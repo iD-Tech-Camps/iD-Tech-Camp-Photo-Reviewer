@@ -2,6 +2,16 @@
 
 import React from "react";
 import { Icon } from "@/components/Icon";
+import { createClient } from "@/lib/supabase/client";
+
+function initialsFromEmail(email: string): string {
+  const local = email.split("@")[0] || email;
+  const parts = local.split(/[._-]+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+  return local.slice(0, 2).toUpperCase();
+}
 
 export function Sidebar({
   current,
@@ -14,6 +24,30 @@ export function Sidebar({
   isAdmin: boolean;
   pendingCount?: number;
 }) {
+  const [email, setEmail] = React.useState<string | null>(null);
+  const [signingOut, setSigningOut] = React.useState(false);
+
+  React.useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+    supabase.auth.getUser().then(({ data }) => {
+      if (!cancelled) setEmail(data.user?.email ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  };
+
+  const displayName = email ? email.split("@")[0] : "…";
+  const avatarInitials = email ? initialsFromEmail(email) : "··";
   const userItems = [
     { id: "review",      label: "Review",             icon: "review", badge: pendingCount },
     { id: "leaderboard", label: "Stats & Leaderboard",icon: "trophy" },
@@ -67,16 +101,43 @@ export function Sidebar({
       ))}
 
       <div className="sidebar-footer">
-        <div className="avatar">RT</div>
+        <div className="avatar">{avatarInitials}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 500 }}>Riley Turner</div>
-          <div style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
-            Programs · Reviewer
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+            title={email ?? undefined}
+          >
+            {displayName}
+          </div>
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--ink-3)",
+              fontFamily: "var(--font-mono)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+            title={email ?? undefined}
+          >
+            {email ?? "Loading…"}
           </div>
         </div>
-        <button className="nav-item" style={{ width: 28, height: 28, padding: 0, justifyContent: "center" }}
-          title="Settings">
-          <Icon name="gear" size={14} />
+        <button
+          className="nav-item"
+          style={{ width: 28, height: 28, padding: 0, justifyContent: "center" }}
+          title="Sign out"
+          aria-label="Sign out"
+          onClick={handleSignOut}
+          disabled={signingOut}
+        >
+          <Icon name="log-out" size={14} />
         </button>
       </div>
     </aside>

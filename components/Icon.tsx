@@ -53,6 +53,7 @@ export function Icon({ name, size = 16, strokeWidth = 1.6, style }: IconProps) {
     case "chevron-d":return <svg {...common}><path d="M6 9l6 6 6-6"/></svg>;
     case "mail":     return <svg {...common}><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>;
     case "phone":    return <svg {...common}><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a2 2 0 01-2 2A16 16 0 013 6a2 2 0 012-2z"/></svg>;
+    case "log-out":  return <svg {...common}><path d="M15 4h4a1 1 0 011 1v14a1 1 0 01-1 1h-4M10 17l5-5-5-5M15 12H3"/></svg>;
     default:         return <svg {...common}><circle cx="12" cy="12" r="4"/></svg>;
   }
 }
