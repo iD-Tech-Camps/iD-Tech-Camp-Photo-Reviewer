@@ -140,15 +140,15 @@ export function fireConfetti(
   }
 }
 
-type Toast =
-  | { id: number; kind: "info"; msg: string; icon?: string; tone?: string }
-  | { id: number; kind: "points"; amount: number; label: string };
+type InfoToast   = { id: number; kind: "info";   msg: string; icon?: string; tone?: string };
+type PointsToast = { id: number; kind: "points"; amount: number; label: string };
+type Toast = InfoToast | PointsToast;
 
 export function useToast() {
   const [toasts, setToasts] = React.useState<Toast[]>([]);
-  const push = (t: Omit<Toast, "id">) => {
+  const push = (t: Omit<InfoToast, "id"> | Omit<PointsToast, "id">) => {
     const id = Date.now() + Math.random();
-    setToasts(ts => [...ts, { ...(t as Toast), id } as Toast]);
+    setToasts(ts => [...ts, { ...t, id } as Toast]);
     setTimeout(() => setToasts(ts => ts.filter(x => x.id !== id)), 2400);
   };
   const show = (msg: string, icon?: string) => push({ kind: "info", msg, icon });
