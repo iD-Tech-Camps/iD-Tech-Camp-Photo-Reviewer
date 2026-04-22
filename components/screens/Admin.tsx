@@ -99,9 +99,10 @@ export function AdminOverview() {
 }
 
 export function AdminAssignment() {
-  const [strategy, setStrategy] = React.useState("roundrobin");
   const [batchSize, setBatchSize] = React.useState(10);
   const [reminderDays, setReminderDays] = React.useState(2);
+  const [remindersOn, setRemindersOn] = React.useState(true);
+  const [suppressWeekends, setSuppressWeekends] = React.useState(false);
 
   return (
     <>
@@ -116,29 +117,6 @@ export function AdminAssignment() {
 
       <div className="page-body" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-          <div className="card">
-            <h3 className="card-title" style={{ marginBottom: 14 }}>Assignment strategy</h3>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-              {([
-                ["roundrobin", "Round-robin",     "Each reviewer gets the next N in the queue."],
-                ["bycamp",     "By camp",         "Match reviewers to camps they know well."],
-                ["random",     "Random",          "Shuffled across the whole queue."],
-              ] as [string, string, string][]).map(([id, title, desc]) => (
-                <button key={id}
-                  onClick={() => setStrategy(id)}
-                  style={{
-                    padding: 14, borderRadius: "var(--radius-sm)",
-                    border: strategy === id ? "2px solid var(--ink)" : "1px solid var(--rule-2)",
-                    background: strategy === id ? "var(--paper-3)" : "var(--paper)",
-                    textAlign: "left", cursor: "pointer",
-                  }}>
-                  <div style={{ fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 500, marginBottom: 4 }}>{title}</div>
-                  <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.4 }}>{desc}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
           <div className="card">
             <h3 className="card-title" style={{ marginBottom: 14 }}>Batch settings</h3>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -171,30 +149,54 @@ export function AdminAssignment() {
           </div>
 
           <div className="card">
-            <h3 className="card-title" style={{ marginBottom: 6 }}>Reminders</h3>
-            <div style={{ fontSize: 13, color: "var(--ink-3)", marginBottom: 14 }}>
-              Nudge inactive reviewers via email + in-app.
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+              gap: 12, marginBottom: 14,
+            }}>
               <div>
-                <label className="label">Remind after inactivity</label>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <input type="range" min="1" max="14" value={reminderDays}
-                    onChange={(e) => setReminderDays(+e.target.value)}
-                    style={{ flex: 1 }} />
-                  <span style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 500, minWidth: 64 }}>
-                    {reminderDays}d
-                  </span>
+                <h3 className="card-title" style={{ marginBottom: 6 }}>Reminders</h3>
+                <div style={{ fontSize: 13, color: "var(--ink-3)" }}>
+                  Nudge inactive reviewers via email + in-app.
                 </div>
               </div>
-              <div>
-                <label className="label">Channels</label>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <button className="tag-chip active">Email</button>
-                  <button className="tag-chip active">In-app</button>
-                  <button className="tag-chip">Slack</button>
-                  <button className="tag-chip">SMS</button>
+              <Toggle value={remindersOn} onChange={setRemindersOn} />
+            </div>
+
+            <div style={{
+              opacity: remindersOn ? 1 : 0.45,
+              pointerEvents: remindersOn ? "auto" : "none",
+              transition: "opacity 0.15s",
+            }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                <div>
+                  <label className="label">Remind after inactivity</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <input type="range" min="1" max="14" value={reminderDays}
+                      onChange={(e) => setReminderDays(+e.target.value)}
+                      style={{ flex: 1 }} />
+                    <span style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 500, minWidth: 64 }}>
+                      {reminderDays}d
+                    </span>
+                  </div>
                 </div>
+                <div>
+                  <label className="label">Channels</label>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <button className="tag-chip active">Email</button>
+                    <button className="tag-chip active">In-app</button>
+                    <button className="tag-chip">Slack</button>
+                    <button className="tag-chip">SMS</button>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 4 }}>
+                <ToggleRow
+                  label="Suppress on weekends"
+                  hint="Skip reminders on Saturday and Sunday."
+                  value={suppressWeekends}
+                  onChange={setSuppressWeekends}
+                />
               </div>
             </div>
           </div>
@@ -204,7 +206,12 @@ export function AdminAssignment() {
           <div className="card" style={{ background: "var(--lake-soft)", borderColor: "transparent" }}>
             <div className="card-eyebrow">Preview</div>
             <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.5 }}>
-              With <strong>round-robin</strong>, each active reviewer will receive batches of <strong>{batchSize} photos</strong>. Reviewers idle for <strong>{reminderDays} days</strong> get a nudge. At current queue depth of <strong>2,481</strong>, you&apos;ll clear it in <strong>~5.3 hours</strong> with 31 active reviewers.
+              Each active reviewer will receive batches of <strong>{batchSize} photos</strong>.{" "}
+              {remindersOn
+                ? <>Reviewers idle for <strong>{reminderDays} days</strong> get a nudge{suppressWeekends ? " (weekends skipped)" : ""}.</>
+                : <>Reminders are <strong>off</strong>.</>
+              }{" "}
+              At current queue depth of <strong>2,481</strong>, you&apos;ll clear it in <strong>~5.3 hours</strong> with 31 active reviewers.
             </div>
           </div>
 
@@ -395,7 +402,6 @@ export function AdminPoints() {
     approve: 10, reject: 10, flag: 15, streakBonus: 25,
     teamWin: 100, accurateFlag: 15, perfectBatch: 50,
   });
-  const [doublePts, setDoublePts] = React.useState(true);
 
   return (
     <>
@@ -448,38 +454,7 @@ export function AdminPoints() {
             </div>
           </div>
 
-          <div className="card">
-            <h3 className="card-title" style={{ marginBottom: 14 }}>Bonus events</h3>
-            <div style={{ padding: 16, background: "var(--sun-soft)", borderRadius: "var(--radius-sm)", marginBottom: 12 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div>
-                  <div style={{ fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 500 }}>
-                    Double-points hour · 10:00–11:00 AM PT
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
-                    All actions earn 2× points during the window.
-                  </div>
-                </div>
-                <button
-                  onClick={() => setDoublePts(!doublePts)}
-                  style={{
-                    width: 44, height: 24, borderRadius: 12,
-                    background: doublePts ? "var(--sun)" : "var(--rule-2)",
-                    position: "relative", transition: "all 0.2s",
-                  }}>
-                  <div style={{
-                    position: "absolute", top: 2, left: doublePts ? 22 : 2,
-                    width: 20, height: 20, borderRadius: "50%",
-                    background: "white", transition: "all 0.2s",
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
-                  }} />
-                </button>
-              </div>
-            </div>
-            <button className="btn btn-ghost" style={{ width: "100%" }}>
-              <Icon name="plus" size={13} /> Schedule a new bonus event
-            </button>
-          </div>
+          <BonusEvents />
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -504,6 +479,521 @@ export function AdminPoints() {
 }
 
 type TagRow = { id: string; label: string; type: "approve" | "reject" };
+
+type BonusPeriodMode = "recurring" | "one-time";
+
+type BonusPeriod = {
+  id: string;
+  label: string;
+  mode: BonusPeriodMode;
+  days: number[];
+  startTime: string;
+  endTime: string;
+  startAt: string;
+  endAt: string;
+  multiplier: number;
+  enabled: boolean;
+};
+
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAY_SHORT  = ["S", "M", "T", "W", "T", "F", "S"];
+const ALL_DAYS   = [0, 1, 2, 3, 4, 5, 6];
+const WEEKDAYS   = [1, 2, 3, 4, 5];
+
+function formatTime12(hhmm: string): string {
+  const [hStr, mStr] = hhmm.split(":");
+  const h = parseInt(hStr, 10);
+  const m = mStr ?? "00";
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = ((h + 11) % 12) + 1;
+  return `${h12}:${m} ${period}`;
+}
+
+function formatDays(days: number[]): string {
+  if (days.length === 7) return "Every day";
+  if (days.length === 0) return "No days";
+  const sorted = [...days].sort((a, b) => a - b);
+  if (sorted.length === 5 && sorted.every((d, i) => d === WEEKDAYS[i])) return "Weekdays";
+  if (sorted.length === 2 && sorted[0] === 0 && sorted[1] === 6) return "Weekends";
+  return sorted.map(d => DAY_LABELS[d]).join(", ");
+}
+
+function formatDateTime(local: string): string {
+  if (!local) return "—";
+  const d = new Date(local);
+  if (Number.isNaN(d.getTime())) return local;
+  return d.toLocaleString(undefined, {
+    month: "short", day: "numeric", year: "numeric",
+    hour: "numeric", minute: "2-digit",
+  });
+}
+
+function formatOneTimeRange(startAt: string, endAt: string): string {
+  if (!startAt || !endAt) return "—";
+  const s = new Date(startAt);
+  const e = new Date(endAt);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return "—";
+  const sameDay =
+    s.getFullYear() === e.getFullYear() &&
+    s.getMonth() === e.getMonth() &&
+    s.getDate() === e.getDate();
+  const dateFmt: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" };
+  const timeFmt: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
+  if (sameDay) {
+    return `${s.toLocaleDateString(undefined, dateFmt)} · ${s.toLocaleTimeString(undefined, timeFmt)}–${e.toLocaleTimeString(undefined, timeFmt)}`;
+  }
+  return `${s.toLocaleString(undefined, { ...dateFmt, ...timeFmt })} → ${e.toLocaleString(undefined, { ...dateFmt, ...timeFmt })}`;
+}
+
+function roundedNowLocalInput(offsetMinutes: number = 0): string {
+  const d = new Date(Date.now() + offsetMinutes * 60_000);
+  d.setSeconds(0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function BonusEvents() {
+  const [periods, setPeriods] = React.useState<BonusPeriod[]>([
+    {
+      id: "bp_1",
+      label: "Double-points hour",
+      mode: "recurring",
+      days: [...ALL_DAYS],
+      startTime: "10:00",
+      endTime: "11:00",
+      startAt: "",
+      endAt: "",
+      multiplier: 2,
+      enabled: true,
+    },
+  ]);
+  const [editing, setEditing] = React.useState<BonusPeriod | null>(null);
+
+  const startNew = () => setEditing({
+    id: "bp_" + Date.now(),
+    label: "",
+    mode: "recurring",
+    days: [...ALL_DAYS],
+    startTime: "12:00",
+    endTime: "13:00",
+    startAt: roundedNowLocalInput(60),
+    endAt: roundedNowLocalInput(120),
+    multiplier: 2,
+    enabled: true,
+  });
+
+  const save = (period: BonusPeriod) => {
+    setPeriods(prev => {
+      const exists = prev.some(p => p.id === period.id);
+      return exists ? prev.map(p => p.id === period.id ? period : p) : [...prev, period];
+    });
+    setEditing(null);
+  };
+
+  const remove = (id: string) => {
+    setPeriods(prev => prev.filter(p => p.id !== id));
+    if (editing?.id === id) setEditing(null);
+  };
+
+  const toggle = (id: string) => {
+    setPeriods(prev => prev.map(p => p.id === id ? { ...p, enabled: !p.enabled } : p));
+  };
+
+  return (
+    <div className="card">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+        <h3 className="card-title">Bonus events</h3>
+        <span style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)", letterSpacing: "0.08em" }}>
+          {periods.filter(p => p.enabled).length} ACTIVE · {periods.length} TOTAL
+        </span>
+      </div>
+      <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
+        Multiply all points earned during a scheduled window.
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+        {periods.length === 0 && !editing && (
+          <div style={{
+            padding: 20, borderRadius: "var(--radius-sm)",
+            border: "1px dashed var(--rule-2)",
+            textAlign: "center", fontSize: 13, color: "var(--ink-3)",
+          }}>
+            No bonus periods scheduled.
+          </div>
+        )}
+        {periods.map(p => (
+          <BonusPeriodRow
+            key={p.id}
+            period={p}
+            onToggle={() => toggle(p.id)}
+            onEdit={() => setEditing(p)}
+            onRemove={() => remove(p.id)}
+          />
+        ))}
+      </div>
+
+      {editing ? (
+        <BonusPeriodForm
+          period={editing}
+          existing={periods.some(p => p.id === editing.id)}
+          onCancel={() => setEditing(null)}
+          onSave={save}
+          onRemove={() => remove(editing.id)}
+        />
+      ) : (
+        <button
+          onClick={startNew}
+          style={{
+            width: "100%",
+            padding: "10px 12px",
+            border: "1px dashed var(--rule-2)",
+            borderRadius: 8,
+            background: "transparent",
+            color: "var(--ink-2)",
+            fontSize: 13, fontWeight: 500,
+            cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+          }}
+        >
+          <Icon name="plus" size={12} /> Schedule a bonus period
+        </button>
+      )}
+    </div>
+  );
+}
+
+function BonusPeriodRow({
+  period,
+  onToggle,
+  onEdit,
+  onRemove,
+}: {
+  period: BonusPeriod;
+  onToggle: () => void;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  const active = period.enabled;
+  return (
+    <div style={{
+      padding: "12px 14px",
+      borderRadius: "var(--radius-sm)",
+      background: active ? "var(--sun-soft)" : "var(--paper-2)",
+      border: "1px solid " + (active ? "transparent" : "var(--rule)"),
+      display: "flex", alignItems: "center", gap: 12,
+      opacity: active ? 1 : 0.7,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          display: "flex", alignItems: "baseline", gap: 8, marginBottom: 2, flexWrap: "wrap",
+        }}>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 500 }}>
+            {period.label || `${period.multiplier}× bonus`}
+          </div>
+          <span className="pill pill-sun" style={{ fontSize: 11 }}>
+            {period.multiplier}×
+          </span>
+          <span className="pill" style={{ fontSize: 11 }}>
+            {period.mode === "recurring" ? "Recurring" : "One-time"}
+          </span>
+        </div>
+        <div style={{ fontSize: 12, color: "var(--ink-2)", fontFamily: "var(--font-mono)" }}>
+          {period.mode === "recurring"
+            ? `${formatDays(period.days)} · ${formatTime12(period.startTime)}–${formatTime12(period.endTime)}`
+            : formatOneTimeRange(period.startAt, period.endAt)}
+        </div>
+      </div>
+      <button
+        onClick={onEdit}
+        className="btn btn-ghost"
+        style={{ padding: "4px 10px", fontSize: 12 }}
+      >
+        Edit
+      </button>
+      <button
+        onClick={onRemove}
+        className="btn btn-ghost"
+        style={{ padding: "4px 6px", color: "var(--ink-3)" }}
+        title="Remove"
+      >
+        <Icon name="x" size={14} />
+      </button>
+      <Toggle value={period.enabled} onChange={onToggle} />
+    </div>
+  );
+}
+
+function BonusPeriodForm({
+  period,
+  existing,
+  onCancel,
+  onSave,
+  onRemove,
+}: {
+  period: BonusPeriod;
+  existing: boolean;
+  onCancel: () => void;
+  onSave: (p: BonusPeriod) => void;
+  onRemove: () => void;
+}) {
+  const [draft, setDraft] = React.useState<BonusPeriod>(period);
+
+  const toggleDay = (d: number) => {
+    setDraft(prev => ({
+      ...prev,
+      days: prev.days.includes(d)
+        ? prev.days.filter(x => x !== d)
+        : [...prev.days, d].sort((a, b) => a - b),
+    }));
+  };
+
+  const presetDays = (preset: "all" | "weekdays" | "weekends") => {
+    const days = preset === "all" ? [...ALL_DAYS] : preset === "weekdays" ? [...WEEKDAYS] : [0, 6];
+    setDraft(prev => ({ ...prev, days }));
+  };
+
+  const toMinutes = (t: string) => {
+    const [h, m] = t.split(":").map(n => parseInt(n, 10));
+    return h * 60 + m;
+  };
+  const recurringTimesValid = toMinutes(draft.endTime) > toMinutes(draft.startTime);
+  const oneTimeDatesValid =
+    !!draft.startAt && !!draft.endAt &&
+    new Date(draft.endAt).getTime() > new Date(draft.startAt).getTime();
+  const multiplierValid = draft.multiplier >= 1.1 && draft.multiplier <= 10;
+  const daysValid = draft.days.length > 0;
+  const canSave = draft.mode === "recurring"
+    ? recurringTimesValid && multiplierValid && daysValid
+    : oneTimeDatesValid && multiplierValid;
+
+  return (
+    <div style={{
+      padding: 14,
+      borderRadius: 8,
+      background: "var(--paper-2)",
+      border: "1px solid var(--rule)",
+      display: "flex", flexDirection: "column", gap: 14,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <div className="card-eyebrow">{existing ? "Edit bonus period" : "New bonus period"}</div>
+      </div>
+
+      <FieldRow label="Label" hint="Optional — shown to reviewers during the bonus window.">
+        <input
+          className="input"
+          value={draft.label}
+          onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+          placeholder="e.g. Lunch rush"
+          maxLength={40}
+        />
+      </FieldRow>
+
+      <div>
+        <label className="label" style={{ marginBottom: 6 }}>Schedule type</label>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+          {([
+            ["recurring", "Recurring", "Repeats on selected days"],
+            ["one-time",  "One-time",  "Specific start & end date"],
+          ] as [BonusPeriodMode, string, string][]).map(([value, label, desc]) => {
+            const on = draft.mode === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setDraft({ ...draft, mode: value })}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: on ? "1.5px solid var(--sun)" : "1px solid var(--rule)",
+                  background: on ? "var(--sun-soft)" : "var(--paper)",
+                  color: on ? "var(--ink)" : "var(--ink-2)",
+                  textAlign: "left", cursor: "pointer",
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: on ? 500 : 400, marginBottom: 2 }}>{label}</div>
+                <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{desc}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {draft.mode === "recurring" ? (
+        <>
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+              <label className="label" style={{ marginBottom: 0 }}>Days</label>
+              <div style={{ display: "flex", gap: 4 }}>
+                <button type="button" className="btn btn-ghost" style={{ padding: "2px 8px", fontSize: 11 }}
+                  onClick={() => presetDays("all")}>Every day</button>
+                <button type="button" className="btn btn-ghost" style={{ padding: "2px 8px", fontSize: 11 }}
+                  onClick={() => presetDays("weekdays")}>Weekdays</button>
+                <button type="button" className="btn btn-ghost" style={{ padding: "2px 8px", fontSize: 11 }}
+                  onClick={() => presetDays("weekends")}>Weekends</button>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
+              {DAY_SHORT.map((letter, i) => {
+                const on = draft.days.includes(i);
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => toggleDay(i)}
+                    title={DAY_LABELS[i]}
+                    style={{
+                      padding: "8px 0",
+                      borderRadius: 6,
+                      border: on ? "1.5px solid var(--sun)" : "1px solid var(--rule)",
+                      background: on ? "var(--sun-soft)" : "var(--paper)",
+                      color: on ? "var(--ink)" : "var(--ink-2)",
+                      fontFamily: "var(--font-display)", fontSize: 13,
+                      fontWeight: on ? 500 : 400,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {letter}
+                  </button>
+                );
+              })}
+            </div>
+            {!daysValid && (
+              <div style={{ fontSize: 11, color: "var(--rose)", marginTop: 6 }}>
+                Pick at least one day.
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+            <FieldRow label="Start time">
+              <input
+                className="input"
+                type="time"
+                value={draft.startTime}
+                onChange={(e) => setDraft({ ...draft, startTime: e.target.value })}
+              />
+            </FieldRow>
+            <FieldRow label="End time">
+              <input
+                className="input"
+                type="time"
+                value={draft.endTime}
+                onChange={(e) => setDraft({ ...draft, endTime: e.target.value })}
+              />
+            </FieldRow>
+            <FieldRow label="Multiplier" hint="1.1× – 10×">
+              <MultiplierInput
+                value={draft.multiplier}
+                onChange={(v) => setDraft({ ...draft, multiplier: v })}
+              />
+            </FieldRow>
+          </div>
+
+          {!recurringTimesValid && (
+            <div style={{ fontSize: 11, color: "var(--rose)", marginTop: -6 }}>
+              End time must be after start time.
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <FieldRow label="Starts">
+              <input
+                className="input"
+                type="datetime-local"
+                value={draft.startAt}
+                onChange={(e) => setDraft({ ...draft, startAt: e.target.value })}
+              />
+            </FieldRow>
+            <FieldRow label="Ends">
+              <input
+                className="input"
+                type="datetime-local"
+                value={draft.endAt}
+                onChange={(e) => setDraft({ ...draft, endAt: e.target.value })}
+              />
+            </FieldRow>
+          </div>
+
+          <FieldRow label="Multiplier" hint="1.1× – 10×">
+            <MultiplierInput
+              value={draft.multiplier}
+              onChange={(v) => setDraft({ ...draft, multiplier: v })}
+            />
+          </FieldRow>
+
+          {!oneTimeDatesValid && (
+            <div style={{ fontSize: 11, color: "var(--rose)", marginTop: -6 }}>
+              End must be after start.
+            </div>
+          )}
+        </>
+      )}
+
+      <div style={{
+        padding: 10, borderRadius: 6,
+        background: "var(--sun-soft)",
+        fontSize: 12, color: "var(--ink-2)",
+        fontFamily: "var(--font-mono)",
+      }}>
+        Preview · {draft.mode === "recurring"
+          ? `${formatDays(draft.days)} · ${formatTime12(draft.startTime)}–${formatTime12(draft.endTime)}`
+          : formatOneTimeRange(draft.startAt, draft.endAt)
+        } · {draft.multiplier}× points
+      </div>
+
+      <div style={{ display: "flex", gap: 8, justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          {existing && (
+            <button className="btn btn-ghost" onClick={onRemove}
+              style={{ color: "var(--rose)", fontSize: 12 }}>
+              Delete
+            </button>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+          <button
+            className="btn btn-primary"
+            disabled={!canSave}
+            style={{ opacity: canSave ? 1 : 0.5, cursor: canSave ? "pointer" : "not-allowed" }}
+            onClick={() => onSave(draft)}
+          >
+            <Icon name="check" size={12} /> {existing ? "Save changes" : "Add bonus period"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MultiplierInput({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <input
+        className="input"
+        type="number"
+        step="0.5"
+        min="1.1"
+        max="10"
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+        style={{ flex: 1 }}
+      />
+      <span style={{
+        fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 500,
+        color: "var(--ink-2)",
+      }}>×</span>
+    </div>
+  );
+}
 
 function TagLibrary() {
   const [tags, setTags] = React.useState<TagRow[]>([

@@ -8,7 +8,6 @@ import {
   PHOTO_TAGS,
   REJECT_REASONS,
   FLAG_REASONS,
-  EXAMPLES,
   PhotoPlaceholder,
 } from "@/components/data";
 import { useSettings } from "@/components/settings";
@@ -190,66 +189,52 @@ export function ReviewScreen({
             padding: 20,
             overflowY: "auto",
           }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16 }}>
               <div>
-                <div className="card-eyebrow">Reference</div>
-                <h3 className="card-title">What to look for</h3>
+                <div className="card-eyebrow">Quick guide</div>
+                <h3 className="card-title">When to use each</h3>
               </div>
               <button onClick={() => setShowExamplesDrawer(false)} style={{ color: "var(--ink-3)" }}>
                 <Icon name="x" size={14} />
               </button>
             </div>
 
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                <span className="pill pill-moss">
-                  <Icon name="check" size={10} /> Approve
-                </span>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                {EXAMPLES.good.slice(0, 4).map((ex) => (
-                  <div key={ex.id} style={{
-                    aspectRatio: "3/2", borderRadius: 6, overflow: "hidden",
-                    position: "relative", border: "2px solid var(--moss)",
-                  }}>
-                    <PhotoPlaceholder photo={{ id: ex.id, camp: ex.label, activity: "" }} compact />
-                  </div>
-                ))}
-              </div>
-              <ul style={{ marginTop: 10, paddingLeft: 16, fontSize: 12, color: "var(--ink-2)" }}>
-                {EXAMPLES.good.map(ex => (
-                  <li key={ex.id} style={{ marginBottom: 4 }}>
-                    <strong>{ex.label}:</strong> {ex.note}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <GuideSection
+              tone="moss"
+              icon="check"
+              label="Approve"
+              intro="Share-worthy. A parent would be happy to see this."
+              bullets={[
+                "Campers are the clear subject and recognizable.",
+                "Sharp focus, decent light, clean framing.",
+                "Everyone looks safe, engaged, and appropriate.",
+              ]}
+            />
 
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                <span className="pill pill-rose">
-                  <Icon name="x" size={10} /> Reject
-                </span>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                {EXAMPLES.bad.slice(0, 4).map((ex) => (
-                  <div key={ex.id} style={{
-                    aspectRatio: "3/2", borderRadius: 6, overflow: "hidden",
-                    position: "relative", border: "2px solid var(--rose)",
-                    filter: ex.id === "EX_B01" ? "blur(2px)" : "none",
-                  }}>
-                    <PhotoPlaceholder photo={{ id: ex.id, camp: ex.label, activity: "" }} compact />
-                  </div>
-                ))}
-              </div>
-              <ul style={{ marginTop: 10, paddingLeft: 16, fontSize: 12, color: "var(--ink-2)" }}>
-                {EXAMPLES.bad.map(ex => (
-                  <li key={ex.id} style={{ marginBottom: 4 }}>
-                    <strong>{ex.label}:</strong> {ex.note}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <GuideSection
+              tone="rose"
+              icon="x"
+              label="Reject"
+              intro="Clearly not usable. No admin review needed."
+              bullets={[
+                "Blurry, too dark, or badly composed.",
+                "Duplicate or near-identical to another shot.",
+                "No campers visible, or backs of heads only.",
+              ]}
+            />
+
+            <GuideSection
+              tone="sun"
+              icon="flag"
+              label="Flag"
+              intro="You're unsure. Send it up for a second opinion."
+              bullets={[
+                "Possible safety, dress code, or behavior concern.",
+                "Minor identifiable but guardian consent is unclear.",
+                "Great shot but borderline — you want admin to decide.",
+              ]}
+              last
+            />
           </aside>
         )}
       </div>
@@ -275,6 +260,41 @@ export function ReviewScreen({
           onConfirm={(reasons, note) => commitDecision({ decision: "flag", tags: reasons, note })}
         />
       )}
+    </div>
+  );
+}
+
+function GuideSection({
+  tone,
+  icon,
+  label,
+  intro,
+  bullets,
+  last,
+}: {
+  tone: "moss" | "rose" | "sun";
+  icon: string;
+  label: string;
+  intro: string;
+  bullets: string[];
+  last?: boolean;
+}) {
+  const pillClass = tone === "moss" ? "pill pill-moss" : tone === "rose" ? "pill pill-rose" : "pill pill-sun";
+  return (
+    <div style={{ marginBottom: last ? 0 : 18 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+        <span className={pillClass}>
+          <Icon name={icon} size={10} /> {label}
+        </span>
+      </div>
+      <p style={{ fontSize: 13, color: "var(--ink-2)", margin: "0 0 8px" }}>
+        {intro}
+      </p>
+      <ul style={{ paddingLeft: 16, margin: 0, fontSize: 12, color: "var(--ink-2)" }}>
+        {bullets.map((b, i) => (
+          <li key={i} style={{ marginBottom: 4 }}>{b}</li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -358,12 +358,11 @@ export function GuideScreen() {
       <div className="page-body" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
         <div className="card" style={{ gridColumn: "span 2" }}>
           <h3 className="card-title" style={{ marginBottom: 12 }}>The 30-second rubric</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
             {[
               ["01", "Can you see a face?", "At least one subject's face should be visible and in focus."],
               ["02", "Does it feel safe?",   "Nothing you'd be uncomfortable sending to a parent."],
               ["03", "Is the camp readable?","Backdrop should suggest what the kids are doing."],
-              ["04", "Would you print it?",  "If the answer is no, reject."],
             ].map(([n, q, a]) => (
               <div key={n} className="accent-bar">
                 <div style={{
