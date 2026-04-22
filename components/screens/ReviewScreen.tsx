@@ -11,6 +11,7 @@ import {
   EXAMPLES,
   PhotoPlaceholder,
 } from "@/components/data";
+import { useSettings } from "@/components/settings";
 
 type Decision = {
   decision: "approve" | "reject" | "flag";
@@ -621,6 +622,7 @@ export function SessionComplete({
   onHome: () => void;
   onAnother: () => void;
 }) {
+  const { settings } = useSettings();
   const total = Object.values(decisions).reduce((s, d) => s + (d.pts || 0), 0);
   const counts = {
     approve: Object.values(decisions).filter(d => d.decision === "approve").length,
@@ -637,7 +639,7 @@ export function SessionComplete({
     }}>
       <div style={{ maxWidth: 520, width: "100%", textAlign: "center" }}>
         <div className="pennant" style={{ marginBottom: 20, background: "var(--moss)" }}>
-          Batch complete
+          {settings.completionTitle}
         </div>
         <div style={{
           fontFamily: "var(--font-display)", fontSize: 120, fontWeight: 450,
@@ -646,7 +648,7 @@ export function SessionComplete({
           +{total}
         </div>
         <div style={{ fontSize: 18, color: "var(--ink-2)", marginBottom: 32 }}>
-          points earned. Nice eye today.
+          {settings.completionMessage}
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 32 }}>
@@ -664,28 +666,30 @@ export function SessionComplete({
           </div>
         </div>
 
-        <div style={{
-          padding: 16, borderRadius: "var(--radius)",
-          background: "var(--sun-soft)",
-          marginBottom: 24,
-          display: "flex", alignItems: "center", gap: 12,
-        }}>
+        {settings.showStreaks && (
           <div style={{
-            width: 40, height: 40, borderRadius: 8, flexShrink: 0,
-            background: "var(--sun)", color: "white",
-            display: "grid", placeItems: "center",
+            padding: 16, borderRadius: "var(--radius)",
+            background: "var(--sun-soft)",
+            marginBottom: 24,
+            display: "flex", alignItems: "center", gap: 12,
           }}>
-            <Icon name="fire" size={20} />
-          </div>
-          <div style={{ textAlign: "left" }}>
-            <div style={{ fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 500 }}>
-              Streak extended to day 10
+            <div style={{
+              width: 40, height: 40, borderRadius: 8, flexShrink: 0,
+              background: "var(--sun)", color: "white",
+              display: "grid", placeItems: "center",
+            }}>
+              <Icon name="fire" size={20} />
             </div>
-            <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
-              4 more days to earn &quot;Week Warrior+&quot;
+            <div style={{ textAlign: "left" }}>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 500 }}>
+                Streak extended to day 10
+              </div>
+              <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
+                4 more days to earn &quot;Week Warrior+&quot;
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
           <button className="btn btn-ghost btn-lg" onClick={onHome}>

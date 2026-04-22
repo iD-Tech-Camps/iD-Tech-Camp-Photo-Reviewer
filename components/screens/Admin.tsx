@@ -4,6 +4,8 @@ import React from "react";
 import { Icon } from "@/components/Icon";
 import { PageHeader } from "@/components/Shell";
 import { EXAMPLES, ADMIN_USERS, PhotoPlaceholder } from "@/components/data";
+import { useSettings, AppSettings } from "@/components/settings";
+import { useCurrentUser } from "@/lib/current-user";
 
 export function AdminOverview() {
   return (
@@ -154,9 +156,15 @@ export function AdminAssignment() {
               <div>
                 <label className="label">Auto-reassign after</label>
                 <select className="select" defaultValue="30">
-                  <option value="15">15 minutes of inactivity</option>
                   <option value="30">30 minutes of inactivity</option>
                   <option value="60">1 hour of inactivity</option>
+                  <option value="120">2 hours of inactivity</option>
+                  <option value="240">4 hours of inactivity</option>
+                  <option value="480">8 hours of inactivity</option>
+                  <option value="1440">1 day of inactivity</option>
+                  <option value="2880">2 days of inactivity</option>
+                  <option value="4320">3 days of inactivity</option>
+                  <option value="10080">1 week of inactivity</option>
                 </select>
               </div>
             </div>
@@ -843,6 +851,360 @@ export function AdminUsers() {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!value)}
+      style={{
+        width: 40, height: 22, borderRadius: 11,
+        background: value ? "var(--moss)" : "var(--rule-2)",
+        position: "relative", transition: "all 0.2s",
+        flexShrink: 0,
+      }}
+      aria-pressed={value}
+    >
+      <div style={{
+        position: "absolute", top: 2, left: value ? 20 : 2,
+        width: 18, height: 18, borderRadius: "50%",
+        background: "white", transition: "all 0.2s",
+        boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
+      }} />
+    </button>
+  );
+}
+
+function FieldRow({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <label className="label" style={{ marginBottom: 0 }}>{label}</label>
+      {children}
+      {hint && (
+        <div style={{ fontSize: 11, color: "var(--ink-3)", lineHeight: 1.4 }}>
+          {hint}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToggleRow({
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "12px 0", borderBottom: "1px solid var(--rule)", gap: 16,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 500 }}>{label}</div>
+        {hint && (
+          <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
+            {hint}
+          </div>
+        )}
+      </div>
+      <Toggle value={value} onChange={onChange} />
+    </div>
+  );
+}
+
+const ACCENT_OPTIONS: { id: AppSettings["accent"]; label: string; color: string }[] = [
+  { id: "sun",  label: "Sun",  color: "oklch(0.72 0.17 55)" },
+  { id: "lake", label: "Lake", color: "oklch(0.58 0.11 230)" },
+  { id: "moss", label: "Moss", color: "oklch(0.55 0.12 155)" },
+  { id: "rose", label: "Rose", color: "oklch(0.62 0.16 25)" },
+];
+
+export function AdminSettings() {
+  const { settings, update, reset } = useSettings();
+  const { firstName } = useCurrentUser();
+  const previewName = firstName || "Riley";
+  const [confirmReset, setConfirmReset] = React.useState(false);
+
+  const set = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) =>
+    update({ [key]: value } as Partial<AppSettings>);
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Admin · Settings"
+        title="App <em>settings.</em>"
+        sub="Branding, copy, and feature flags. Changes save automatically."
+      >
+        {confirmReset ? (
+          <>
+            <button className="btn btn-ghost" onClick={() => setConfirmReset(false)}>
+              Cancel
+            </button>
+            <button className="btn btn-primary"
+              style={{ background: "var(--rose)" }}
+              onClick={() => { reset(); setConfirmReset(false); }}>
+              Confirm reset
+            </button>
+          </>
+        ) : (
+          <button className="btn btn-ghost" onClick={() => setConfirmReset(true)}>
+            Reset to defaults
+          </button>
+        )}
+      </PageHeader>
+
+      <div className="page-body" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+          <div className="card">
+            <h3 className="card-title" style={{ marginBottom: 4 }}>Branding</h3>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
+              Shown in the sidebar and in browser tab.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 14 }}>
+              <FieldRow label="App name">
+                <input className="input"
+                  value={settings.brandName}
+                  onChange={(e) => set("brandName", e.target.value)}
+                  maxLength={32} />
+              </FieldRow>
+              <FieldRow label="Tagline">
+                <input className="input"
+                  value={settings.brandTagline}
+                  onChange={(e) => set("brandTagline", e.target.value)}
+                  maxLength={48} />
+              </FieldRow>
+              <FieldRow label="Mark" hint="1 char">
+                <input className="input"
+                  style={{ textAlign: "center", fontFamily: "var(--font-display)", fontSize: 20 }}
+                  value={settings.brandMark}
+                  onChange={(e) => set("brandMark", e.target.value.slice(0, 2))}
+                  maxLength={2} />
+              </FieldRow>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3 className="card-title" style={{ marginBottom: 4 }}>Reviewer copy</h3>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
+              The text reviewers see on the home screen.
+              Use <code style={{ fontFamily: "var(--font-mono)", fontSize: 11, background: "var(--paper-3)", padding: "1px 4px", borderRadius: 3 }}>{"{name}"}</code> and{" "}
+              <code style={{ fontFamily: "var(--font-mono)", fontSize: 11, background: "var(--paper-3)", padding: "1px 4px", borderRadius: 3 }}>{"{count}"}</code> as placeholders.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <FieldRow label="Home greeting" hint={`{name} is replaced with the reviewer's first name from their Google profile. Currently signed in as ${previewName}.`}>
+                <input className="input"
+                  value={settings.homeGreeting}
+                  onChange={(e) => set("homeGreeting", e.target.value)}
+                  maxLength={120} />
+              </FieldRow>
+              <FieldRow label="Home subtitle">
+                <input className="input"
+                  value={settings.homeSubtitle}
+                  onChange={(e) => set("homeSubtitle", e.target.value)}
+                  maxLength={160} />
+              </FieldRow>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3 className="card-title" style={{ marginBottom: 14 }}>Completion + empty states</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 14 }}>
+                <FieldRow label="Completion pennant" hint="Shown above the points total.">
+                  <input className="input"
+                    value={settings.completionTitle}
+                    onChange={(e) => set("completionTitle", e.target.value)}
+                    maxLength={40} />
+                </FieldRow>
+                <FieldRow label="Completion message">
+                  <input className="input"
+                    value={settings.completionMessage}
+                    onChange={(e) => set("completionMessage", e.target.value)}
+                    maxLength={120} />
+                </FieldRow>
+              </div>
+              <FieldRow label="Empty queue message" hint="Shown when there are no photos waiting.">
+                <input className="input"
+                  value={settings.emptyQueueMessage}
+                  onChange={(e) => set("emptyQueueMessage", e.target.value)}
+                  maxLength={160} />
+              </FieldRow>
+              <FieldRow label="Support email" hint="Where reviewers go for help.">
+                <input className="input" type="email"
+                  value={settings.supportEmail}
+                  onChange={(e) => set("supportEmail", e.target.value)} />
+              </FieldRow>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3 className="card-title" style={{ marginBottom: 14 }}>Appearance</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <FieldRow label="Theme">
+                <div style={{ display: "flex", gap: 4, padding: 3, background: "var(--paper-3)",
+                  borderRadius: 8, width: "fit-content" }}>
+                  {(["light","dark"] as const).map(t => (
+                    <button key={t}
+                      onClick={() => set("theme", t)}
+                      className="btn"
+                      style={{
+                        padding: "6px 14px", fontSize: 12, textTransform: "capitalize",
+                        background: settings.theme === t ? "var(--paper)" : "transparent",
+                        boxShadow: settings.theme === t ? "var(--shadow-sm)" : "none",
+                      }}>{t}</button>
+                  ))}
+                </div>
+              </FieldRow>
+
+              <FieldRow label="Accent color">
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {ACCENT_OPTIONS.map(opt => (
+                    <button key={opt.id}
+                      onClick={() => set("accent", opt.id)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8,
+                        padding: "8px 14px",
+                        borderRadius: 8,
+                        border: settings.accent === opt.id ? "1.5px solid var(--ink)" : "1px solid var(--rule)",
+                        background: settings.accent === opt.id ? "var(--paper-3)" : "var(--paper)",
+                        cursor: "pointer", fontSize: 13,
+                      }}>
+                      <span style={{
+                        width: 16, height: 16, borderRadius: "50%",
+                        background: opt.color, flexShrink: 0,
+                      }} />
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </FieldRow>
+
+              <FieldRow label="Density">
+                <div style={{ display: "flex", gap: 4, padding: 3, background: "var(--paper-3)",
+                  borderRadius: 8, width: "fit-content" }}>
+                  {(["comfortable","compact"] as const).map(d => (
+                    <button key={d}
+                      onClick={() => set("density", d)}
+                      className="btn"
+                      style={{
+                        padding: "6px 14px", fontSize: 12, textTransform: "capitalize",
+                        background: settings.density === d ? "var(--paper)" : "transparent",
+                        boxShadow: settings.density === d ? "var(--shadow-sm)" : "none",
+                      }}>{d}</button>
+                  ))}
+                </div>
+              </FieldRow>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3 className="card-title" style={{ marginBottom: 4 }}>Features</h3>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 6 }}>
+              Toggle gamification and engagement features on or off for everyone.
+            </div>
+            <ToggleRow
+              label="Confetti on batch complete"
+              hint="Celebrate when a reviewer finishes a batch."
+              value={settings.confettiOnComplete}
+              onChange={(v) => set("confettiOnComplete", v)}
+            />
+            <ToggleRow
+              label="Stats &amp; leaderboard"
+              hint="Show the leaderboard nav item and the stats link on the home screen."
+              value={settings.showLeaderboard}
+              onChange={(v) => set("showLeaderboard", v)}
+            />
+            <ToggleRow
+              label="Streaks"
+              hint="Show daily streak callouts and badges."
+              value={settings.showStreaks}
+              onChange={(v) => set("showStreaks", v)}
+            />
+            <ToggleRow
+              label="Double-points hour"
+              hint="Show the double-points pennant on the home screen."
+              value={settings.showDoublePoints}
+              onChange={(v) => set("showDoublePoints", v)}
+            />
+          </div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, position: "sticky", top: 20, alignSelf: "start" }}>
+          <div className="card">
+            <div className="card-eyebrow">Live preview</div>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4, marginBottom: 14 }}>
+              How your changes look right now.
+            </div>
+
+            <div style={{
+              padding: 14, borderRadius: "var(--radius-sm)",
+              background: "var(--paper-2)", border: "1px solid var(--rule)",
+              display: "flex", alignItems: "center", gap: 10, marginBottom: 14,
+            }}>
+              <div className="brand-mark" style={{ flexShrink: 0 }}>
+                <span>{settings.brandMark}</span>
+              </div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div className="brand-name" style={{
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {settings.brandName}
+                </div>
+                <div className="brand-tag" style={{
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {settings.brandTagline}
+                </div>
+              </div>
+            </div>
+
+            <div style={{
+              padding: 16, borderRadius: "var(--radius-sm)",
+              background: "var(--paper)", border: "1px solid var(--rule)",
+            }}>
+              <div className="page-eyebrow" style={{ marginBottom: 6 }}>
+                Home screen
+              </div>
+              <div style={{
+                fontFamily: "var(--font-display)", fontSize: 22,
+                fontWeight: 450, letterSpacing: "-0.02em", lineHeight: 1.15,
+                marginBottom: 6,
+              }}>
+                {settings.homeGreeting.replace(/\{name\}/g, previewName)}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5 }}>
+                {settings.homeSubtitle
+                  .replace(/\{name\}/g, previewName)
+                  .replace(/\{count\}/g, "10")}
+              </div>
+            </div>
+          </div>
+
+          <div className="card" style={{ background: "var(--lake-soft)", borderColor: "transparent" }}>
+            <div className="card-eyebrow">About</div>
+            <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.5, color: "var(--ink-2)" }}>
+              Settings persist in this browser. In production, sync these to your backend so every reviewer sees the same brand and copy.
+            </div>
+          </div>
         </div>
       </div>
     </>

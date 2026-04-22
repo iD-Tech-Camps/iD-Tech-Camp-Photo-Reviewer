@@ -4,6 +4,17 @@ import React from "react";
 import { Icon } from "@/components/Icon";
 import { PageHeader } from "@/components/Shell";
 import { SESSION_PHOTOS, PhotoPlaceholder } from "@/components/data";
+import { useSettings, fillTemplate } from "@/components/settings";
+import { useCurrentUser } from "@/lib/current-user";
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+}
+
+function greetingHtml(template: string, name: string): string {
+  return fillTemplate(escapeHtml(template), { name: escapeHtml(name) });
+}
 
 export function HomeScreen({
   onStart,
@@ -14,12 +25,21 @@ export function HomeScreen({
   onNav: (screen: string) => void;
   pendingCount?: number;
 }) {
+  const { settings } = useSettings();
+  const { firstName } = useCurrentUser();
+  const reviewerName = firstName || "there";
+  const greeting = greetingHtml(settings.homeGreeting, reviewerName);
+  const subtitle = fillTemplate(settings.homeSubtitle, {
+    name: reviewerName,
+    count: pendingCount,
+  });
+
   return (
     <>
       <PageHeader
         eyebrow="Monday · June 9"
-        title="Ready when you are, <em>Riley.</em>"
-        sub="A fresh batch of 10 photos is waiting. Estimated 4 minutes."
+        title={greeting}
+        sub={subtitle}
       >
         <button className="btn btn-ghost" onClick={() => onNav("guide")}>
           <Icon name="book" size={14} /> Guide
@@ -30,6 +50,7 @@ export function HomeScreen({
         display: "grid",
         placeItems: "center",
         minHeight: "calc(100vh - 200px)",
+        paddingBottom: 0,
       }}>
         <div style={{ maxWidth: 640, width: "100%", textAlign: "center" }}>
 
@@ -51,10 +72,12 @@ export function HomeScreen({
             ))}
           </div>
 
-          <div className="pennant" style={{ marginBottom: 16 }}>
-            <Icon name="bolt" size={11} style={{ marginRight: 6 }} />
-            Double-points hour · ends 11:00
-          </div>
+          {settings.showDoublePoints && (
+            <div className="pennant" style={{ marginBottom: 16 }}>
+              <Icon name="bolt" size={11} style={{ marginRight: 6 }} />
+              Double-points hour · ends 11:00
+            </div>
+          )}
 
           <h2 style={{
             fontFamily: "var(--font-display)",
@@ -63,34 +86,48 @@ export function HomeScreen({
           }}>
             Start a batch of 10
           </h2>
-          <p style={{ color: "var(--ink-3)", fontSize: 15, margin: "0 0 28px", lineHeight: 1.5 }}>
-            From Game Dev, Robotics, Film, AI, and Roblox camps.
-            Keyboard shortcuts: <span className="kbd">A</span> approve,
-            {" "}<span className="kbd">R</span> reject,
-            {" "}<span className="kbd">F</span> flag.
+          <p style={{
+            color: "var(--ink-2)",
+            fontSize: 14,
+            margin: "0 0 28px",
+            lineHeight: 1.5,
+            display: "flex",
+            gap: 14,
+            alignItems: "center",
+            flexWrap: "wrap",
+            justifyContent: "center",
+          }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span className="kbd">A</span> approve
+            </span>
+            <span style={{ opacity: 0.3 }}>·</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span className="kbd">R</span> reject
+            </span>
+            <span style={{ opacity: 0.3 }}>·</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <span className="kbd">F</span> flag
+            </span>
           </p>
 
           <button className="btn btn-primary btn-lg" onClick={onStart}
-            style={{ padding: "16px 32px", fontSize: 16 }}>
+            style={{ padding: "16px 32px", fontSize: 16, marginBottom: 32 }}>
             <Icon name="play" size={16} /> Start reviewing
           </button>
 
-          <div style={{
-            marginTop: 24,
-            display: "inline-flex", gap: 20, alignItems: "center",
-            fontSize: 12, color: "var(--ink-3)",
-            fontFamily: "var(--font-mono)",
-            letterSpacing: "0.06em", textTransform: "uppercase",
-          }}>
-            <span>{pendingCount} photos</span>
-            <span style={{ opacity: 0.4 }}>·</span>
-            <span>~4 min</span>
-            <span style={{ opacity: 0.4 }}>·</span>
-            <button onClick={() => onNav("leaderboard")}
-              style={{ color: "var(--ink-2)", textDecoration: "underline", fontFamily: "inherit", fontSize: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>
-              See your stats
-            </button>
-          </div>
+          {settings.showLeaderboard && (
+            <div style={{
+              display: "flex", justifyContent: "center",
+              fontSize: 12, color: "var(--ink-3)",
+              fontFamily: "var(--font-mono)",
+              letterSpacing: "0.06em", textTransform: "uppercase",
+            }}>
+              <button onClick={() => onNav("leaderboard")}
+                style={{ color: "var(--ink-2)", textDecoration: "underline", fontFamily: "inherit", fontSize: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>
+                See your stats
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </>

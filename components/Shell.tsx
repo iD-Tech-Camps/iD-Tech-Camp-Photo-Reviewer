@@ -3,15 +3,8 @@
 import React from "react";
 import { Icon } from "@/components/Icon";
 import { createClient } from "@/lib/supabase/client";
-
-function initialsFromEmail(email: string): string {
-  const local = email.split("@")[0] || email;
-  const parts = local.split(/[._-]+/).filter(Boolean);
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase();
-  }
-  return local.slice(0, 2).toUpperCase();
-}
+import { useSettings } from "@/components/settings";
+import { useCurrentUser } from "@/lib/current-user";
 
 export function Sidebar({
   current,
@@ -24,19 +17,9 @@ export function Sidebar({
   isAdmin: boolean;
   pendingCount?: number;
 }) {
-  const [email, setEmail] = React.useState<string | null>(null);
+  const { settings } = useSettings();
+  const { email, fullName, firstName, initials, loading } = useCurrentUser();
   const [signingOut, setSigningOut] = React.useState(false);
-
-  React.useEffect(() => {
-    const supabase = createClient();
-    let cancelled = false;
-    supabase.auth.getUser().then(({ data }) => {
-      if (!cancelled) setEmail(data.user?.email ?? null);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const handleSignOut = async () => {
     if (signingOut) return;
@@ -46,29 +29,32 @@ export function Sidebar({
     window.location.href = "/login";
   };
 
-  const displayName = email ? email.split("@")[0] : "…";
-  const avatarInitials = email ? initialsFromEmail(email) : "··";
+  const displayName = fullName || firstName || (email ? email.split("@")[0] : (loading ? "…" : "Reviewer"));
+  const avatarInitials = loading ? "··" : initials;
   const userItems = [
     { id: "review",      label: "Review",             icon: "review", badge: pendingCount },
-    { id: "leaderboard", label: "Stats & Leaderboard",icon: "trophy" },
+    settings.showLeaderboard
+      ? { id: "leaderboard", label: "Stats & Leaderboard",icon: "trophy" }
+      : null,
     { id: "profile",     label: "My profile",         icon: "user" },
     { id: "guide",       label: "Guide & examples",   icon: "book" },
-  ];
+  ].filter(Boolean) as { id: string; label: string; icon: string; badge?: number }[];
   const adminItems = [
     { id: "admin-overview",   label: "Overview",       icon: "bolt" },
     { id: "admin-assignment", label: "Assignment",     icon: "sliders" },
     { id: "admin-points",     label: "Points & rules", icon: "medal" },
     { id: "admin-examples",   label: "Example library",icon: "image" },
     { id: "admin-users",      label: "Users",          icon: "users" },
+    { id: "admin-settings",   label: "App settings",   icon: "gear" },
   ];
 
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark"><span>Ƭ</span></div>
+        <div className="brand-mark"><span>{settings.brandMark}</span></div>
         <div>
-          <div className="brand-name">Treeline</div>
-          <div className="brand-tag">Photo Review · iD Tech</div>
+          <div className="brand-name">{settings.brandName}</div>
+          <div className="brand-tag">{settings.brandTagline}</div>
         </div>
       </div>
 

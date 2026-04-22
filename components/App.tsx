@@ -15,7 +15,10 @@ import {
   AdminPoints,
   AdminExamples,
   AdminUsers,
+  AdminSettings,
 } from "@/components/screens/Admin";
+import { SettingsProvider, useSettings } from "@/components/settings";
+import { UserProvider } from "@/lib/current-user";
 
 const VALID_SCREENS = [
   "review",
@@ -27,17 +30,21 @@ const VALID_SCREENS = [
   "admin-points",
   "admin-examples",
   "admin-users",
+  "admin-settings",
 ];
 
-const TWEAKS = {
-  theme: "light",
-  accent: "sun",
-  density: "comfortable",
-  gamification: "prominent",
-  confetti: true,
-};
-
 export default function App() {
+  return (
+    <UserProvider>
+      <SettingsProvider>
+        <AppInner />
+      </SettingsProvider>
+    </UserProvider>
+  );
+}
+
+function AppInner() {
+  const { settings } = useSettings();
   const [screen, setScreen] = React.useState<string>("review");
   const [mode, setMode] = React.useState<"nav" | "session" | "complete">("nav");
   const [sessionResult, setSessionResult] = React.useState<Record<string, any> | null>(null);
@@ -55,22 +62,22 @@ export default function App() {
   }, [screen]);
 
   React.useEffect(() => {
-    document.documentElement.setAttribute("data-theme", TWEAKS.theme);
+    document.documentElement.setAttribute("data-theme", settings.theme);
     const accentMap: Record<string, string> = {
       sun: "oklch(0.72 0.17 55)",
       lake: "oklch(0.58 0.11 230)",
       moss: "oklch(0.55 0.12 155)",
       rose: "oklch(0.62 0.16 25)",
     };
-    document.documentElement.style.setProperty("--sun", accentMap[TWEAKS.accent] || accentMap.sun);
-  }, []);
+    document.documentElement.style.setProperty("--sun", accentMap[settings.accent] || accentMap.sun);
+  }, [settings.theme, settings.accent]);
 
   const handleStart = () => setMode("session");
   const handleExit  = () => setMode("nav");
   const handleComplete = (decisions: Record<string, any>) => {
     setSessionResult(decisions);
     setMode("complete");
-    if (TWEAKS.confetti) {
+    if (settings.confettiOnComplete) {
       setTimeout(() => fireConfetti(window.innerWidth * 0.2, window.innerHeight * 0.4, 60), 200);
       setTimeout(() => fireConfetti(window.innerWidth * 0.8, window.innerHeight * 0.4, 60), 400);
     }
@@ -121,6 +128,7 @@ export default function App() {
         {screen === "admin-points"     && <AdminPoints />}
         {screen === "admin-examples"   && <AdminExamples />}
         {screen === "admin-users"      && <AdminUsers />}
+        {screen === "admin-settings"   && <AdminSettings />}
       </main>
       {toast.node}
     </div>
