@@ -72,6 +72,13 @@ function AppInner() {
     document.documentElement.style.setProperty("--sun", accentMap[settings.accent] || accentMap.sun);
   }, [settings.theme, settings.accent]);
 
+  React.useEffect(() => {
+    if (typeof document === "undefined") return;
+    const name = settings.brandName.trim();
+    const tag = settings.brandTagline.trim();
+    document.title = name && tag ? `${name} · ${tag}` : name || tag || "Photo Review";
+  }, [settings.brandName, settings.brandTagline]);
+
   const handleStart = () => setMode("session");
   const handleExit  = () => setMode("nav");
   const handleComplete = (decisions: Record<string, any>) => {
