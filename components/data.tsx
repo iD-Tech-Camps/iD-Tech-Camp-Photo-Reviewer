@@ -2,7 +2,7 @@
 
 import React from "react";
 
-export const REJECT_REASONS = [
+export const NEGATIVE_TAGS = [
   { id: "blurry",         label: "Blurry / out of focus" },
   { id: "bad-expression", label: "Bad expression" },
   { id: "bad-lighting",   label: "Bad lighting" },
@@ -11,14 +11,10 @@ export const REJECT_REASONS = [
   { id: "duplicate",      label: "Duplicate shot" },
   { id: "off-brand",      label: "Off-brand / not camp context" },
   { id: "low-quality",    label: "Technical issue (resolution, crop)" },
-];
-
-export const FLAG_REASONS = [
   { id: "inappropriate",  label: "Possibly inappropriate" },
   { id: "gesture",        label: "Questionable gesture" },
   { id: "consent",        label: "Consent / media release unclear" },
   { id: "minor-ident",    label: "Identifying info visible" },
-  { id: "second-opinion", label: "Want a second opinion" },
   { id: "safety",         label: "Safety concern" },
 ];
 

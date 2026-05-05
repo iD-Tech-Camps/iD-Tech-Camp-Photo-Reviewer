@@ -399,7 +399,7 @@ function FlagNotifications() {
 
 export function AdminPoints() {
   const [pts, setPts] = React.useState<Record<string, number>>({
-    approve: 10, reject: 10, flag: 15, streakBonus: 25,
+    approve: 10, flag: 15, streakBonus: 25,
     teamWin: 100, accurateFlag: 15, perfectBatch: 50,
   });
 
@@ -420,8 +420,7 @@ export function AdminPoints() {
             <div style={{ display: "grid", gap: 2 }}>
               {([
                 ["approve", "Approve photo", "Standard approve action"],
-                ["reject",  "Reject photo",  "Standard reject with valid reason tag"],
-                ["flag",    "Flag for admin","Flagging earns more — we want you to ask"],
+                ["flag",    "Flag for admin","Flag anything that isn't a clear approve — admin makes the final call"],
                 ["accurateFlag", "Accurate flag bonus", "When admin agrees with your flag"],
                 ["perfectBatch", "Perfect batch bonus", "All 10 decisions confirmed by admin"],
                 ["streakBonus",  "Daily streak bonus", "Per day on a 3+ day streak"],
@@ -478,7 +477,7 @@ export function AdminPoints() {
   );
 }
 
-type TagRow = { id: string; label: string; type: "approve" | "reject" };
+type TagRow = { id: string; label: string; type: "approve" | "flag" };
 
 type BonusPeriodMode = "recurring" | "one-time";
 
@@ -1000,15 +999,15 @@ function TagLibrary() {
     { id: "hero",          label: "Hero shot",          type: "approve" },
     { id: "group-energy",  label: "Group energy",       type: "approve" },
     { id: "activity",      label: "Activity context",   type: "approve" },
-    { id: "blurry",        label: "Blurry",             type: "reject"  },
-    { id: "bad-expression",label: "Bad expression",     type: "reject"  },
-    { id: "messy-setup",   label: "Messy setup",        type: "reject"  },
-    { id: "bad-lighting",  label: "Bad lighting",       type: "reject"  },
-    { id: "inappropriate", label: "Inappropriate",      type: "reject"  },
+    { id: "blurry",        label: "Blurry",             type: "flag"    },
+    { id: "bad-expression",label: "Bad expression",     type: "flag"    },
+    { id: "messy-setup",   label: "Messy setup",        type: "flag"    },
+    { id: "bad-lighting",  label: "Bad lighting",       type: "flag"    },
+    { id: "inappropriate", label: "Inappropriate",      type: "flag"    },
   ]);
   const [adding, setAdding] = React.useState(false);
   const [newLabel, setNewLabel] = React.useState("");
-  const [newType, setNewType]   = React.useState<"approve" | "reject">("approve");
+  const [newType, setNewType]   = React.useState<"approve" | "flag">("approve");
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => { if (adding && inputRef.current) inputRef.current.focus(); }, [adding]);
@@ -1026,14 +1025,14 @@ function TagLibrary() {
   const remove = (id: string) => setTags(ts => ts.filter(t => t.id !== id));
 
   const approve = tags.filter(t => t.type === "approve");
-  const reject  = tags.filter(t => t.type === "reject");
+  const flag    = tags.filter(t => t.type === "flag");
 
-  const chipStyle = (type: "approve" | "reject"): React.CSSProperties => ({
+  const chipStyle = (type: "approve" | "flag"): React.CSSProperties => ({
     display: "inline-flex", alignItems: "center", gap: 6,
     padding: "5px 10px", borderRadius: 999,
     fontSize: 12, fontWeight: 500,
-    background: type === "approve" ? "var(--moss-soft)" : "var(--rose-soft)",
-    color:      type === "approve" ? "var(--moss)"      : "var(--rose)",
+    background: type === "approve" ? "var(--moss-soft)" : "var(--sun-soft)",
+    color:      type === "approve" ? "var(--moss)"      : "var(--sun)",
     border: "1px solid transparent",
   });
 
@@ -1071,24 +1070,24 @@ function TagLibrary() {
       </div>
 
       <div style={{ marginBottom: 14 }}>
-        <div className="card-eyebrow" style={{ color: "var(--rose)", marginBottom: 6 }}>
-          Reject tags · reasons
+        <div className="card-eyebrow" style={{ color: "var(--sun)", marginBottom: 6 }}>
+          Flag tags · reasons
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {reject.map(t => (
-            <span key={t.id} style={chipStyle("reject")}>
+          {flag.map(t => (
+            <span key={t.id} style={chipStyle("flag")}>
               {t.label}
               <button onClick={() => remove(t.id)} style={{
-                marginLeft: 2, color: "var(--rose)", opacity: 0.6,
+                marginLeft: 2, color: "var(--sun)", opacity: 0.6,
                 display: "grid", placeItems: "center",
               }}>
                 <Icon name="x" size={10} />
               </button>
             </span>
           ))}
-          {reject.length === 0 && (
+          {flag.length === 0 && (
             <span style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
-              No reject tags yet
+              No flag tags yet
             </span>
           )}
         </div>
@@ -1140,22 +1139,22 @@ function TagLibrary() {
                 Approve tag
               </button>
               <button
-                onClick={() => setNewType("reject")}
+                onClick={() => setNewType("flag")}
                 style={{
                   padding: "10px 12px",
                   borderRadius: 8,
-                  border: newType === "reject" ? "1.5px solid var(--rose)" : "1px solid var(--rule)",
-                  background: newType === "reject" ? "var(--rose-soft)" : "var(--paper)",
-                  color: newType === "reject" ? "var(--rose)" : "var(--ink-2)",
+                  border: newType === "flag" ? "1.5px solid var(--sun)" : "1px solid var(--rule)",
+                  background: newType === "flag" ? "var(--sun-soft)" : "var(--paper)",
+                  color: newType === "flag" ? "var(--sun)" : "var(--ink-2)",
                   textAlign: "left", cursor: "pointer",
                   display: "flex", alignItems: "center", gap: 8,
-                  fontSize: 13, fontWeight: newType === "reject" ? 500 : 400,
+                  fontSize: 13, fontWeight: newType === "flag" ? 500 : 400,
                 }}>
                 <span style={{
                   width: 12, height: 12, borderRadius: 6,
-                  background: "var(--rose)", flexShrink: 0,
+                  background: "var(--sun)", flexShrink: 0,
                 }} />
-                Reject tag
+                Flag tag
               </button>
             </div>
           </div>

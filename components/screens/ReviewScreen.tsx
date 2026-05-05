@@ -6,14 +6,13 @@ import { fireConfetti, ToastApi } from "@/components/Shell";
 import {
   SESSION_PHOTOS,
   PHOTO_TAGS,
-  REJECT_REASONS,
-  FLAG_REASONS,
+  NEGATIVE_TAGS,
   PhotoPlaceholder,
 } from "@/components/data";
 import { useSettings } from "@/components/settings";
 
 type Decision = {
-  decision: "approve" | "reject" | "flag";
+  decision: "approve" | "flag";
   rating?: number;
   tags?: string[];
   note?: string;
@@ -37,19 +36,17 @@ export function ReviewScreen({
 }) {
   const [index, setIndex] = React.useState(0);
   const [decisions, setDecisions] = React.useState<Record<string, Decision>>({});
-  const [modal, setModal] = React.useState<null | "approve" | "reject" | "flag">(null);
-  const [pulse, setPulse] = React.useState<null | "approve" | "reject" | "flag">(null);
+  const [modal, setModal] = React.useState<null | "approve" | "flag">(null);
+  const [pulse, setPulse] = React.useState<null | "approve" | "flag">(null);
 
   const photo = SESSION_PHOTOS[index];
   const total = SESSION_PHOTOS.length;
 
   const labelFor = (kind: Decision["decision"]) =>
-    kind === "approve" ? "Approved" :
-    kind === "reject"  ? "Rejected" :
-    "Flagged for admin";
+    kind === "approve" ? "Approved" : "Flagged for admin";
 
   const commitDecision = (d: Decision) => {
-    const pts = d.decision === "approve" ? 10 : d.decision === "reject" ? 10 : 15;
+    const pts = d.decision === "approve" ? 10 : 15;
     const full: Decision = { ...d, pts };
     setDecisions(prev => ({ ...prev, [photo.id]: full }));
     setPulse(d.decision);
@@ -73,7 +70,6 @@ export function ReviewScreen({
         return;
       }
       if (e.key === "a" || e.key === "A") setModal("approve");
-      else if (e.key === "r" || e.key === "R") setModal("reject");
       else if (e.key === "f" || e.key === "F") setModal("flag");
       else if (e.key === "Escape") onExit();
     };
@@ -145,7 +141,6 @@ export function ReviewScreen({
               transform: pulse ? "scale(0.985)" : "scale(1)",
               transition: "all 0.2s ease",
               border: pulse === "approve" ? "3px solid var(--moss)"
-                    : pulse === "reject"  ? "3px solid var(--rose)"
                     : pulse === "flag"    ? "3px solid var(--sun)"
                     : "none",
             }}>
@@ -155,7 +150,7 @@ export function ReviewScreen({
 
           <div style={{
             display: "grid",
-            gridTemplateColumns: "1fr 1fr 1fr",
+            gridTemplateColumns: "1fr 1fr",
             gap: 12,
             maxWidth: "min(72vw, 1000px)",
             width: "100%",
@@ -166,12 +161,7 @@ export function ReviewScreen({
               icon="check" label="Approve" shortcut="A"
             />
             <BigAction
-              color="var(--rose)" tone="solid"
-              onClick={() => setModal("reject")}
-              icon="x" label="Reject" shortcut="R"
-            />
-            <BigAction
-              color="var(--sun)" tone="outline"
+              color="var(--sun)" tone="solid"
               onClick={() => setModal("flag")}
               icon="flag" label="Flag" shortcut="F"
             />
@@ -212,26 +202,15 @@ export function ReviewScreen({
             />
 
             <GuideSection
-              tone="rose"
-              icon="x"
-              label="Reject"
-              intro="Clearly not usable. No admin review needed."
-              bullets={[
-                "Blurry, too dark, or badly composed.",
-                "Duplicate or near-identical to another shot.",
-                "No campers visible, or backs of heads only.",
-              ]}
-            />
-
-            <GuideSection
               tone="sun"
               icon="flag"
               label="Flag"
-              intro="You're unsure. Send it up for a second opinion."
+              intro="Anything that isn't a clear approve. Tag what you see and an admin will make the final call."
               bullets={[
+                "Quality issues — blurry, dark, badly framed, duplicate.",
+                "No campers visible, or backs of heads only.",
                 "Possible safety, dress code, or behavior concern.",
-                "Minor identifiable but guardian consent is unclear.",
-                "Great shot but borderline — you want admin to decide.",
+                "Consent unclear, or you just want a second opinion.",
               ]}
               last
             />
@@ -246,18 +225,11 @@ export function ReviewScreen({
           onConfirm={(rating, tags) => commitDecision({ decision: "approve", rating, tags })}
         />
       )}
-      {modal === "reject" && (
-        <RejectModal
-          photo={photo}
-          onCancel={() => setModal(null)}
-          onConfirm={(reasons) => commitDecision({ decision: "reject", tags: reasons })}
-        />
-      )}
       {modal === "flag" && (
         <FlagModal
           photo={photo}
           onCancel={() => setModal(null)}
-          onConfirm={(reasons, note) => commitDecision({ decision: "flag", tags: reasons, note })}
+          onConfirm={(tags, note) => commitDecision({ decision: "flag", tags, note })}
         />
       )}
     </div>
@@ -493,78 +465,6 @@ function ApproveModal({
   );
 }
 
-function RejectModal({
-  photo,
-  onCancel,
-  onConfirm,
-}: {
-  photo: Photo;
-  onCancel: () => void;
-  onConfirm: (reasons: string[]) => void;
-}) {
-  const [reasons, setReasons] = React.useState<string[]>([]);
-  const toggle = (id: string) => setReasons(r => r.includes(id) ? r.filter(x => x !== id) : [...r, id]);
-
-  return (
-    <Modal onClose={onCancel}>
-      <ModalHeader
-        eyebrow="Rejecting"
-        title="Why? Pick all that apply."
-        tone="rose"
-      />
-      <p style={{ fontSize: 14, color: "var(--ink-2)", marginTop: -10, marginBottom: 18 }}>
-        Your selections become tags on the photo. We use them to improve auto-filters.
-      </p>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 22 }}>
-        {REJECT_REASONS.map(r => {
-          const on = reasons.includes(r.id);
-          return (
-            <button
-              key={r.id}
-              onClick={() => toggle(r.id)}
-              style={{
-                padding: "12px 14px",
-                borderRadius: 8,
-                border: on ? "1.5px solid var(--rose)" : "1px solid var(--rule)",
-                background: on ? "var(--rose-soft)" : "var(--paper-2)",
-                textAlign: "left",
-                display: "flex", alignItems: "center", gap: 10,
-                cursor: "pointer",
-                transition: "all 0.12s",
-              }}
-            >
-              <div style={{
-                width: 18, height: 18, flexShrink: 0,
-                borderRadius: 4,
-                border: on ? "none" : "1.5px solid var(--rule-2)",
-                background: on ? "var(--rose)" : "transparent",
-                display: "grid", placeItems: "center",
-                color: "white",
-              }}>
-                {on && <Icon name="check" size={12} />}
-              </div>
-              <span style={{ fontSize: 14, fontWeight: on ? 500 : 400 }}>{r.label}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-        <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-        <button
-          className="btn btn-rose"
-          disabled={reasons.length === 0}
-          style={{ opacity: reasons.length ? 1 : 0.5, cursor: reasons.length ? "pointer" : "not-allowed" }}
-          onClick={() => onConfirm(reasons)}
-        >
-          <Icon name="x" size={13} /> Reject · +10 pts
-        </button>
-      </div>
-    </Modal>
-  );
-}
-
 function FlagModal({
   photo,
   onCancel,
@@ -572,32 +472,32 @@ function FlagModal({
 }: {
   photo: Photo;
   onCancel: () => void;
-  onConfirm: (reasons: string[], note: string) => void;
+  onConfirm: (tags: string[], note: string) => void;
 }) {
-  const [reasons, setReasons] = React.useState<string[]>([]);
+  const [tags, setTags] = React.useState<string[]>([]);
   const [note, setNote] = React.useState("");
-  const toggle = (id: string) => setReasons(r => r.includes(id) ? r.filter(x => x !== id) : [...r, id]);
-  const canSubmit = reasons.length > 0 || note.trim().length > 0;
+  const toggle = (id: string) => setTags(r => r.includes(id) ? r.filter(x => x !== id) : [...r, id]);
+  const canSubmit = tags.length > 0;
 
   return (
     <Modal onClose={onCancel} width={560}>
       <ModalHeader
         eyebrow="Flagging for admin"
-        title="What should they look at?"
+        title="What's wrong with it?"
         tone="sun"
       />
       <p style={{ fontSize: 14, color: "var(--ink-2)", marginTop: -10, marginBottom: 18 }}>
-        An admin will see this photo with your note and reasons in their queue.
+        Tag everything that applies. An admin will make the final call — your tags help them decide and improve our auto-filters.
       </p>
 
-      <div className="label" style={{ marginBottom: 8 }}>Reason</div>
+      <div className="label" style={{ marginBottom: 8 }}>Tags</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 18 }}>
-        {FLAG_REASONS.map(r => (
+        {NEGATIVE_TAGS.map(r => (
           <button
             key={r.id}
             onClick={() => toggle(r.id)}
-            className={"tag-chip" + (reasons.includes(r.id) ? " active" : "")}
-            style={reasons.includes(r.id) ? {
+            className={"tag-chip" + (tags.includes(r.id) ? " active" : "")}
+            style={tags.includes(r.id) ? {
               background: "var(--sun-soft)",
               borderColor: "var(--sun)",
               color: "var(--ink)",
@@ -608,13 +508,13 @@ function FlagModal({
         ))}
       </div>
 
-      <div className="label" style={{ marginBottom: 6 }}>Message to admin</div>
+      <div className="label" style={{ marginBottom: 6 }}>Reason <span style={{ color: "var(--ink-3)", fontWeight: 400 }}>(optional)</span></div>
       <textarea
         className="textarea"
         rows={3}
         value={note}
         onChange={(e) => setNote(e.target.value)}
-        placeholder="e.g. Could be a great shot but I'm not sure if the gesture is OK — want a second opinion."
+        placeholder="Add context for the admin — e.g. unsure if the gesture is OK, or want a second opinion on framing."
         style={{ marginBottom: 20 }}
       />
 
@@ -624,7 +524,7 @@ function FlagModal({
           className="btn btn-sun"
           disabled={!canSubmit}
           style={{ opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "not-allowed" }}
-          onClick={() => onConfirm(reasons, note.trim())}
+          onClick={() => onConfirm(tags, note.trim())}
         >
           <Icon name="flag" size={13} /> Flag & continue · +15 pts
         </button>
@@ -646,7 +546,6 @@ export function SessionComplete({
   const total = Object.values(decisions).reduce((s, d) => s + (d.pts || 0), 0);
   const counts = {
     approve: Object.values(decisions).filter(d => d.decision === "approve").length,
-    reject:  Object.values(decisions).filter(d => d.decision === "reject").length,
     flag:    Object.values(decisions).filter(d => d.decision === "flag").length,
   };
   return (
@@ -671,14 +570,10 @@ export function SessionComplete({
           {settings.completionMessage}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 32 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14, marginBottom: 32 }}>
           <div className="card" style={{ textAlign: "center" }}>
             <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 450, color: "var(--moss)" }}>{counts.approve}</div>
             <div className="card-eyebrow">Approved</div>
-          </div>
-          <div className="card" style={{ textAlign: "center" }}>
-            <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 450, color: "var(--rose)" }}>{counts.reject}</div>
-            <div className="card-eyebrow">Rejected</div>
           </div>
           <div className="card" style={{ textAlign: "center" }}>
             <div style={{ fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 450, color: "var(--sun)" }}>{counts.flag}</div>

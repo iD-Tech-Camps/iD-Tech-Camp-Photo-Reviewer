@@ -411,11 +411,11 @@ export function GuideScreen() {
         <div className="card">
           <div className="card-header">
             <div>
-              <span className="card-eyebrow" style={{ color: "var(--rose)" }}>Reject these</span>
-              <h3 className="card-title">Bad photos</h3>
+              <span className="card-eyebrow" style={{ color: "var(--sun)" }}>Flag these</span>
+              <h3 className="card-title">Problem photos</h3>
             </div>
-            <span className="pill pill-rose">
-              <Icon name="x" size={10} /> {EXAMPLES.bad.length} examples
+            <span className="pill pill-sun">
+              <Icon name="flag" size={10} /> {EXAMPLES.bad.length} examples
             </span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -423,7 +423,7 @@ export function GuideScreen() {
               <div key={ex.id}>
                 <div style={{
                   aspectRatio: "3/2", borderRadius: 6, overflow: "hidden",
-                  position: "relative", border: "2px solid var(--rose)", marginBottom: 8,
+                  position: "relative", border: "2px solid var(--sun)", marginBottom: 8,
                   filter: i === 0 ? "blur(2px)" : "none",
                 }}>
                   <PhotoPlaceholder photo={{ id: ex.id, camp: ex.label, activity: "" }} compact />

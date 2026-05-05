@@ -102,10 +102,6 @@ export function HomeScreen({
             </span>
             <span style={{ opacity: 0.3 }}>·</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span className="kbd">R</span> reject
-            </span>
-            <span style={{ opacity: 0.3 }}>·</span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <span className="kbd">F</span> flag
             </span>
           </p>
