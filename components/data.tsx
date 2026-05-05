@@ -18,6 +18,10 @@ export const NEGATIVE_TAGS = [
   { id: "safety",         label: "Safety concern" },
 ];
 
+export function negativeTagLabel(id: string): string {
+  return NEGATIVE_TAGS.find(t => t.id === id)?.label ?? id;
+}
+
 export const PHOTO_TAGS = [
   { id: "blurry",        label: "Blurry",              color: "rose" },
   { id: "bad-expression",label: "Bad expression",      color: "rose" },
@@ -205,13 +209,160 @@ export const EXAMPLES = {
 };
 
 export const ADMIN_USERS = [
-  { name: "Priya Shah",      email: "priya.s@idtech.com",  role: "Reviewer", team: "Operations", status: "Active",   last: "2m ago" },
-  { name: "Marcus Webb",     email: "marcus.w@idtech.com", role: "Reviewer", team: "Programs",   status: "Active",   last: "14m ago" },
-  { name: "Ana Flores",      email: "ana.f@idtech.com",    role: "Lead",     team: "Marketing",  status: "Active",   last: "1h ago" },
-  { name: "Jordan Kim",      email: "jordan.k@idtech.com", role: "Reviewer", team: "Support",    status: "Active",   last: "3h ago" },
-  { name: "Riley Turner",    email: "riley.t@idtech.com",  role: "Reviewer", team: "Programs",   status: "Active",   last: "now" },
-  { name: "Sam Okafor",      email: "sam.o@idtech.com",    role: "Reviewer", team: "Programs",   status: "Active",   last: "4h ago" },
-  { name: "Leo Chen",        email: "leo.c@idtech.com",    role: "Reviewer", team: "Operations", status: "Idle",     last: "2d ago" },
-  { name: "Mira Patel",      email: "mira.p@idtech.com",   role: "Reviewer", team: "Marketing",  status: "Active",   last: "28m ago" },
-  { name: "Dr. Harper Rowe", email: "harper.r@idtech.com", role: "Admin",    team: "—",         status: "Active",   last: "now" },
+  { name: "Priya Shah",      email: "priya.s@idtech.com",  role: "Senior Reviewer", team: "Operations", status: "Active", last: "2m ago" },
+  { name: "Marcus Webb",     email: "marcus.w@idtech.com", role: "Staff Reviewer",  team: "Programs",   status: "Active", last: "14m ago" },
+  { name: "Ana Flores",      email: "ana.f@idtech.com",    role: "Senior Reviewer", team: "Marketing",  status: "Active", last: "1h ago" },
+  { name: "Jordan Kim",      email: "jordan.k@idtech.com", role: "Staff Reviewer",  team: "Support",    status: "Active", last: "3h ago" },
+  { name: "Riley Turner",    email: "riley.t@idtech.com",  role: "Staff Reviewer",  team: "Programs",   status: "Active", last: "now" },
+  { name: "Sam Okafor",      email: "sam.o@idtech.com",    role: "Staff Reviewer",  team: "Programs",   status: "Active", last: "4h ago" },
+  { name: "Leo Chen",        email: "leo.c@idtech.com",    role: "Staff Reviewer",  team: "Operations", status: "Idle",   last: "2d ago" },
+  { name: "Mira Patel",      email: "mira.p@idtech.com",   role: "Staff Reviewer",  team: "Marketing",  status: "Active", last: "28m ago" },
+  { name: "Dr. Harper Rowe", email: "harper.r@idtech.com", role: "Admin",           team: "—",          status: "Active", last: "now" },
+];
+
+export type FlaggedPhoto = {
+  id: string;
+  camp: string;
+  campLocation: string;
+  campWeek: string;
+  campWeekDates: string;
+  activity: string;
+  captured: string;
+  capturedDate: string;
+  flaggedBy: string;
+  flaggedByEmail: string;
+  flaggedAt: string;
+  flaggedAtRelative: string;
+  tags: string[];
+  note?: string;
+};
+
+export const FLAGGED_PHOTOS: FlaggedPhoto[] = [
+  {
+    id: "IMG_4612",
+    camp: "Game Dev",
+    campLocation: "Stanford University, Palo Alto CA",
+    campWeek: "Week 3",
+    campWeekDates: "Jul 8 – Jul 12, 2026",
+    activity: "Unity workshop",
+    captured: "2:14 PM",
+    capturedDate: "Jul 10, 2026",
+    flaggedBy: "Riley Turner",
+    flaggedByEmail: "riley.t@idtech.com",
+    flaggedAt: "Jul 10, 2026 · 4:31 PM",
+    flaggedAtRelative: "12m ago",
+    tags: ["gesture", "inappropriate"],
+    note: "Camper in back is making a gesture I'm not sure about — could be totally innocent but want a second set of eyes.",
+  },
+  {
+    id: "IMG_4590",
+    camp: "Robotics",
+    campLocation: "UCLA, Los Angeles CA",
+    campWeek: "Week 3",
+    campWeekDates: "Jul 8 – Jul 12, 2026",
+    activity: "VEX build lab",
+    captured: "11:47 AM",
+    capturedDate: "Jul 10, 2026",
+    flaggedBy: "Marcus Webb",
+    flaggedByEmail: "marcus.w@idtech.com",
+    flaggedAt: "Jul 10, 2026 · 1:02 PM",
+    flaggedAtRelative: "1h ago",
+    tags: ["bad-lighting", "bad-expression"],
+    note: "Lighting is rough but the moment is great. If you can rescue the exposure it might be worth keeping.",
+  },
+  {
+    id: "IMG_4588",
+    camp: "Film",
+    campLocation: "NYU, New York NY",
+    campWeek: "Week 3",
+    campWeekDates: "Jul 8 – Jul 12, 2026",
+    activity: "Editing session",
+    captured: "10:22 AM",
+    capturedDate: "Jul 10, 2026",
+    flaggedBy: "Ana Flores",
+    flaggedByEmail: "ana.f@idtech.com",
+    flaggedAt: "Jul 10, 2026 · 12:18 PM",
+    flaggedAtRelative: "2h ago",
+    tags: ["minor-ident"],
+    note: "Camper's full name visible on the laptop sticker — please blur or skip.",
+  },
+  {
+    id: "IMG_4571",
+    camp: "AI & ML",
+    campLocation: "MIT, Cambridge MA",
+    campWeek: "Week 3",
+    campWeekDates: "Jul 8 – Jul 12, 2026",
+    activity: "Demo day rehearsal",
+    captured: "3:48 PM",
+    capturedDate: "Jul 9, 2026",
+    flaggedBy: "Priya Shah",
+    flaggedByEmail: "priya.s@idtech.com",
+    flaggedAt: "Jul 9, 2026 · 5:30 PM",
+    flaggedAtRelative: "Yesterday",
+    tags: ["duplicate"],
+    note: "Looks like a duplicate of IMG_4570 — same group, almost identical framing.",
+  },
+  {
+    id: "IMG_4555",
+    camp: "Roblox",
+    campLocation: "Caltech, Pasadena CA",
+    campWeek: "Week 3",
+    campWeekDates: "Jul 8 – Jul 12, 2026",
+    activity: "Free time — rec room",
+    captured: "4:30 PM",
+    capturedDate: "Jul 9, 2026",
+    flaggedBy: "Jordan Kim",
+    flaggedByEmail: "jordan.k@idtech.com",
+    flaggedAt: "Jul 9, 2026 · 6:11 PM",
+    flaggedAtRelative: "Yesterday",
+    tags: ["consent", "no-faces"],
+    note: "Two new arrivals this week — not sure if media releases came in. Faces partially turned but still identifiable.",
+  },
+  {
+    id: "IMG_4540",
+    camp: "Creative",
+    campLocation: "USC, Los Angeles CA",
+    campWeek: "Week 3",
+    campWeekDates: "Jul 8 – Jul 12, 2026",
+    activity: "Outdoor shoot",
+    captured: "1:05 PM",
+    capturedDate: "Jul 9, 2026",
+    flaggedBy: "Sam Okafor",
+    flaggedByEmail: "sam.o@idtech.com",
+    flaggedAt: "Jul 9, 2026 · 2:22 PM",
+    flaggedAtRelative: "Yesterday",
+    tags: ["safety"],
+    note: "Camper too close to the stair edge — small thing but worth a look before it goes anywhere.",
+  },
+  {
+    id: "IMG_4521",
+    camp: "Game Dev",
+    campLocation: "Stanford University, Palo Alto CA",
+    campWeek: "Week 2",
+    campWeekDates: "Jul 1 – Jul 5, 2026",
+    activity: "Lunch — dining hall",
+    captured: "12:18 PM",
+    capturedDate: "Jul 3, 2026",
+    flaggedBy: "Mira Patel",
+    flaggedByEmail: "mira.p@idtech.com",
+    flaggedAt: "Jul 3, 2026 · 3:00 PM",
+    flaggedAtRelative: "Last week",
+    tags: ["off-brand", "messy-setup"],
+  },
+  {
+    id: "IMG_4498",
+    camp: "Robotics",
+    campLocation: "UCLA, Los Angeles CA",
+    campWeek: "Week 2",
+    campWeekDates: "Jul 1 – Jul 5, 2026",
+    activity: "Team photo",
+    captured: "4:02 PM",
+    capturedDate: "Jul 2, 2026",
+    flaggedBy: "Leo Chen",
+    flaggedByEmail: "leo.c@idtech.com",
+    flaggedAt: "Jul 2, 2026 · 4:55 PM",
+    flaggedAtRelative: "Last week",
+    tags: ["blurry", "low-quality"],
+    note: "Soft focus across the whole frame — phone shake during a long-ish exposure.",
+  },
 ];

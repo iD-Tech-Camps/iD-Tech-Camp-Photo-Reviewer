@@ -17,14 +17,16 @@ import {
   AdminUsers,
   AdminSettings,
 } from "@/components/screens/Admin";
+import { FlagReviewScreen } from "@/components/screens/FlagReview";
 import { SettingsProvider, useSettings } from "@/components/settings";
-import { UserProvider } from "@/lib/current-user";
+import { UserProvider, useCurrentUser, type Role } from "@/lib/current-user";
 
 const VALID_SCREENS = [
   "review",
   "leaderboard",
   "profile",
   "guide",
+  "flag-review",
   "admin-overview",
   "admin-assignment",
   "admin-points",
@@ -32,6 +34,22 @@ const VALID_SCREENS = [
   "admin-users",
   "admin-settings",
 ];
+
+const SENIOR_SCREENS = new Set(["flag-review"]);
+const ADMIN_SCREENS = new Set([
+  "admin-overview",
+  "admin-assignment",
+  "admin-points",
+  "admin-examples",
+  "admin-users",
+  "admin-settings",
+]);
+
+function screenAllowedFor(screen: string, role: Role): boolean {
+  if (ADMIN_SCREENS.has(screen)) return role === "admin";
+  if (SENIOR_SCREENS.has(screen)) return role === "senior" || role === "admin";
+  return true;
+}
 
 export default function App() {
   return (
@@ -45,6 +63,7 @@ export default function App() {
 
 function AppInner() {
   const { settings } = useSettings();
+  const { role } = useCurrentUser();
   const [screen, setScreen] = React.useState<string>("review");
   const [mode, setMode] = React.useState<"nav" | "session" | "complete">("nav");
   const [sessionResult, setSessionResult] = React.useState<Record<string, any> | null>(null);
@@ -60,6 +79,12 @@ function AppInner() {
   React.useEffect(() => {
     if (typeof window !== "undefined") localStorage.setItem("screen", screen);
   }, [screen]);
+
+  React.useEffect(() => {
+    if (!screenAllowedFor(screen, role)) {
+      setScreen("review");
+    }
+  }, [screen, role]);
 
   React.useEffect(() => {
     document.documentElement.setAttribute("data-theme", settings.theme);
@@ -118,24 +143,26 @@ function AppInner() {
     );
   }
 
+  const activeScreen = screenAllowedFor(screen, role) ? screen : "review";
+
   return (
-    <div className="app-shell" data-screen-label={screen}>
+    <div className="app-shell" data-screen-label={activeScreen}>
       <Sidebar
-        current={screen}
+        current={activeScreen}
         onNav={setScreen}
-        isAdmin={true}
       />
       <main className="main">
-        {screen === "review"      && <HomeScreen onStart={handleStart} onNav={setScreen} />}
-        {screen === "leaderboard" && <LeaderboardScreen />}
-        {screen === "profile"     && <ProfileScreen />}
-        {screen === "guide"       && <GuideScreen />}
-        {screen === "admin-overview"   && <AdminOverview />}
-        {screen === "admin-assignment" && <AdminAssignment />}
-        {screen === "admin-points"     && <AdminPoints />}
-        {screen === "admin-examples"   && <AdminExamples />}
-        {screen === "admin-users"      && <AdminUsers />}
-        {screen === "admin-settings"   && <AdminSettings />}
+        {activeScreen === "review"      && <HomeScreen onStart={handleStart} onNav={setScreen} />}
+        {activeScreen === "leaderboard" && <LeaderboardScreen />}
+        {activeScreen === "profile"     && <ProfileScreen />}
+        {activeScreen === "guide"       && <GuideScreen />}
+        {activeScreen === "flag-review" && <FlagReviewScreen toast={toast} />}
+        {activeScreen === "admin-overview"   && <AdminOverview />}
+        {activeScreen === "admin-assignment" && <AdminAssignment />}
+        {activeScreen === "admin-points"     && <AdminPoints />}
+        {activeScreen === "admin-examples"   && <AdminExamples />}
+        {activeScreen === "admin-users"      && <AdminUsers />}
+        {activeScreen === "admin-settings"   && <AdminSettings />}
       </main>
       {toast.node}
     </div>

@@ -4,21 +4,20 @@ import React from "react";
 import { Icon } from "@/components/Icon";
 import { createClient } from "@/lib/supabase/client";
 import { useSettings } from "@/components/settings";
-import { useCurrentUser } from "@/lib/current-user";
+import { useCurrentUser, ROLE_LABEL, type Role } from "@/lib/current-user";
+import { FLAGGED_PHOTOS } from "@/components/data";
 
 export function Sidebar({
   current,
   onNav,
-  isAdmin,
   pendingCount = 10,
 }: {
   current: string;
   onNav: (id: string) => void;
-  isAdmin: boolean;
   pendingCount?: number;
 }) {
   const { settings } = useSettings();
-  const { email, fullName, firstName, initials, loading } = useCurrentUser();
+  const { email, fullName, firstName, initials, loading, role, setRole } = useCurrentUser();
   const [signingOut, setSigningOut] = React.useState(false);
 
   const handleSignOut = async () => {
@@ -31,6 +30,10 @@ export function Sidebar({
 
   const displayName = fullName || firstName || (email ? email.split("@")[0] : (loading ? "…" : "Reviewer"));
   const avatarInitials = loading ? "··" : initials;
+
+  const canSeeFlagReview = role === "senior" || role === "admin";
+  const canSeeAdmin = role === "admin";
+
   const userItems = [
     { id: "review",      label: "Review",             icon: "review", badge: pendingCount },
     settings.showLeaderboard
@@ -39,6 +42,11 @@ export function Sidebar({
     { id: "profile",     label: "My profile",         icon: "user" },
     { id: "guide",       label: "Guide & examples",   icon: "book" },
   ].filter(Boolean) as { id: string; label: string; icon: string; badge?: number }[];
+
+  const seniorItems: { id: string; label: string; icon: string; badge?: number }[] = [
+    { id: "flag-review", label: "Flag review", icon: "flag", badge: FLAGGED_PHOTOS.length },
+  ];
+
   const adminItems = [
     { id: "admin-overview",   label: "Overview",       icon: "bolt" },
     { id: "admin-assignment", label: "Assignment",     icon: "sliders" },
@@ -71,62 +79,125 @@ export function Sidebar({
         </button>
       ))}
 
-      <div className="nav-section">
-        Admin {!isAdmin && <span style={{ opacity: 0.6 }}>(preview)</span>}
-      </div>
-      {adminItems.map(it => (
-        <button
-          key={it.id}
-          className={"nav-item" + (current === it.id ? " active" : "")}
-          onClick={() => onNav(it.id)}
-          style={{ opacity: isAdmin ? 1 : 0.75 }}
-        >
-          <Icon name={it.icon} />
-          <span>{it.label}</span>
-        </button>
-      ))}
+      {canSeeFlagReview && (
+        <>
+          <div className="nav-section">Senior</div>
+          {seniorItems.map(it => (
+            <button
+              key={it.id}
+              className={"nav-item" + (current === it.id ? " active" : "")}
+              onClick={() => onNav(it.id)}
+            >
+              <Icon name={it.icon} />
+              <span>{it.label}</span>
+              {it.badge ? <span className="badge">{it.badge}</span> : null}
+            </button>
+          ))}
+        </>
+      )}
 
-      <div className="sidebar-footer">
-        <div className="avatar">{avatarInitials}</div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 500,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-            title={email ?? undefined}
-          >
-            {displayName}
+      {canSeeAdmin && (
+        <>
+          <div className="nav-section">Admin</div>
+          {adminItems.map(it => (
+            <button
+              key={it.id}
+              className={"nav-item" + (current === it.id ? " active" : "")}
+              onClick={() => onNav(it.id)}
+            >
+              <Icon name={it.icon} />
+              <span>{it.label}</span>
+            </button>
+          ))}
+        </>
+      )}
+
+      <div className="sidebar-footer" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
+        <RoleSwitcher role={role} onChange={setRole} />
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="avatar">{avatarInitials}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: 500,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+              title={email ?? undefined}
+            >
+              {displayName}
+            </div>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--ink-3)",
+                fontFamily: "var(--font-mono)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+              title={email ?? undefined}
+            >
+              {email ?? "Loading…"}
+            </div>
           </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--ink-3)",
-              fontFamily: "var(--font-mono)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-            title={email ?? undefined}
+          <button
+            className="nav-item"
+            style={{ width: 28, height: 28, padding: 0, justifyContent: "center" }}
+            title="Sign out"
+            aria-label="Sign out"
+            onClick={handleSignOut}
+            disabled={signingOut}
           >
-            {email ?? "Loading…"}
-          </div>
+            <Icon name="log-out" size={14} />
+          </button>
         </div>
-        <button
-          className="nav-item"
-          style={{ width: 28, height: 28, padding: 0, justifyContent: "center" }}
-          title="Sign out"
-          aria-label="Sign out"
-          onClick={handleSignOut}
-          disabled={signingOut}
-        >
-          <Icon name="log-out" size={14} />
-        </button>
       </div>
     </aside>
+  );
+}
+
+function RoleSwitcher({ role, onChange }: { role: Role; onChange: (r: Role) => void }) {
+  return (
+    <label
+      style={{
+        display: "flex", flexDirection: "column", gap: 4,
+        padding: "8px 10px",
+        borderRadius: 8,
+        background: "var(--paper-2)",
+        border: "1px solid var(--rule)",
+      }}
+    >
+      <span
+        style={{
+          fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
+          color: "var(--ink-3)", fontFamily: "var(--font-mono)",
+        }}
+      >
+        View as
+      </span>
+      <select
+        value={role}
+        onChange={(e) => onChange(e.target.value as Role)}
+        style={{
+          background: "transparent",
+          border: "none",
+          fontFamily: "inherit",
+          fontSize: 13,
+          fontWeight: 500,
+          color: "var(--ink)",
+          padding: 0,
+          cursor: "pointer",
+          outline: "none",
+        }}
+      >
+        <option value="staff">{ROLE_LABEL.staff}</option>
+        <option value="senior">{ROLE_LABEL.senior}</option>
+        <option value="admin">{ROLE_LABEL.admin}</option>
+      </select>
+    </label>
   );
 }
 

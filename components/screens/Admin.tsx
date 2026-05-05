@@ -1316,7 +1316,7 @@ export function AdminUsers() {
                     </div>
                   </td>
                   <td>
-                    <span className={"pill " + (u.role === "Admin" ? "pill-sun" : u.role === "Lead" ? "pill-lake" : "")}>
+                    <span className={"pill " + (u.role === "Admin" ? "pill-sun" : u.role === "Senior Reviewer" ? "pill-lake" : "")}>
                       {u.role}
                     </span>
                   </td>

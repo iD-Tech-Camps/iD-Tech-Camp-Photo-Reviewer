@@ -3,12 +3,22 @@
 import React from "react";
 import { createClient } from "@/lib/supabase/client";
 
+export type Role = "staff" | "senior" | "admin";
+
+export const ROLE_LABEL: Record<Role, string> = {
+  staff:  "Staff Reviewer",
+  senior: "Senior Reviewer",
+  admin:  "Admin",
+};
+
 export type CurrentUser = {
   email: string | null;
   fullName: string | null;
   firstName: string | null;
   initials: string;
   loading: boolean;
+  role: Role;
+  setRole: (role: Role) => void;
 };
 
 const FALLBACK: CurrentUser = {
@@ -17,7 +27,11 @@ const FALLBACK: CurrentUser = {
   firstName: null,
   initials: "··",
   loading: true,
+  role: "staff",
+  setRole: () => {},
 };
+
+const ROLE_STORAGE_KEY = "current-user-role-v1";
 
 const UserContext = React.createContext<CurrentUser>(FALLBACK);
 
@@ -48,8 +62,27 @@ function firstNameFrom(fullName: string | null, email: string | null): string | 
   return null;
 }
 
+function readStoredRole(): Role {
+  if (typeof window === "undefined") return "staff";
+  const raw = window.localStorage.getItem(ROLE_STORAGE_KEY);
+  if (raw === "staff" || raw === "senior" || raw === "admin") return raw;
+  return "staff";
+}
+
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<CurrentUser>(FALLBACK);
+  const [role, setRoleState] = React.useState<Role>("staff");
+
+  React.useEffect(() => {
+    setRoleState(readStoredRole());
+  }, []);
+
+  const setRole = React.useCallback((next: Role) => {
+    setRoleState(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(ROLE_STORAGE_KEY, next);
+    }
+  }, []);
 
   React.useEffect(() => {
     const supabase = createClient();
@@ -58,7 +91,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     const apply = (data: { email?: string | null; user_metadata?: Record<string, any> | null } | null) => {
       if (cancelled) return;
       if (!data) {
-        setUser({ ...FALLBACK, loading: false });
+        setUser({ ...FALLBACK, loading: false, role, setRole });
         return;
       }
       const meta = data.user_metadata || {};
@@ -76,6 +109,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           ? initialsFromEmail(email)
           : "··",
         loading: false,
+        role,
+        setRole,
       });
     };
 
@@ -89,7 +124,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
       sub.subscription.unsubscribe();
     };
-  }, []);
+  }, [role, setRole]);
 
   return <UserContext.Provider value={user}>{children}</UserContext.Provider>;
 }

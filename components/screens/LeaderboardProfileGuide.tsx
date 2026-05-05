@@ -232,7 +232,7 @@ export function ProfileScreen() {
       <PageHeader
         eyebrow="Your profile"
         title="Riley <em>Turner.</em>"
-        sub="Programs · Reviewer · Joined May 28, 2026"
+        sub="Programs · Staff Reviewer · Joined May 28, 2026"
       />
 
       <div className="page-body" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
