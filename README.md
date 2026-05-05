@@ -1,4 +1,4 @@
-# iD Tech Camp Photo Reviewer
+# iD Tech Camp Photo Reviewer Web App
 
 Next.js 14 (App Router) + TypeScript + Tailwind CSS app for reviewing camp photos.
 
