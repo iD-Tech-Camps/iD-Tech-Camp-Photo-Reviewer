@@ -1538,6 +1538,21 @@ export function AdminExamples({ toast }: { toast: ToastApi }) {
 
         {byKind === null ? (
           <ExamplesGridSkeleton />
+        ) : list.length === 0 ? (
+          <div style={{
+            padding: "48px 20px", borderRadius: "var(--radius-sm)",
+            border: "1px dashed var(--rule-2)",
+            background: "var(--paper-2)",
+            textAlign: "center",
+            color: "var(--ink-3)",
+          }}>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 16, color: "var(--ink-2)", marginBottom: 4 }}>
+              No {tab} examples uploaded yet.
+            </div>
+            <div style={{ fontSize: 13 }}>
+              Click <strong style={{ color: "var(--ink-2)" }}>Add example</strong> to upload one.
+            </div>
+          </div>
         ) : (
           <ExamplesGrid
             kind={tab}
