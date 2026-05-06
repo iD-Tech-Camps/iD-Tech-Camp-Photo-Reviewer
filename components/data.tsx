@@ -5,6 +5,10 @@
 // PHOTO_TAGS, and negativeTagLabel exports that previously lived here. If
 // you need a label for a tag id, use buildTagLabelLookup(tags) — it covers
 // inactive ids too, which negativeTagLabel didn't.
+//
+// EXAMPLES moved to the live `examples` table + Supabase Storage as part of
+// step 7.6b (May 2026). Use lib/examples.ts → fetchExamples() to read the
+// curated good/bad library; admin writes go through the same module.
 
 import React from "react";
 
@@ -142,22 +146,6 @@ export const RECENT_ACTIVITY = [
   { when: "Yesterday",    text: "Completed daily streak (day 9)",         pts: "+25"  },
   { when: "Yesterday",    text: "Approved 10 of 10 in a session",         pts: "+100" },
 ];
-
-export const EXAMPLES = {
-  good: [
-    { id: "EX_G01", label: "Eye contact, engaged", note: "Subjects looking at camera or clearly focused on activity." },
-    { id: "EX_G02", label: "Hero shot",             note: "Clear subject, good framing, strong moment." },
-    { id: "EX_G03", label: "Group energy",          note: "Natural group interaction, multiple faces visible." },
-    { id: "EX_G04", label: "Activity context",      note: "Shows what camp is actually about. Backdrop reads." },
-  ],
-  bad: [
-    { id: "EX_B01", label: "Blurry",                note: "Motion or focus blur that obscures faces." },
-    { id: "EX_B02", label: "Bad expression",        note: "Mid-blink, mid-chew, or uncomfortable looking." },
-    { id: "EX_B03", label: "Messy setup",           note: "Distracting clutter, trash, disorganized space." },
-    { id: "EX_B04", label: "Bad lighting",          note: "Harsh shadows, blown highlights, or too dark." },
-    { id: "EX_B05", label: "Inappropriate gesture", note: "Any gesture or pose that shouldn't go to parents." },
-  ],
-};
 
 export const ADMIN_USERS = [
   { name: "Priya Shah",      email: "priya.s@idtech.com",  role: "Senior Reviewer", team: "Operations", reviewed: 482, pts: 4820, last: "2m ago" },

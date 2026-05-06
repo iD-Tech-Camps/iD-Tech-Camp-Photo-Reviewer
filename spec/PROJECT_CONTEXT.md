@@ -14,7 +14,7 @@ Reviewers move through a queue of photos and either **approve** them (share-wort
 
 ## Current status (as of last working session)
 
-**The reviewer and senior flows are now fully DB-backed, and the Profile + Admin Overview screens read live aggregates. Tags, app settings, points config, and the multiplier-bonus schedule are all live on Supabase as of May 6, 2026 (sub-steps 7.6a / 7.6c / 7.6d). Examples (7.6b) is the only piece of step 7.6 still on mocks — the user explicitly deferred it for a follow-up plan.** Step 7 of the roadmap is partially complete (sub-steps 1–5 done; 7.6 sub-pieces a/c/d landed; 7.6b remaining). What works end-to-end against Supabase:
+**The reviewer and senior flows are now fully DB-backed, and the Profile + Admin Overview screens read live aggregates. Tags, app settings, points config, the multiplier-bonus schedule, and the example library are all live on Supabase as of May 6, 2026 (sub-steps 7.6a–d, complete).** Step 7 of the roadmap is now fully done (all sub-steps 1–6 landed). What works end-to-end against Supabase:
 
 - Production deployment on Vercel (auto-deploys from `main`)
 - Google OAuth login restricted to `@idtech.com` accounts (Internal Workspace)
@@ -28,12 +28,12 @@ Reviewers move through a queue of photos and either **approve** them (share-wort
 - **AppSettings live on `app_settings` (migration 16).** The single-row table now covers everything in the runtime `AppSettings` type except `bonusPeriods`: brand_*, the four reviewer-copy strings (greeting / subtitle / completion title + message / empty-queue message), `support_email`, and the appearance triple (`theme` / `accent` / `density`). The dead `show_leaderboard` column from migration 7 was dropped. `SettingsProvider` (`components/settings.tsx`) now hydrates from the DB on mount via `lib/app-settings.ts`, and admin edits go through `updateAppSettings` (optimistic UI, rollback + `saveError` surfaced on failure). The localStorage blob is gone.
 - **Points multiplier bonus has its own table now (migration 17).** `bonus_periods` is a multi-row table with the same shape the localStorage `BonusPeriod` had — `mode` discriminates recurring (days[] + HH:MM clock window) vs one-time (timestamptz pair) rows; `multiplier` is `numeric(4,2)` with a 1.10–10.00 check. Admin → Points & rules → Points multiplier bonus now reads/writes through `lib/bonus-periods.ts` via the new `BonusPeriodsProvider` + `useBonusPeriods` hook. Shell.tsx's `useActiveBonusPeriod` reads from the same provider. Mounted from `App.tsx` directly under `SettingsProvider`.
 - **`points_config` is read from the DB in ReviewScreen.** `lib/points-config.ts → fetchPointsConfig` lands on mount; `basePointsFor` returns the per-decision base (with a `DEFAULT_POINTS_CONFIG` fallback if the fetch hasn't resolved yet). Approve / Flag buttons + the post-decision toast multiply the base by the active bonus multiplier and the result is now passed verbatim into `submitReview` as `pointsAwarded` — the DB snapshot in `reviews.points_awarded` reflects the bonus the reviewer actually saw. (The trigger keeps its "fall back to points_config" behavior so senior accept/delete decisions, which never run through a bonus pennant, still snapshot correctly.) Admin → Points & rules → Per-action points loads + saves through `updatePointsConfig`.
-- 17 migrations applied. **Four** server-side tests still pass after the DB extensions (smoke + reviewer e2e + flag e2e + reviewer_stats); migrations 16–17 didn't disturb the surface they probe.
+- **Examples library is fully DB-backed (migration 18, sub-step 7.6b).** `lib/examples.ts` exposes `fetchExamples` / `createExample` / `updateExampleMetadata` / `replaceExampleImage` / `deleteExample` / `reorderExamples`. Image files live in the new `example-images` Supabase Storage bucket (public-read, admin-write at both bucket and object-RLS layers). AdminExamples now wires up upload / edit-metadata / replace-image / delete modals plus drag-and-drop reordering via `@dnd-kit/core` + `@dnd-kit/sortable` (atomic via the `public.reorder_examples` RPC; optimistic UI with rollback on failure). GuideScreen renders the curated images directly (no more `PhotoPlaceholder` fakery there) in the order admins set. The `EXAMPLES` mock constant in `components/data.tsx` is gone; the placeholder seed rows from migration 7 were dropped by migration 18.
+- 18 migrations applied. **Four** server-side tests still pass after the DB extensions (smoke + reviewer e2e + flag e2e + reviewer_stats); migrations 16–18 didn't disturb the surface they probe.
 - **UX cleanups landed (May 6, 2026):** Points Multiplier Bonus schedules (multiplier + days/times, admin-configured) are persisted via `SettingsProvider` and read by both HomeScreen (banner) and ReviewScreen (compact pennant) through the shared `BonusPennant` + `useActiveBonusPeriod` in `Shell.tsx`; both displays show the active window so reviewers know when it ends. The reviewer's `FlagModal` now exposes a "Quarantine" checkbox that flows through `submitReview` to `reviews.quarantine`; the senior queue surfaces the same flag both as a row pill and a rose-themed banner on the detail panel.
 
 **What does NOT work yet:**
 
-- **Examples are still on mocks (sub-step 7.6b).** `EXAMPLES` in `components/data.tsx` is consumed by GuideScreen + AdminExamples; the user explicitly deferred this piece to revisit with an updated plan. Everything else in step 7.6 has landed.
 - The admin-overview "Active reviewers" denominator currently equals total profiles count; once invitations + idle/inactive transitions land we'll want to filter by `profiles.status`.
 - No SmugMug API integration (the placeholder seed data simulates one location/week with 10 photos under "iD Tech Camps → Adelphi University → May 25–29, 2026")
 - Outstanding `npm audit` issues (Next.js 14.2.35 has known high-severity advisories; major-version upgrade pending)
@@ -61,14 +61,14 @@ components/
   App.tsx                 # root client component, role-gated screen routing; owns the live pendingCount fetch
   Shell.tsx               # Sidebar (live Review + Flag-review badges, role-aware nav), PageHeader, fireConfetti, useToast
   Icon.tsx                # inline SVG icon set
-  data.tsx                # mock constants. Tag exports are gone as of 7.6a — ReviewScreen / FlagReview / AdminTagLibrary now read from the live `tags` table via lib/tags.ts. Still exports EXAMPLES (used by GuideScreen + AdminExamples — 7.6b), PhotoPlaceholder + photoPaletteFor (used everywhere for the decorative gradient stand-ins), and the orphaned SESSION_PHOTOS / FLAGGED_PHOTOS / ADMIN_USERS / BADGES / RECENT_ACTIVITY arrays (no longer consumed by screens; HomeScreen still uses SESSION_PHOTOS for the decorative thumbnail strip, which is purely visual until SmugMug data lands in step 8).
+  data.tsx                # mock constants. Tag exports gone as of 7.6a; EXAMPLES gone as of 7.6b. Still exports PhotoPlaceholder + photoPaletteFor (used elsewhere for decorative gradient stand-ins) and the orphaned SESSION_PHOTOS / FLAGGED_PHOTOS / ADMIN_USERS / BADGES / RECENT_ACTIVITY arrays (no longer consumed by screens; HomeScreen still uses SESSION_PHOTOS for the decorative thumbnail strip, which is purely visual until SmugMug data lands in step 8).
   settings.tsx            # Two providers + helpers. SettingsProvider / useSettings backs the singleton AppSettings (branding, reviewer copy, appearance, supportEmail) — DB-backed via lib/app-settings.ts as of 7.6c. BonusPeriodsProvider / useBonusPeriods backs the multiplier-bonus list — DB-backed via lib/bonus-periods.ts as of 7.6d. Also exports activeBonusPeriod / formatBonusWindow / formatBonusMultiplier / fillTemplate.
   BrowserWindow.tsx       # ported from prototype, currently orphaned
   screens/
     HomeScreen.tsx        # uses live pendingCount from App.tsx
     ReviewScreen.tsx      # DB-backed approve/flag flow
-    LeaderboardProfileGuide.tsx  # ProfileScreen reads live `reviewer_stats` (career stats, decision breakdown, activity card); GuideScreen still uses mock EXAMPLES — step 7.6
-    Admin.tsx             # admin sub-screens. Overview now reads live `reviewer_stats` (roster + 24h activity stats); Points/Examples/Settings still use SettingsProvider + data.tsx mocks — step 7.6
+    LeaderboardProfileGuide.tsx  # ProfileScreen reads live `reviewer_stats` (career stats, decision breakdown, activity card); GuideScreen reads the live `examples` library (lib/examples.ts → fetchExamples) and renders real images from Supabase Storage.
+    Admin.tsx             # admin sub-screens. Overview reads live `reviewer_stats`; Points/TagLibrary/BonusEvents/Settings/Examples are all DB-backed. Examples uses `lib/examples.ts` + Supabase Storage and ships with @dnd-kit drag-and-drop reordering plus modal-based upload/edit/replace/delete.
     FlagReview.tsx        # DB-backed senior queue
 lib/
   current-user.tsx        # UserProvider, useCurrentUser, Role type, ROLE_LABEL. Reads role + id from profiles.
@@ -78,6 +78,7 @@ lib/
   app-settings.ts         # fetchAppSettings, updateAppSettings — single-row config (brand_*, reviewer copy, appearance, support_email). Backs SettingsProvider.
   points-config.ts        # fetchPointsConfig, updatePointsConfig, basePointsFor, DEFAULT_POINTS_CONFIG. Backs ReviewScreen (read for points_awarded calc) + AdminPoints (read/write).
   bonus-periods.ts        # fetchBonusPeriods, createBonusPeriod, updateBonusPeriod, deleteBonusPeriod, setBonusPeriodEnabled. Backs BonusPeriodsProvider, which Shell.tsx + AdminPoints both consume.
+  examples.ts             # fetchExamples, createExample, updateExampleMetadata, replaceExampleImage, deleteExample, reorderExamples. Owns the Supabase Storage round-trips (upload + cleanup-on-error, public URL resolution via the SDK) for the example-images bucket. Backs AdminExamples + GuideScreen.
   supabase/
     client.ts             # browser client (createBrowserClient)
     server.ts             # server client (createServerClient with cookies)
@@ -85,7 +86,7 @@ lib/
 middleware.ts             # root middleware, delegates to lib/supabase/middleware.ts
 styles/legacy.css         # ~650 lines, source of truth for visual styling
 supabase/
-  migrations/             # 17 SQL migrations applied to the work-account project (see SCHEMA_SPEC.md for the table)
+  migrations/             # 18 SQL migrations applied to the work-account project (see SCHEMA_SPEC.md for the table)
   tests/
     smoke_test.sql              # schema-level smoke; runs as service role
     e2e_review_flow.sql         # reviewer flow end-to-end; runs under role=authenticated with pinned JWT
@@ -119,7 +120,7 @@ Three roles, matching the Postgres `role` enum exactly:
 | **Production URL** | `https://id-tech-camp-photo-reviewer.vercel.app` | Public URL, but middleware redirects unauthenticated users to `/login` |
 | **GitHub repo** | `iD-Tech-Camps/iD-Tech-Camp-Photo-Reviewer` (work GitHub org) | Was originally on personal account; transferred to work org. The local `origin` remote was updated 2026-05-05 to the new canonical URL. |
 | **Vercel project** | Personal Vercel account, connected to the new GitHub repo location | Auto-deploys on push to `main` |
-| **Supabase project** | Work-account Supabase, project ID stored separately | Old personal-account Supabase project should be deleted/paused |
+| **Supabase project** | Work-account Supabase, project ID stored separately | Old personal-account Supabase project should be deleted/paused. As of 7.6b also hosts the `example-images` Storage bucket (public-read, admin-write at both bucket and `storage.objects` RLS layers). |
 | **Google Cloud project** | Personal Google account, project name "iD Photo Reviewer" | Internal Workspace app — only `@idtech.com` accounts can complete OAuth. Acceptable to leave on personal account; transferable later if needed. |
 
 **Environment variables in use:**
@@ -144,7 +145,7 @@ Both set in Vercel (all environments) and in `.env.local` for local dev.
 | 4 | Supabase + Google OAuth | ✅ Done |
 | 5 | Database schema design | ✅ Done |
 | 6 | **MVP scope refactor** — remove feature toggles, defer leaderboard/streaks/multiplier-bonus/accuracy, merge Admin Overview + Users | 🟡 In progress |
-| 7 | Replace `localStorage` with Supabase persistence | 🟡 In progress (4/6 sub-steps done) |
+| 7 | Replace `localStorage` with Supabase persistence | ✅ Done |
 | 8 | SmugMug API integration | Pending |
 | 9 | Next.js security upgrade (resolves audit warnings) | Pending |
 | 10 | Polish + team rollout | Pending |
@@ -158,14 +159,14 @@ Both set in Vercel (all environments) and in `.env.local` for local dev.
 | 7.3 | Wire `ReviewScreen` to insert real `reviews` + `review_tags` | ✅ Done | `431bcd2` |
 | 7.4 | Wire `FlagReview` senior actions + sidebar live count | ✅ Done | `a955aa2`, fix in `740780d` (migration 14) |
 | 7.5 | Move points / profile reads off mock data onto live `reviews` aggregates; same for the merged Admin Overview roster | ✅ Done | migration 15 (`reviewer_stats` view), `lib/profile.ts`, third e2e test |
-| 7.6 | Read `tags` / `examples` / `points_config` / `app_settings` (incl. multiplier-bonus schedule) from DB | 🟡 In progress (1 / 4 pieces done — see breakdown below) | — |
+| 7.6 | Read `tags` / `examples` / `points_config` / `app_settings` (incl. multiplier-bonus schedule) from DB | ✅ Done (4 / 4 pieces) | — |
 
 **Step 7.6 sub-pieces** (tackled one at a time per the working-style rule):
 
 | # | Piece | Status | Landed in |
 |---|---|---|---|
 | 7.6a | Tags — wire ReviewScreen / FlagReview / AdminTagLibrary to the live `tags` table via `lib/tags.ts`; drop NEGATIVE_TAGS / PHOTO_TAGS / negativeTagLabel | ✅ Done | 2026-05-06 |
-| 7.6b | Examples — wire GuideScreen + AdminExamples to the live `examples` table | ⏸️ Deferred | user requested an updated plan before tackling |
+| 7.6b | Examples — wire GuideScreen + AdminExamples to the live `examples` table backed by Supabase Storage. Migration 18 added `examples.storage_path`, the `example-images` bucket + RLS, and the `public.reorder_examples` RPC. New `lib/examples.ts` owns all reads/writes including upload-with-cleanup-on-error. AdminExamples got upload / edit-metadata / replace-image / delete modals plus `@dnd-kit` drag-reorder. GuideScreen renders real images. | ✅ Done | 2026-05-06 |
 | 7.6c | App settings — migration 16 added `home_greeting` / `home_subtitle` / `completion_title` / `completion_message` / `empty_queue_message` / `support_email` / `theme` / `accent` / `density` to `app_settings` and dropped the dead `show_leaderboard`. `lib/app-settings.ts` is the SettingsProvider's source of truth; AdminSettings debounces text input writes (500ms idle + flush on blur) to avoid hammering the DB. | ✅ Done | 2026-05-06 |
 | 7.6d | Points & bonus — `lib/points-config.ts` reads/writes the singleton row; ReviewScreen passes an explicit `pointsAwarded = base × multiplier` into `submitReview` so the DB snapshot reflects the bonus the reviewer saw. Migration 17 added the `bonus_periods` table; `lib/bonus-periods.ts` + `BonusPeriodsProvider` (in `components/settings.tsx`) replace the localStorage schedule. AdminPoints loads + saves both. | ✅ Done | 2026-05-06 |
 

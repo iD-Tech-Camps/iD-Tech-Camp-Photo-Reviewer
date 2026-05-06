@@ -1,6 +1,6 @@
 # iD Photo Reviewer — Database Schema Spec (Step 5 + step-6 fixes)
 
-> **Status: implemented.** This document was originally the brief for step 5 and is now the reference for what's actually in the database. The schema lives in `supabase/migrations/20260505000001_*.sql` through `supabase/migrations/20260505000014_*.sql`, applied to the work-account Supabase project (`idtech-photo-reviewer`). The few places where the implementation diverges from the original brief are called out inline with **`Implementation note`** blocks.
+> **Status: implemented.** This document was originally the brief for step 5 and is now the reference for what's actually in the database. The schema lives in `supabase/migrations/20260505000001_*.sql` through `supabase/migrations/20260506000018_*.sql`, applied to the work-account Supabase project (`idtech-photo-reviewer`). The few places where the implementation diverges from the original brief are called out inline with **`Implementation note`** blocks.
 >
 > **Two material changes since the original step-5 brief landed:**
 >
@@ -286,12 +286,26 @@ Mode-specific check constraints (`bonus_periods_recurring_complete`, `bonus_peri
 | `kind` | example_kind not null | good / bad |
 | `label` | text not null | |
 | `note` | text | |
-| `image_url` | text | optional reference image |
-| `display_order` | int not null | `default 0` |
+| `image_url` | text | resolved public URL of the storage object; populated by the app on insert/replace so consumers can read it without paying for an SDK call. Legacy escape hatch for hand-seeded rows that never had an uploaded file. |
+| `storage_path` | text | path within the `example-images` bucket (added in migration 18). Nullable for backwards compatibility, but every row created through the AdminExamples UI has one. |
+| `display_order` | int not null | `default 0` — admin-curated; written by `lib/examples.ts → reorderExamples` (single transactional RPC) |
 | `active` | bool not null | `default true` |
 | `created_at` | timestamptz | |
 
-Seed from the `EXAMPLES` constant in `components/data.tsx`.
+> **Implementation note (step 7.6b, May 2026).** The original migration-7 seed of 9 conceptual placeholder rows (labels only, no image files) was deleted by migration 18. The new model is "every example is a real uploaded image" — admins create them through the UI, which uploads to Supabase Storage and inserts a row pointing at the resulting object. `lib/examples.ts` is the single client-side reader/writer; both `AdminExamples` (admin UI) and `GuideScreen` (reviewer-facing) consume `fetchExamples()`. The reorder helper (`reorderExamples`) calls the `public.reorder_examples(example_kind, uuid[])` RPC so the new `display_order` for an entire kind is written in a single statement — the client doesn't have to fan out N parallel UPDATEs and risk a half-applied ordering on partial failure.
+
+### Storage
+
+The `example-images` bucket holds the actual image files for the example library. Created by migration 18.
+
+- **Public read.** Bucket is created with `public = true` so the Guide screen can render images via the plain public URL (`storage.from('example-images').getPublicUrl(path).data.publicUrl`) without signing each one. The app already gates the Guide screen behind sign-in via middleware, so unauthenticated users never see the URLs in the first place.
+- **Storage RLS** (separate from table RLS — both have to be set):
+  - SELECT: any authenticated user (mirrors the bucket-level public read; the policy is what authenticated *clients* hit before the public-read kicks in).
+  - INSERT / UPDATE / DELETE: admin only via `public.is_admin()`.
+- **Path convention.** Each upload lands at `<uuid>.<ext>` — opaque, collision-free, and replacing an image lands at a fresh path so the browser cache is busted for free (no `?v=...` query string needed). The old object is deleted after the row update succeeds.
+- **No second consumer yet.** The upload + cleanup-on-error pattern is currently only used by `lib/examples.ts`. If a second feature picks up Storage, lift the helpers (path generation, public URL resolution, upload-then-cleanup) into `lib/storage.ts`.
+
+This is the first feature in the codebase that uses Supabase Storage. There's no separate config — the bucket lives in the same Supabase project as the rest of the schema.
 
 ---
 
@@ -384,6 +398,7 @@ Each step landed as its own migration file under `supabase/migrations/` so each 
 | `20260506000015_reviewer_stats_view.sql` | Step 7.5: adds the `public.reviewer_stats` view — a left join of `profiles` with aggregated `reviews` (count by decision, sum of points, max created_at, count where created_at >= current_date), zero-coalesced. Uses `with (security_invoker = true)` so RLS is enforced via the underlying tables' policies. Backs `lib/profile.ts → fetchMyStats / fetchReviewerRoster`. |
 | `20260506000016_app_settings_extension.sql` | Step 7.6c: extends `app_settings` with the reviewer-copy strings, `support_email`, and the appearance triple (theme/accent/density) — backfills DEFAULT_SETTINGS values into the singleton row, then locks the new columns NOT NULL with check constraints. Drops the dead `show_leaderboard` column. Backs `lib/app-settings.ts` and the new `SettingsProvider` write path. |
 | `20260506000017_bonus_periods.sql` | Step 7.6d: adds the `bonus_periods` table + the `bonus_period_mode` enum + RLS (read-all / write-admin). Includes mode-specific check constraints so recurring rows have a populated weekday set + clock window and one-time rows have a valid timestamptz pair. Backs `lib/bonus-periods.ts` and the new `BonusPeriodsProvider`. |
+| `20260506000018_examples_storage.sql` | Step 7.6b: adds `examples.storage_path`, deletes the placeholder seeds from migration 7, creates the public `example-images` Storage bucket, adds storage.objects RLS policies (auth read; admin write), and adds the `public.reorder_examples(example_kind, uuid[])` RPC for atomic display-order updates. Backs `lib/examples.ts` and the rebuilt `AdminExamples` + `GuideScreen` UIs. |
 
 Four tests live under `supabase/tests/` (deliberately outside `migrations/` so they aren't applied by `db push`). All four are transactions wrapped in `begin; ... rollback;`:
 

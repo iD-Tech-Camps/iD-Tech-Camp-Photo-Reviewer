@@ -3,10 +3,10 @@
 import React from "react";
 import { Icon } from "@/components/Icon";
 import { PageHeader } from "@/components/Shell";
-import { EXAMPLES, PhotoPlaceholder } from "@/components/data";
 import { useCurrentUser, ROLE_LABEL } from "@/lib/current-user";
 import { createClient } from "@/lib/supabase/client";
 import { fetchMyStats, type ReviewerStats } from "@/lib/profile";
+import { fetchExamples, type Example, type ExampleKind } from "@/lib/examples";
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -230,12 +230,38 @@ function formatRelativeFromIso(iso: string): string {
 }
 
 export function GuideScreen() {
+  // One fetch covers both lists; partition client-side. fetchExamples
+  // returns active rows ordered by display_order, so the Guide reflects
+  // whatever ordering the admins set in AdminExamples (no extra sort here).
+  const [examples, setExamples] = React.useState<{ good: Example[]; bad: Example[] } | null>(null);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+
+  const load = React.useCallback(() => {
+    setLoadError(null);
+    const supabase = createClient();
+    fetchExamples(supabase)
+      .then((rows) => {
+        const grouped: { good: Example[]; bad: Example[] } = { good: [], bad: [] };
+        for (const r of rows) grouped[r.kind].push(r);
+        setExamples(grouped);
+      })
+      .catch((err) => {
+        console.error("[guide] fetchExamples failed:", err);
+        setLoadError(err?.message ?? "Failed to load examples");
+        setExamples({ good: [], bad: [] });
+      });
+  }, []);
+
+  React.useEffect(() => {
+    load();
+  }, [load]);
+
   return (
     <>
       <PageHeader
         eyebrow="Reference"
         title="The <em>photo guide.</em>"
-        sub="Admin-curated examples. Updated June 6 by Harper Rowe."
+        sub="Admin-curated examples — drag the cards in Admin → Example library to change the order."
       />
 
       <div className="page-body" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
@@ -261,68 +287,135 @@ export function GuideScreen() {
           </div>
         </div>
 
-        <div className="card">
-          <div className="card-header">
-            <div>
-              <span className="card-eyebrow" style={{ color: "var(--moss)" }}>Approve these</span>
-              <h3 className="card-title">Good photos</h3>
-            </div>
-            <span className="pill pill-moss">
-              <Icon name="check" size={10} /> {EXAMPLES.good.length} examples
-            </span>
+        {loadError && (
+          <div style={{
+            gridColumn: "span 2",
+            padding: 12,
+            border: "1px solid var(--rose)", borderRadius: 8,
+            background: "var(--rose-soft)", color: "var(--rose)",
+            fontSize: 13,
+            display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12,
+          }}>
+            <span>Couldn&apos;t load examples: {loadError}</span>
+            <button className="btn btn-ghost" onClick={load}>Retry</button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {EXAMPLES.good.map(ex => (
-              <div key={ex.id}>
-                <div style={{
-                  aspectRatio: "3/2", borderRadius: 6, overflow: "hidden",
-                  position: "relative", border: "2px solid var(--moss)", marginBottom: 8,
-                }}>
-                  <PhotoPlaceholder photo={{ id: ex.id, camp: ex.label, activity: "" }} compact />
-                </div>
-                <div style={{ fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 500 }}>
-                  {ex.label}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.4 }}>
-                  {ex.note}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        )}
 
-        <div className="card">
-          <div className="card-header">
-            <div>
-              <span className="card-eyebrow" style={{ color: "var(--sun)" }}>Flag these</span>
-              <h3 className="card-title">Problem photos</h3>
-            </div>
-            <span className="pill pill-sun">
-              <Icon name="flag" size={10} /> {EXAMPLES.bad.length} examples
-            </span>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            {EXAMPLES.bad.map((ex, i) => (
-              <div key={ex.id}>
-                <div style={{
-                  aspectRatio: "3/2", borderRadius: 6, overflow: "hidden",
-                  position: "relative", border: "2px solid var(--sun)", marginBottom: 8,
-                  filter: i === 0 ? "blur(2px)" : "none",
-                }}>
-                  <PhotoPlaceholder photo={{ id: ex.id, camp: ex.label, activity: "" }} compact />
-                </div>
-                <div style={{ fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 500 }}>
-                  {ex.label}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.4 }}>
-                  {ex.note}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
+        <ExamplesCard
+          kind="good"
+          accent="moss"
+          eyebrow="Approve these"
+          title="Good photos"
+          icon="check"
+          examples={examples?.good ?? null}
+        />
+        <ExamplesCard
+          kind="bad"
+          accent="sun"
+          eyebrow="Flag these"
+          title="Problem photos"
+          icon="flag"
+          examples={examples?.bad ?? null}
+        />
       </div>
     </>
+  );
+}
+
+function ExamplesCard({
+  kind: _kind,
+  accent,
+  eyebrow,
+  title,
+  icon,
+  examples,
+}: {
+  kind: ExampleKind;
+  accent: "moss" | "sun";
+  eyebrow: string;
+  title: string;
+  icon: string;
+  examples: Example[] | null;
+}) {
+  const accentVar = accent === "moss" ? "var(--moss)" : "var(--sun)";
+  const pillClass = accent === "moss" ? "pill pill-moss" : "pill pill-sun";
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <div>
+          <span className="card-eyebrow" style={{ color: accentVar }}>{eyebrow}</span>
+          <h3 className="card-title">{title}</h3>
+        </div>
+        {examples !== null && (
+          <span className={pillClass}>
+            <Icon name={icon} size={10} /> {examples.length} {examples.length === 1 ? "example" : "examples"}
+          </span>
+        )}
+      </div>
+      {examples === null ? (
+        <ExampleGridSkeleton />
+      ) : examples.length === 0 ? (
+        <div style={{
+          padding: "24px 12px", textAlign: "center",
+          color: "var(--ink-3)", fontSize: 13,
+        }}>
+          No examples in this list yet. Admins can add some in Admin &rarr; Example library.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          {examples.map((ex) => (
+            <div key={ex.id}>
+              <div style={{
+                aspectRatio: "3/2", borderRadius: 6, overflow: "hidden",
+                position: "relative", border: `2px solid ${accentVar}`, marginBottom: 8,
+                background: "var(--paper-3)",
+              }}>
+                {ex.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={ex.imageUrl}
+                    alt={ex.label}
+                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                  />
+                ) : (
+                  <div style={{
+                    width: "100%", height: "100%", display: "grid", placeItems: "center",
+                    color: "var(--ink-3)", fontSize: 11, fontFamily: "var(--font-mono)",
+                  }}>
+                    no image
+                  </div>
+                )}
+              </div>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 500 }}>
+                {ex.label}
+              </div>
+              {ex.note && (
+                <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.4 }}>
+                  {ex.note}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExampleGridSkeleton() {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} style={{ opacity: 0.5 }}>
+          <div style={{
+            aspectRatio: "3/2", borderRadius: 6, marginBottom: 8,
+            background: "var(--paper-3)",
+          }} />
+          <div style={{ height: 12, width: "60%", background: "var(--paper-3)", borderRadius: 4, marginBottom: 4 }} />
+          <div style={{ height: 10, width: "85%", background: "var(--paper-3)", borderRadius: 4 }} />
+        </div>
+      ))}
+    </div>
   );
 }

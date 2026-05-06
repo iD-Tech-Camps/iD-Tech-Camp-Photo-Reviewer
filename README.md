@@ -67,6 +67,10 @@ The app has three roles, matching the Postgres `role` enum exactly:
 
 Promotion happens by hand-editing `profiles.role` in Supabase until the Admin Users screen is wired up.
 
+### Example library (Admin)
+
+`Admin → Example library` is upload-driven: every example is a real image admins upload directly. Files land in the `example-images` Supabase Storage bucket; metadata sits in `public.examples`. Drag a card to reorder within the active Good/Bad tab — the new order is persisted via the `public.reorder_examples` RPC in a single transaction, so a partial network failure can't half-apply the ordering. Reviewers see the same images in `Guide & examples` in the order admins curated. The 10 MB per-file cap is enforced client-side; storage RLS additionally blocks non-admin uploads at the DB layer.
+
 ### Flag review (Senior Reviewer + Admin)
 
 Lives in the sidebar under **Senior → Flag review**. For each flagged photo a reviewer sees:
@@ -119,11 +123,12 @@ lib/
   app-settings.ts     fetchAppSettings + updateAppSettings — backs SettingsProvider
   points-config.ts    fetchPointsConfig + updatePointsConfig + basePointsFor — backs ReviewScreen + AdminPoints
   bonus-periods.ts    fetch / create / update / delete / setEnabled — backs BonusPeriodsProvider
+  examples.ts         fetch / create / updateMetadata / replaceImage / delete / reorder — backs AdminExamples + GuideScreen, owns Supabase Storage round-trips for the example-images bucket
   supabase/           browser, server, and middleware Supabase clients
 middleware.ts         Root middleware → lib/supabase/middleware.ts (session refresh + auth gating)
 styles/legacy.css     Source of truth for visual styling (Tailwind installed but unused)
 supabase/
-  migrations/         17 SQL migrations, applied to the work-account project
+  migrations/         18 SQL migrations, applied to the work-account project
   tests/              smoke + two e2e tests (run under role=authenticated)
 spec/
   PROJECT_CONTEXT.md  Working-session handoff doc — read this first

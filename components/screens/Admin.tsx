@@ -2,8 +2,7 @@
 
 import React from "react";
 import { Icon } from "@/components/Icon";
-import { PageHeader } from "@/components/Shell";
-import { EXAMPLES, PhotoPlaceholder } from "@/components/data";
+import { PageHeader, type ToastApi } from "@/components/Shell";
 import { useSettings, AppSettings, BonusPeriod, BonusPeriodMode } from "@/components/settings";
 import { useCurrentUser, ROLE_LABEL } from "@/lib/current-user";
 import { createClient } from "@/lib/supabase/client";
@@ -22,6 +21,33 @@ import {
   type PointsConfig,
 } from "@/lib/points-config";
 import { useBonusPeriods } from "@/components/settings";
+import {
+  createExample,
+  deleteExample,
+  fetchExamples,
+  reorderExamples,
+  replaceExampleImage,
+  updateExampleMetadata,
+  type Example,
+  type ExampleKind,
+} from "@/lib/examples";
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 export function AdminAssignment() {
   const [batchSize, setBatchSize] = React.useState(10);
@@ -1290,26 +1316,211 @@ function TagLibrary() {
   );
 }
 
-export function AdminExamples() {
-  const [tab, setTab] = React.useState<"good" | "bad">("good");
-  const list = EXAMPLES[tab];
+// 10MB client-side cap. Storage RLS enforces admin-only writes, but we
+// guard at the file-picker layer with a friendly message so admins don't
+// have to wait for the round-trip to learn an upload was rejected.
+const MAX_EXAMPLE_FILE_BYTES = 10 * 1024 * 1024;
+
+type ExamplesByKind = Record<ExampleKind, Example[]>;
+
+type ExampleModalState =
+  | { kind: "closed" }
+  | { kind: "upload"; presetKind: ExampleKind }
+  | { kind: "edit"; example: Example }
+  | { kind: "replace"; example: Example }
+  | { kind: "delete"; example: Example };
+
+export function AdminExamples({ toast }: { toast: ToastApi }) {
+  const supabase = React.useMemo(() => createClient(), []);
+  const [tab, setTab] = React.useState<ExampleKind>("good");
+  const [byKind, setByKind] = React.useState<ExamplesByKind | null>(null);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [modal, setModal] = React.useState<ExampleModalState>({ kind: "closed" });
+  const [activeMenuId, setActiveMenuId] = React.useState<string | null>(null);
+
+  const refetch = React.useCallback(async () => {
+    setLoadError(null);
+    try {
+      const rows = await fetchExamples(supabase);
+      const grouped: ExamplesByKind = { good: [], bad: [] };
+      for (const r of rows) grouped[r.kind].push(r);
+      setByKind(grouped);
+    } catch (err: any) {
+      console.error("[admin-examples] fetch failed:", err);
+      setLoadError(err?.message ?? "Failed to load examples");
+      setByKind({ good: [], bad: [] });
+    }
+  }, [supabase]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchExamples(supabase)
+      .then((rows) => {
+        if (cancelled) return;
+        const grouped: ExamplesByKind = { good: [], bad: [] };
+        for (const r of rows) grouped[r.kind].push(r);
+        setByKind(grouped);
+      })
+      .catch((err) => {
+        console.error("[admin-examples] fetch failed:", err);
+        if (!cancelled) {
+          setLoadError(err?.message ?? "Failed to load examples");
+          setByKind({ good: [], bad: [] });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [supabase]);
+
+  const list = byKind?.[tab] ?? [];
+  const counts = {
+    good: byKind?.good.length ?? 0,
+    bad:  byKind?.bad.length  ?? 0,
+  };
+
+  // ── mutations ──────────────────────────────────────────────────────────
+
+  const handleUpload = async (kind: ExampleKind, label: string, note: string, file: File) => {
+    try {
+      const created = await createExample(supabase, { kind, label, note, file });
+      setByKind((prev) => {
+        const base = prev ?? { good: [], bad: [] };
+        return { ...base, [kind]: [...base[kind], created] };
+      });
+      toast.show?.(`Uploaded "${created.label}"`, "check");
+      setModal({ kind: "closed" });
+    } catch (err: any) {
+      console.error("[admin-examples] create failed:", err);
+      toast.show?.(err?.message ? `Upload failed: ${err.message}` : "Upload failed.");
+    }
+  };
+
+  const handleEditMetadata = async (
+    example: Example,
+    patch: { label: string; note: string; kind: ExampleKind },
+  ) => {
+    try {
+      const updated = await updateExampleMetadata(supabase, example.id, patch);
+      setByKind((prev) => {
+        if (!prev) return prev;
+        // If kind changed, move between buckets. Otherwise replace in-place.
+        if (updated.kind === example.kind) {
+          return {
+            ...prev,
+            [example.kind]: prev[example.kind].map((e) => (e.id === updated.id ? updated : e)),
+          };
+        }
+        return {
+          ...prev,
+          [example.kind]: prev[example.kind].filter((e) => e.id !== example.id),
+          [updated.kind]: [...prev[updated.kind], updated],
+        };
+      });
+      toast.show?.("Saved.", "check");
+      setModal({ kind: "closed" });
+    } catch (err: any) {
+      console.error("[admin-examples] update failed:", err);
+      toast.show?.(err?.message ? `Save failed: ${err.message}` : "Save failed.");
+    }
+  };
+
+  const handleReplace = async (example: Example, file: File) => {
+    try {
+      const updated = await replaceExampleImage(supabase, example.id, file);
+      setByKind((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          [updated.kind]: prev[updated.kind].map((e) => (e.id === updated.id ? updated : e)),
+        };
+      });
+      toast.show?.("Image replaced.", "check");
+      setModal({ kind: "closed" });
+    } catch (err: any) {
+      console.error("[admin-examples] replace failed:", err);
+      toast.show?.(err?.message ? `Replace failed: ${err.message}` : "Replace failed.");
+    }
+  };
+
+  const handleDelete = async (example: Example) => {
+    try {
+      await deleteExample(supabase, example.id);
+      setByKind((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          [example.kind]: prev[example.kind].filter((e) => e.id !== example.id),
+        };
+      });
+      toast.show?.(`Deleted "${example.label}"`, "x");
+      setModal({ kind: "closed" });
+    } catch (err: any) {
+      console.error("[admin-examples] delete failed:", err);
+      toast.show?.(err?.message ? `Delete failed: ${err.message}` : "Delete failed.");
+    }
+  };
+
+  const handleReorder = async (kind: ExampleKind, nextOrder: Example[]) => {
+    // Optimistic update. Snapshot the previous list so we can roll back on
+    // failure — the persistence layer is a single RPC, so a half-applied
+    // ordering shouldn't be possible, but the user could still see a stale
+    // local state if the network drops.
+    const previous = byKind?.[kind] ?? [];
+    setByKind((prev) => {
+      const base = prev ?? { good: [], bad: [] };
+      return { ...base, [kind]: nextOrder };
+    });
+    try {
+      await reorderExamples(supabase, kind, nextOrder.map((e) => e.id));
+    } catch (err: any) {
+      console.error("[admin-examples] reorder failed:", err);
+      setByKind((prev) => {
+        if (!prev) return prev;
+        return { ...prev, [kind]: previous };
+      });
+      toast.show?.(err?.message ? `Reorder failed: ${err.message}` : "Reorder failed.");
+    }
+  };
+
+  // ── render ────────────────────────────────────────────────────────────
 
   return (
     <>
       <PageHeader
         eyebrow="Admin · Examples"
         title="Example <em>library.</em>"
-        sub="What reviewers see in the guide and session drawer."
+        sub={byKind === null
+          ? "Loading examples…"
+          : "What reviewers see in the guide. Drag to reorder within a tab."}
       >
-        <button className="btn btn-primary">
+        <button
+          className="btn btn-primary"
+          onClick={() => setModal({ kind: "upload", presetKind: tab })}
+          disabled={byKind === null}
+        >
           <Icon name="plus" size={14} /> Add example
         </button>
       </PageHeader>
 
       <div className="page-body">
+        {loadError && (
+          <div style={{
+            padding: 12, marginBottom: 14,
+            border: "1px solid var(--rose)", borderRadius: 8,
+            background: "var(--rose-soft)", color: "var(--rose)",
+            fontSize: 13,
+            display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12,
+          }}>
+            <span>Couldn&apos;t load examples: {loadError}</span>
+            <button className="btn btn-ghost" onClick={refetch}>Retry</button>
+          </div>
+        )}
+
         <div style={{ display: "flex", gap: 4, padding: 3, background: "var(--paper-3)",
           borderRadius: 8, width: "fit-content", marginBottom: 20 }}>
-          {([["good", `Good · ${EXAMPLES.good.length}`], ["bad", `Bad · ${EXAMPLES.bad.length}`]] as ["good" | "bad", string][]).map(([id, label]) => (
+          {([
+            ["good", `Good · ${counts.good}`],
+            ["bad",  `Bad · ${counts.bad}`],
+          ] as [ExampleKind, string][]).map(([id, label]) => (
             <button key={id}
               onClick={() => setTab(id)}
               className="btn"
@@ -1321,36 +1532,115 @@ export function AdminExamples() {
           ))}
         </div>
 
+        {byKind === null ? (
+          <ExamplesGridSkeleton />
+        ) : (
+          <ExamplesGrid
+            kind={tab}
+            list={list}
+            activeMenuId={activeMenuId}
+            onMenuToggle={(id) => setActiveMenuId((prev) => (prev === id ? null : id))}
+            onMenuClose={() => setActiveMenuId(null)}
+            onEdit={(ex) => { setActiveMenuId(null); setModal({ kind: "edit", example: ex }); }}
+            onReplace={(ex) => { setActiveMenuId(null); setModal({ kind: "replace", example: ex }); }}
+            onDelete={(ex) => { setActiveMenuId(null); setModal({ kind: "delete", example: ex }); }}
+            onUpload={() => setModal({ kind: "upload", presetKind: tab })}
+            onReorder={(next) => handleReorder(tab, next)}
+          />
+        )}
+      </div>
+
+      {modal.kind === "upload" && (
+        <ExampleUploadModal
+          presetKind={modal.presetKind}
+          onCancel={() => setModal({ kind: "closed" })}
+          onConfirm={handleUpload}
+        />
+      )}
+      {modal.kind === "edit" && (
+        <ExampleEditModal
+          example={modal.example}
+          onCancel={() => setModal({ kind: "closed" })}
+          onConfirm={(patch) => handleEditMetadata(modal.example, patch)}
+        />
+      )}
+      {modal.kind === "replace" && (
+        <ExampleReplaceModal
+          example={modal.example}
+          onCancel={() => setModal({ kind: "closed" })}
+          onConfirm={(file) => handleReplace(modal.example, file)}
+        />
+      )}
+      {modal.kind === "delete" && (
+        <ExampleDeleteModal
+          example={modal.example}
+          onCancel={() => setModal({ kind: "closed" })}
+          onConfirm={() => handleDelete(modal.example)}
+        />
+      )}
+    </>
+  );
+}
+
+function ExamplesGrid({
+  kind,
+  list,
+  activeMenuId,
+  onMenuToggle,
+  onMenuClose,
+  onEdit,
+  onReplace,
+  onDelete,
+  onUpload,
+  onReorder,
+}: {
+  kind: ExampleKind;
+  list: Example[];
+  activeMenuId: string | null;
+  onMenuToggle: (id: string) => void;
+  onMenuClose: () => void;
+  onEdit: (ex: Example) => void;
+  onReplace: (ex: Example) => void;
+  onDelete: (ex: Example) => void;
+  onUpload: () => void;
+  onReorder: (next: Example[]) => void;
+}) {
+  // Pointer sensor with a small activation distance so a click on the
+  // dots-menu button doesn't accidentally start a drag. Keyboard sensor
+  // (space to pick up, arrows to move, space to drop) is provided by
+  // dnd-kit's default; we wire it explicitly so the activation feels right.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = list.findIndex((e) => e.id === active.id);
+    const newIndex = list.findIndex((e) => e.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    onReorder(arrayMove(list, oldIndex, newIndex));
+  };
+
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext items={list.map((e) => e.id)} strategy={rectSortingStrategy}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
-          {list.map((ex, i) => (
-            <div key={ex.id} className="card" style={{ padding: 12 }}>
-              <div style={{
-                aspectRatio: "3/2", borderRadius: 6, overflow: "hidden",
-                position: "relative", marginBottom: 10,
-                border: `2px solid var(--${tab === "good" ? "moss" : "rose"})`,
-                filter: tab === "bad" && i === 0 ? "blur(2px)" : "none",
-              }}>
-                <PhotoPlaceholder photo={{ id: ex.id, camp: ex.label, activity: "" }} compact />
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 500 }}>
-                    {ex.label}
-                  </div>
-                  <div style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
-                    {ex.id}
-                  </div>
-                </div>
-                <button className="btn btn-ghost" style={{ padding: "4px 6px" }}>
-                  <Icon name="dots" size={14} />
-                </button>
-              </div>
-              <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 8, lineHeight: 1.4 }}>
-                {ex.note}
-              </div>
-            </div>
+          {list.map((ex) => (
+            <SortableExampleCard
+              key={ex.id}
+              example={ex}
+              kind={kind}
+              menuOpen={activeMenuId === ex.id}
+              onMenuToggle={() => onMenuToggle(ex.id)}
+              onMenuClose={onMenuClose}
+              onEdit={() => onEdit(ex)}
+              onReplace={() => onReplace(ex)}
+              onDelete={() => onDelete(ex)}
+            />
           ))}
-          <button className="card" style={{
+          <button onClick={onUpload} className="card" style={{
             border: "2px dashed var(--rule-2)",
             background: "transparent",
             display: "grid", placeItems: "center",
@@ -1359,12 +1649,690 @@ export function AdminExamples() {
           }}>
             <div style={{ textAlign: "center" }}>
               <Icon name="plus" size={24} />
-              <div style={{ marginTop: 6, fontSize: 13 }}>Upload {tab} example</div>
+              <div style={{ marginTop: 6, fontSize: 13 }}>Upload {kind} example</div>
             </div>
           </button>
         </div>
+      </SortableContext>
+    </DndContext>
+  );
+}
+
+function SortableExampleCard({
+  example,
+  kind,
+  menuOpen,
+  onMenuToggle,
+  onMenuClose,
+  onEdit,
+  onReplace,
+  onDelete,
+}: {
+  example: Example;
+  kind: ExampleKind;
+  menuOpen: boolean;
+  onMenuToggle: () => void;
+  onMenuClose: () => void;
+  onEdit: () => void;
+  onReplace: () => void;
+  onDelete: () => void;
+}) {
+  const {
+    attributes, listeners, setNodeRef, transform, transition, isDragging,
+  } = useSortable({ id: example.id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.55 : 1,
+    zIndex: isDragging ? 5 : "auto",
+    cursor: isDragging ? "grabbing" : "grab",
+  };
+
+  // Stop the drag listeners from intercepting clicks on interactive
+  // children (the dots menu, menu items). We attach listeners only to
+  // the card frame, not the menu button.
+  return (
+    <div
+      ref={setNodeRef}
+      className="card"
+      style={{ padding: 12, position: "relative", ...style }}
+      {...attributes}
+      {...listeners}
+    >
+      <div style={{
+        aspectRatio: "3/2", borderRadius: 6, overflow: "hidden",
+        position: "relative", marginBottom: 10,
+        border: `2px solid var(--${kind === "good" ? "moss" : "rose"})`,
+        background: "var(--paper-3)",
+      }}>
+        {example.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={example.imageUrl}
+            alt={example.label}
+            style={{
+              width: "100%", height: "100%", objectFit: "cover",
+              display: "block",
+            }}
+            draggable={false}
+          />
+        ) : (
+          <div style={{
+            width: "100%", height: "100%", display: "grid", placeItems: "center",
+            color: "var(--ink-3)", fontSize: 11, fontFamily: "var(--font-mono)",
+          }}>
+            no image
+          </div>
+        )}
       </div>
-    </>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 500,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {example.label}
+          </div>
+          <div style={{
+            fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginTop: 2,
+          }}>
+            #{example.displayOrder}
+          </div>
+        </div>
+        <div style={{ position: "relative" }}>
+          <button
+            className="btn btn-ghost"
+            style={{ padding: "4px 6px" }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); onMenuToggle(); }}
+            aria-label="Card actions"
+          >
+            <Icon name="dots" size={14} />
+          </button>
+          {menuOpen && (
+            <CardMenu
+              onClose={onMenuClose}
+              onEdit={onEdit}
+              onReplace={onReplace}
+              onDelete={onDelete}
+            />
+          )}
+        </div>
+      </div>
+      {example.note && (
+        <div style={{ fontSize: 12, color: "var(--ink-2)", marginTop: 8, lineHeight: 1.4 }}>
+          {example.note}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CardMenu({
+  onClose,
+  onEdit,
+  onReplace,
+  onDelete,
+}: {
+  onClose: () => void;
+  onEdit: () => void;
+  onReplace: () => void;
+  onDelete: () => void;
+}) {
+  // Close on outside click. The wrapping <div> stops drag listeners but
+  // we still want to dismiss the menu when clicking elsewhere on the page.
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (!ref.current) return;
+      if (!ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+
+  const items: { label: string; icon: string; tone?: "rose"; onClick: () => void }[] = [
+    { label: "Edit metadata", icon: "tag",      onClick: onEdit },
+    { label: "Replace image", icon: "image",    onClick: onReplace },
+    { label: "Delete",        icon: "x",        tone: "rose", onClick: onDelete },
+  ];
+
+  return (
+    <div
+      ref={ref}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        position: "absolute", top: "calc(100% + 4px)", right: 0,
+        minWidth: 160, zIndex: 20,
+        background: "var(--paper)",
+        border: "1px solid var(--rule)",
+        borderRadius: 8,
+        boxShadow: "var(--shadow-md, 0 6px 20px rgba(0,0,0,0.12))",
+        padding: 4,
+        display: "flex", flexDirection: "column",
+      }}
+    >
+      {items.map((it) => (
+        <button
+          key={it.label}
+          onClick={it.onClick}
+          style={{
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "8px 10px", borderRadius: 6,
+            background: "transparent",
+            color: it.tone === "rose" ? "var(--rose)" : "var(--ink)",
+            fontSize: 13, textAlign: "left", cursor: "pointer",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--paper-2)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+        >
+          <Icon name={it.icon} size={13} />
+          {it.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ExamplesGridSkeleton() {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="card" style={{ padding: 12, opacity: 0.5 }}>
+          <div style={{
+            aspectRatio: "3/2", borderRadius: 6, marginBottom: 10,
+            background: "var(--paper-3)",
+          }} />
+          <div style={{ height: 14, width: "60%", background: "var(--paper-3)", borderRadius: 4, marginBottom: 6 }} />
+          <div style={{ height: 10, width: "40%", background: "var(--paper-3)", borderRadius: 4 }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── modals ─────────────────────────────────────────────────────────────────
+//
+// Local Modal/Backdrop component. The one in ReviewScreen.tsx is module-
+// private; reproducing the chrome here keeps the admin screen's state +
+// styling self-contained.
+
+function ExampleModalShell({
+  title,
+  eyebrow,
+  tone,
+  width = 520,
+  onClose,
+  children,
+}: {
+  title: string;
+  eyebrow: string;
+  tone: "moss" | "rose" | "sun" | "lake";
+  width?: number;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const toneVar =
+    tone === "moss" ? "var(--moss)" :
+    tone === "rose" ? "var(--rose)" :
+    tone === "sun"  ? "var(--sun)"  : "var(--lake)";
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(20, 25, 30, 0.55)",
+        backdropFilter: "blur(4px)",
+        display: "grid", placeItems: "center",
+        padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%", maxWidth: width,
+          background: "var(--paper)",
+          borderRadius: "var(--radius-lg)",
+          boxShadow: "var(--shadow-lg)",
+          padding: 24,
+        }}
+      >
+        <div style={{ marginBottom: 18 }}>
+          <div style={{
+            fontFamily: "var(--font-mono)", fontSize: 11,
+            letterSpacing: "0.12em", textTransform: "uppercase",
+            color: toneVar, marginBottom: 4,
+          }}>{eyebrow}</div>
+          <h2 style={{
+            fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 500,
+            letterSpacing: "-0.02em", margin: 0,
+          }}>{title}</h2>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// Bytes → human-readable. Nothing fancy; just enough to make the size
+// limit message read naturally.
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ExampleFilePicker({
+  file,
+  previewUrl,
+  onChange,
+  fileError,
+  helperText,
+}: {
+  file: File | null;
+  previewUrl: string | null;
+  onChange: (file: File | null, error: string | null) => void;
+  fileError: string | null;
+  helperText?: string;
+}) {
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const handlePick = (picked: File | null) => {
+    if (!picked) {
+      onChange(null, null);
+      return;
+    }
+    if (!picked.type.startsWith("image/")) {
+      onChange(null, "Pick an image file (PNG, JPG, GIF, WebP).");
+      return;
+    }
+    if (picked.size > MAX_EXAMPLE_FILE_BYTES) {
+      onChange(null, `That file is ${formatBytes(picked.size)} — the max is 10 MB.`);
+      return;
+    }
+    onChange(picked, null);
+  };
+
+  return (
+    <div>
+      <label className="label" style={{ marginBottom: 6 }}>Image</label>
+      <div style={{
+        display: "flex", gap: 12, alignItems: "stretch",
+        padding: 12,
+        border: `1px ${fileError ? "solid var(--rose)" : "dashed var(--rule-2)"}`,
+        borderRadius: 8,
+        background: "var(--paper-2)",
+      }}>
+        <div style={{
+          width: 110, aspectRatio: "3/2",
+          borderRadius: 6, overflow: "hidden",
+          background: "var(--paper-3)",
+          display: "grid", placeItems: "center",
+          color: "var(--ink-3)", fontSize: 11, fontFamily: "var(--font-mono)",
+          flexShrink: 0,
+        }}>
+          {previewUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={previewUrl} alt="Preview"
+              style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          ) : "no image"}
+        </div>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+              {file ? file.name : "Choose a file to upload"}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
+              {file ? formatBytes(file.size) : (helperText ?? "PNG · JPG · GIF · WebP — 10 MB max")}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              style={{ fontSize: 12 }}
+            >
+              {file ? "Choose different file" : "Choose file"}
+            </button>
+            {file && (
+              <button
+                className="btn btn-ghost"
+                type="button"
+                style={{ fontSize: 12, color: "var(--ink-3)" }}
+                onClick={() => handlePick(null)}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={(e) => handlePick(e.target.files?.[0] ?? null)}
+        />
+      </div>
+      {fileError && (
+        <div style={{ fontSize: 12, color: "var(--rose)", marginTop: 6 }}>{fileError}</div>
+      )}
+    </div>
+  );
+}
+
+function ExampleUploadModal({
+  presetKind,
+  onCancel,
+  onConfirm,
+}: {
+  presetKind: ExampleKind;
+  onCancel: () => void;
+  onConfirm: (kind: ExampleKind, label: string, note: string, file: File) => Promise<void>;
+}) {
+  const [kind, setKind] = React.useState<ExampleKind>(presetKind);
+  const [label, setLabel] = React.useState("");
+  const [note, setNote] = React.useState("");
+  const [file, setFile] = React.useState<File | null>(null);
+  const [fileError, setFileError] = React.useState<string | null>(null);
+  const [submitting, setSubmitting] = React.useState(false);
+
+  // Generate (and revoke on change) an object URL so the picker shows a
+  // preview without uploading anything yet.
+  const previewUrl = React.useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
+  React.useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+
+  const canSubmit = !!file && label.trim().length > 0 && !submitting;
+
+  const submit = async () => {
+    if (!canSubmit || !file) return;
+    setSubmitting(true);
+    try {
+      await onConfirm(kind, label.trim(), note.trim(), file);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ExampleModalShell
+      eyebrow={`New ${kind} example`}
+      title="Upload an example"
+      tone={kind === "good" ? "moss" : "rose"}
+      onClose={onCancel}
+      width={560}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <FieldRow label="Type">
+          <KindToggle value={kind} onChange={setKind} />
+        </FieldRow>
+        <ExampleFilePicker
+          file={file}
+          previewUrl={previewUrl}
+          fileError={fileError}
+          onChange={(f, err) => { setFile(f); setFileError(err); }}
+        />
+        <FieldRow label="Label" hint="Short title shown under the image.">
+          <input className="input"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            maxLength={48}
+            placeholder="e.g. Hero shot" />
+        </FieldRow>
+        <FieldRow label="Note" hint="Optional — explains the why for reviewers.">
+          <textarea className="textarea"
+            rows={3}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            maxLength={240} />
+        </FieldRow>
+      </div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
+        <button className="btn btn-ghost" onClick={onCancel} disabled={submitting}>Cancel</button>
+        <button
+          className="btn btn-primary"
+          disabled={!canSubmit}
+          style={{ opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "not-allowed" }}
+          onClick={submit}
+        >
+          <Icon name="check" size={12} /> {submitting ? "Uploading…" : "Upload"}
+        </button>
+      </div>
+    </ExampleModalShell>
+  );
+}
+
+function ExampleEditModal({
+  example,
+  onCancel,
+  onConfirm,
+}: {
+  example: Example;
+  onCancel: () => void;
+  onConfirm: (patch: { label: string; note: string; kind: ExampleKind }) => Promise<void>;
+}) {
+  const [label, setLabel] = React.useState(example.label);
+  const [note, setNote] = React.useState(example.note);
+  const [kind, setKind] = React.useState<ExampleKind>(example.kind);
+  const [submitting, setSubmitting] = React.useState(false);
+
+  const dirty =
+    label.trim() !== example.label ||
+    note.trim()  !== example.note  ||
+    kind         !== example.kind;
+  const canSubmit = dirty && label.trim().length > 0 && !submitting;
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    try {
+      await onConfirm({ label: label.trim(), note: note.trim(), kind });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ExampleModalShell
+      eyebrow="Edit example"
+      title={example.label}
+      tone={kind === "good" ? "moss" : "rose"}
+      onClose={onCancel}
+      width={520}
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <FieldRow label="Type">
+          <KindToggle value={kind} onChange={setKind} />
+        </FieldRow>
+        <FieldRow label="Label">
+          <input className="input"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            maxLength={48} />
+        </FieldRow>
+        <FieldRow label="Note">
+          <textarea className="textarea"
+            rows={3}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            maxLength={240} />
+        </FieldRow>
+        <div style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
+          To change the image, close this and use &ldquo;Replace image&rdquo; from the card menu.
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
+        <button className="btn btn-ghost" onClick={onCancel} disabled={submitting}>Cancel</button>
+        <button
+          className="btn btn-primary"
+          disabled={!canSubmit}
+          style={{ opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "not-allowed" }}
+          onClick={submit}
+        >
+          <Icon name="check" size={12} /> {submitting ? "Saving…" : "Save changes"}
+        </button>
+      </div>
+    </ExampleModalShell>
+  );
+}
+
+function ExampleReplaceModal({
+  example,
+  onCancel,
+  onConfirm,
+}: {
+  example: Example;
+  onCancel: () => void;
+  onConfirm: (file: File) => Promise<void>;
+}) {
+  const [file, setFile] = React.useState<File | null>(null);
+  const [fileError, setFileError] = React.useState<string | null>(null);
+  const [submitting, setSubmitting] = React.useState(false);
+
+  const previewUrl = React.useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
+  React.useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+
+  const canSubmit = !!file && !submitting;
+  const submit = async () => {
+    if (!canSubmit || !file) return;
+    setSubmitting(true);
+    try {
+      await onConfirm(file);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ExampleModalShell
+      eyebrow="Replace image"
+      title={example.label}
+      tone="lake"
+      onClose={onCancel}
+      width={560}
+    >
+      <div style={{ display: "flex", gap: 14, alignItems: "stretch", marginBottom: 14 }}>
+        <div style={{
+          width: 140, aspectRatio: "3/2", borderRadius: 6, overflow: "hidden",
+          border: "1px solid var(--rule)", background: "var(--paper-3)",
+          flexShrink: 0,
+        }}>
+          {example.imageUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={example.imageUrl} alt="Current"
+              style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          )}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 4 }}>
+          <div className="card-eyebrow">Current image</div>
+          <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+            Pick a new image to replace it. The old file is removed from storage after the new one uploads.
+          </div>
+        </div>
+      </div>
+      <ExampleFilePicker
+        file={file}
+        previewUrl={previewUrl}
+        fileError={fileError}
+        onChange={(f, err) => { setFile(f); setFileError(err); }}
+      />
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
+        <button className="btn btn-ghost" onClick={onCancel} disabled={submitting}>Cancel</button>
+        <button
+          className="btn btn-primary"
+          disabled={!canSubmit}
+          style={{ opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "not-allowed" }}
+          onClick={submit}
+        >
+          <Icon name="check" size={12} /> {submitting ? "Replacing…" : "Replace image"}
+        </button>
+      </div>
+    </ExampleModalShell>
+  );
+}
+
+function ExampleDeleteModal({
+  example,
+  onCancel,
+  onConfirm,
+}: {
+  example: Example;
+  onCancel: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  const [submitting, setSubmitting] = React.useState(false);
+
+  return (
+    <ExampleModalShell
+      eyebrow="Delete example"
+      title={`Delete "${example.label}"?`}
+      tone="rose"
+      onClose={onCancel}
+      width={460}
+    >
+      <p style={{ fontSize: 14, color: "var(--ink-2)", lineHeight: 1.5, marginTop: 0, marginBottom: 18 }}>
+        This removes the row from the library and deletes the image from storage. Reviewers stop seeing it on their next page load. There&apos;s no undo.
+      </p>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button className="btn btn-ghost" onClick={onCancel} disabled={submitting}>Cancel</button>
+        <button
+          className="btn btn-primary"
+          style={{ background: "var(--rose)" }}
+          disabled={submitting}
+          onClick={async () => {
+            setSubmitting(true);
+            try { await onConfirm(); } finally { setSubmitting(false); }
+          }}
+        >
+          <Icon name="x" size={12} /> {submitting ? "Deleting…" : "Delete"}
+        </button>
+      </div>
+    </ExampleModalShell>
+  );
+}
+
+function KindToggle({
+  value,
+  onChange,
+}: {
+  value: ExampleKind;
+  onChange: (kind: ExampleKind) => void;
+}) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+      {([
+        ["good", "Good · approve example", "var(--moss)", "var(--moss-soft)"],
+        ["bad",  "Bad · flag example",     "var(--rose)", "var(--rose-soft)"],
+      ] as [ExampleKind, string, string, string][]).map(([id, label, color, soft]) => {
+        const on = value === id;
+        return (
+          <button
+            key={id}
+            type="button"
+            onClick={() => onChange(id)}
+            style={{
+              padding: "10px 12px", borderRadius: 8,
+              border: on ? `1.5px solid ${color}` : "1px solid var(--rule)",
+              background: on ? soft : "var(--paper)",
+              color: on ? color : "var(--ink-2)",
+              textAlign: "left", cursor: "pointer",
+              fontSize: 13, fontWeight: on ? 500 : 400,
+            }}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

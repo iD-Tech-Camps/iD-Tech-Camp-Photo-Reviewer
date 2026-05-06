@@ -174,7 +174,7 @@ function AppInner() {
         {activeScreen === "admin-overview"   && <AdminOverview />}
         {activeScreen === "admin-assignment" && <AdminAssignment />}
         {activeScreen === "admin-points"     && <AdminPoints />}
-        {activeScreen === "admin-examples"   && <AdminExamples />}
+        {activeScreen === "admin-examples"   && <AdminExamples toast={toast} />}
         {activeScreen === "admin-settings"   && <AdminSettings />}
       </main>
       {toast.node}
