@@ -6,7 +6,8 @@ import { PageHeader, type ToastApi } from "@/components/Shell";
 import { useSettings, AppSettings, BonusPeriod, BonusPeriodMode } from "@/components/settings";
 import { useCurrentUser, ROLE_LABEL } from "@/lib/current-user";
 import { createClient } from "@/lib/supabase/client";
-import { fetchReviewerRoster, type ReviewerStats } from "@/lib/profile";
+import { fetchReviewerRoster, updateReviewerProfile, type ReviewerStats } from "@/lib/profile";
+import type { Role } from "@/lib/current-user";
 import {
   createTag,
   deleteTag,
@@ -2340,13 +2341,15 @@ function KindToggle({
   );
 }
 
-export function AdminOverview() {
+export function AdminOverview({ toast }: { toast: ToastApi }) {
+  const supabase = React.useMemo(() => createClient(), []);
+  const { id: currentUserId } = useCurrentUser();
   const [roster, setRoster] = React.useState<ReviewerStats[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState("");
+  const [editing, setEditing] = React.useState<ReviewerStats | null>(null);
 
   React.useEffect(() => {
-    const supabase = createClient();
     let cancelled = false;
     fetchReviewerRoster(supabase)
       .then((rows) => { if (!cancelled) setRoster(rows); })
@@ -2358,7 +2361,36 @@ export function AdminOverview() {
         }
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [supabase]);
+
+  // Persist a role/team edit. Optimistic UI: patch the local roster row
+  // first, roll back on failure. The roster comes from the `reviewer_stats`
+  // view but the write goes to the `profiles` base table; the next fetch
+  // will resync.
+  const saveEdit = async (
+    user: ReviewerStats,
+    patch: { role: Role; team: string },
+  ): Promise<boolean> => {
+    const previous = roster;
+    const trimmedTeam = patch.team.trim();
+    const nextTeam = trimmedTeam.length === 0 ? null : trimmedTeam;
+    setRoster((prev) => prev?.map((r) =>
+      r.id === user.id ? { ...r, role: patch.role, team: nextTeam } : r,
+    ) ?? prev);
+    try {
+      await updateReviewerProfile(supabase, user.id, {
+        role: patch.role,
+        team: patch.team,
+      });
+      toast.show?.(`Updated ${user.fullName ?? user.email.split("@")[0]}.`, "check");
+      return true;
+    } catch (err: any) {
+      console.error("[admin-overview] update failed:", err);
+      setRoster(previous ?? null);
+      toast.show?.(err?.message ? `Couldn't save: ${err.message}` : "Couldn't save changes.");
+      return false;
+    }
+  };
 
   const all = roster ?? [];
   const accountCount = all.length;
@@ -2470,17 +2502,33 @@ export function AdminOverview() {
                 </tr>
               )}
               {visible.map(u => (
-                <ReviewerRow key={u.id} user={u} />
+                <ReviewerRow
+                  key={u.id}
+                  user={u}
+                  onEdit={() => setEditing(u)}
+                />
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {editing && (
+        <ReviewerEditModal
+          user={editing}
+          isSelf={!!currentUserId && currentUserId === editing.id}
+          onCancel={() => setEditing(null)}
+          onConfirm={async (patch) => {
+            const ok = await saveEdit(editing, patch);
+            if (ok) setEditing(null);
+          }}
+        />
+      )}
     </>
   );
 }
 
-function ReviewerRow({ user }: { user: ReviewerStats }) {
+function ReviewerRow({ user, onEdit }: { user: ReviewerStats; onEdit: () => void }) {
   const displayName = user.fullName ?? user.email.split("@")[0];
   const initials = (() => {
     if (user.fullName) {
@@ -2525,11 +2573,136 @@ function ReviewerRow({ user }: { user: ReviewerStats }) {
         {formatLastActive(user.lastActiveAt)}
       </td>
       <td>
-        <button className="btn btn-ghost" style={{ padding: "4px 6px" }}>
+        <button
+          className="btn btn-ghost"
+          style={{ padding: "4px 6px" }}
+          onClick={onEdit}
+          title="Edit reviewer"
+          aria-label={`Edit ${displayName}`}
+        >
           <Icon name="dots" size={14} />
         </button>
       </td>
     </tr>
+  );
+}
+
+function ReviewerEditModal({
+  user,
+  isSelf,
+  onCancel,
+  onConfirm,
+}: {
+  user: ReviewerStats;
+  isSelf: boolean;
+  onCancel: () => void;
+  onConfirm: (patch: { role: Role; team: string }) => Promise<void>;
+}) {
+  const [role, setRole] = React.useState<Role>(user.role);
+  const [team, setTeam] = React.useState(user.team ?? "");
+  const [submitting, setSubmitting] = React.useState(false);
+
+  // Lockout protection: don't let the only-or-current admin demote
+  // themselves and lose access in the same click. They can still change
+  // team. This is the cheapest version of the guard — counting other
+  // admins to allow demotion when there's a peer is doable, but the
+  // recovery story (edit profiles in SQL) is fine for now.
+  const wouldLockOutSelf = isSelf && user.role === "admin" && role !== "admin";
+
+  const dirty = role !== user.role || team.trim() !== (user.team ?? "");
+  const canSave = dirty && !submitting && !wouldLockOutSelf;
+
+  const submit = async () => {
+    if (!canSave) return;
+    setSubmitting(true);
+    try {
+      await onConfirm({ role, team });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const displayName = user.fullName ?? user.email.split("@")[0];
+
+  return (
+    <ExampleModalShell
+      eyebrow={isSelf ? "Edit your account" : "Edit reviewer"}
+      title={displayName}
+      tone="lake"
+      onClose={onCancel}
+      width={500}
+    >
+      <div style={{
+        marginTop: -8, marginBottom: 18,
+        fontSize: 12, color: "var(--ink-3)", fontFamily: "var(--font-mono)",
+      }}>
+        {user.email}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <FieldRow
+          label="Role"
+          hint={isSelf
+            ? "You can't demote yourself out of the admin role from here. Change another admin first if you need to."
+            : undefined}
+        >
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+            {([
+              ["reviewer", ROLE_LABEL.reviewer, "Reviews the queue."],
+              ["senior",   ROLE_LABEL.senior,   "Plus resolves flags."],
+              ["admin",    ROLE_LABEL.admin,    "Plus admin section."],
+            ] as [Role, string, string][]).map(([id, label, hint]) => {
+              const on = role === id;
+              const disabled = isSelf && user.role === "admin" && id !== "admin";
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => !disabled && setRole(id)}
+                  disabled={disabled}
+                  style={{
+                    padding: "10px 12px", borderRadius: 8,
+                    border: on ? "1.5px solid var(--lake)" : "1px solid var(--rule)",
+                    background: on ? "var(--lake-soft)" : "var(--paper)",
+                    color: on ? "var(--ink)" : "var(--ink-2)",
+                    textAlign: "left",
+                    cursor: disabled ? "not-allowed" : "pointer",
+                    opacity: disabled ? 0.4 : 1,
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: on ? 500 : 400, marginBottom: 2 }}>
+                    {label}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--ink-3)" }}>{hint}</div>
+                </button>
+              );
+            })}
+          </div>
+        </FieldRow>
+
+        <FieldRow label="Team" hint="Free text — Operations, Programs, Marketing, Support, etc.">
+          <input
+            className="input"
+            value={team}
+            onChange={(e) => setTeam(e.target.value)}
+            placeholder="—"
+            maxLength={48}
+          />
+        </FieldRow>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 22 }}>
+        <button className="btn btn-ghost" onClick={onCancel} disabled={submitting}>Cancel</button>
+        <button
+          className="btn btn-primary"
+          disabled={!canSave}
+          style={{ opacity: canSave ? 1 : 0.5, cursor: canSave ? "pointer" : "not-allowed" }}
+          onClick={submit}
+        >
+          <Icon name="check" size={12} /> {submitting ? "Saving…" : "Save changes"}
+        </button>
+      </div>
+    </ExampleModalShell>
   );
 }
 

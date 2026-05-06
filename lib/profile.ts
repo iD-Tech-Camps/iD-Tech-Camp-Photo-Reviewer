@@ -97,3 +97,36 @@ export async function fetchReviewerRoster(
   if (error) throw error;
   return ((data ?? []) as unknown as RawReviewerStatsRow[]).map(mapRow);
 }
+
+// ─── admin write helpers ────────────────────────────────────────────────────
+// Updates target the `profiles` base table directly (the `reviewer_stats`
+// view is read-only — it joins aggregates). Goes through the
+// `profiles_update_admin` RLS policy from migration 9, which allows admins
+// to update any profile's `role` and `team`.
+
+export type UpdateReviewerProfileInput = {
+  role?: "reviewer" | "senior" | "admin";
+  team?: string | null;
+};
+
+export async function updateReviewerProfile(
+  supabase: SupabaseClient,
+  profileId: string,
+  patch: UpdateReviewerProfileInput,
+): Promise<void> {
+  const rowPatch: Record<string, unknown> = {};
+  if (patch.role !== undefined) rowPatch.role = patch.role;
+  // Empty/whitespace team collapses to null so the "—" placeholder renders
+  // consistently in the roster table.
+  if (patch.team !== undefined) {
+    const trimmed = (patch.team ?? "").trim();
+    rowPatch.team = trimmed.length === 0 ? null : trimmed;
+  }
+  if (Object.keys(rowPatch).length === 0) return;
+
+  const { error } = await supabase
+    .from("profiles")
+    .update(rowPatch)
+    .eq("id", profileId);
+  if (error) throw error;
+}

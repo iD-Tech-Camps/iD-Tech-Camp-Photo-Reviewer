@@ -65,7 +65,7 @@ The app has three roles, matching the Postgres `role` enum exactly:
 | `senior`   | "Senior Reviewer" | Everything above, plus the **Flag review** queue. |
 | `admin`    | "Admin"           | Everything above, plus the Admin section (overview, assignment, points, examples, users, app settings). |
 
-Promotion happens by hand-editing `profiles.role` in Supabase until the Admin Users screen is wired up.
+Promote / demote reviewers from `Admin → Overview` — the per-row dots button opens an editor for `role` and `team`. The form refuses to demote the currently-signed-in admin out of the admin role (lockout protection); for stuck cases, edit `profiles.role` directly in Supabase.
 
 ### Example library (Admin)
 
@@ -118,7 +118,7 @@ components/screens/   Top-level screens (Home, Review, FlagReview, Leaderboard, 
 lib/
   current-user.tsx    UserProvider, useCurrentUser, Role type, ROLE_LABEL — reads role from profiles
   reviews.ts          fetchPendingPhotos, fetchPendingCount, fetchFlaggedPhotos, fetchFlaggedCount, submitReview
-  profile.ts          fetchMyStats, fetchReviewerRoster — backed by the `reviewer_stats` view (migration 15)
+  profile.ts          fetchMyStats, fetchReviewerRoster, updateReviewerProfile — reads from `reviewer_stats` view (migration 15); admin role/team writes go to the `profiles` base table
   tags.ts             fetchTags + admin write helpers — backs ReviewScreen, FlagReview, and Admin TagLibrary
   app-settings.ts     fetchAppSettings + updateAppSettings — backs SettingsProvider
   points-config.ts    fetchPointsConfig + updatePointsConfig + basePointsFor — backs ReviewScreen + AdminPoints

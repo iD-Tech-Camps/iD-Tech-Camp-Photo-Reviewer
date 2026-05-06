@@ -171,7 +171,7 @@ function AppInner() {
         {activeScreen === "profile"     && <ProfileScreen />}
         {activeScreen === "guide"       && <GuideScreen />}
         {activeScreen === "flag-review" && <FlagReviewScreen toast={toast} />}
-        {activeScreen === "admin-overview"   && <AdminOverview />}
+        {activeScreen === "admin-overview"   && <AdminOverview toast={toast} />}
         {activeScreen === "admin-assignment" && <AdminAssignment />}
         {activeScreen === "admin-points"     && <AdminPoints />}
         {activeScreen === "admin-examples"   && <AdminExamples toast={toast} />}
