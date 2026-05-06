@@ -3,7 +3,13 @@
 import React from "react";
 import { Icon } from "@/components/Icon";
 import { createClient } from "@/lib/supabase/client";
-import { useSettings } from "@/components/settings";
+import {
+  useSettings,
+  activeBonusPeriod,
+  formatBonusWindow,
+  formatBonusMultiplier,
+  type BonusPeriod,
+} from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
 import { fetchFlaggedCount } from "@/lib/reviews";
 
@@ -274,3 +280,117 @@ export function useToast() {
 }
 
 export type ToastApi = ReturnType<typeof useToast>;
+
+// Returns the currently-active bonus period (if any) and re-evaluates on a
+// timer so windows that start or end mid-session update without a refresh.
+// Both HomeScreen and ReviewScreen subscribe so they stay in sync. Tick
+// interval is 30s — fine-grained enough that "ends in 1 minute" wraps
+// cleanly into "no bonus" without a noticeable delay, but not so frequent
+// that we waste re-renders.
+export function useActiveBonusPeriod(): BonusPeriod | null {
+  const { settings } = useSettings();
+  const [tick, setTick] = React.useState(0);
+  React.useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  return React.useMemo(
+    () => activeBonusPeriod(settings.bonusPeriods),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [settings.bonusPeriods, tick],
+  );
+}
+
+// Visible callout that the active bonus period is ending soon enough that
+// the reviewer should care. Two presentation modes:
+//
+//   * `compact` — a single `pennant`-styled flag with multiplier + label +
+//     window. Used inside the ReviewScreen header where horizontal space
+//     is at a premium.
+//   * default — a banner (~2 lines) with the same info plus a softer
+//     visual treatment, intended for the HomeScreen where the reviewer is
+//     still deciding whether to start a session.
+//
+// Both share the same source data and the same window-formatter, so the
+// content is consistent — only the chrome differs.
+export function BonusPennant({
+  period,
+  variant = "compact",
+}: {
+  period: BonusPeriod;
+  variant?: "compact" | "banner";
+}) {
+  const mult = formatBonusMultiplier(period.multiplier);
+  const label = period.label?.trim() || `${mult} points`;
+  const window = formatBonusWindow(period);
+
+  if (variant === "compact") {
+    return (
+      <span
+        className="pennant"
+        style={{ fontWeight: 600 }}
+        title={`Bonus active — ${label}, ${window}`}
+      >
+        {mult}&nbsp;·&nbsp;{label.toUpperCase()}
+        {window && <>&nbsp;·&nbsp;{window.toUpperCase()}</>}
+      </span>
+    );
+  }
+
+  return (
+    <div
+      role="status"
+      style={{
+        display: "inline-flex",
+        flexDirection: "column",
+        gap: 4,
+        padding: "12px 18px",
+        borderRadius: "var(--radius-sm)",
+        background: "var(--sun-soft)",
+        border: "1px solid var(--sun)",
+        color: "var(--ink)",
+        textAlign: "left",
+        maxWidth: "100%",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: 22,
+            fontWeight: 600,
+            color: "var(--sun)",
+            letterSpacing: "-0.01em",
+          }}
+        >
+          {mult}
+        </span>
+        <span
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: 16,
+            fontWeight: 500,
+            letterSpacing: "-0.01em",
+          }}
+        >
+          {label}
+        </span>
+        <span className="pill pill-sun" style={{ fontSize: 10 }}>
+          Active
+        </span>
+      </div>
+      {window && (
+        <div
+          style={{
+            fontSize: 12,
+            color: "var(--ink-2)",
+            fontFamily: "var(--font-mono)",
+            letterSpacing: "0.04em",
+          }}
+        >
+          {window}
+        </div>
+      )}
+    </div>
+  );
+}

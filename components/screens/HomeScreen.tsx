@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Icon } from "@/components/Icon";
-import { PageHeader } from "@/components/Shell";
+import { BonusPennant, PageHeader, useActiveBonusPeriod } from "@/components/Shell";
 import { SESSION_PHOTOS, PhotoPlaceholder } from "@/components/data";
 import { useSettings, fillTemplate } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
@@ -27,6 +27,7 @@ export function HomeScreen({
 }) {
   const { settings } = useSettings();
   const { firstName } = useCurrentUser();
+  const activePeriod = useActiveBonusPeriod();
   const reviewerName = firstName || "there";
   const greeting = greetingHtml(settings.homeGreeting, reviewerName);
   const subtitle = fillTemplate(settings.homeSubtitle, {
@@ -100,9 +101,15 @@ export function HomeScreen({
           </p>
 
           <button className="btn btn-primary btn-lg" onClick={onStart}
-            style={{ padding: "16px 32px", fontSize: 16, marginBottom: 32 }}>
+            style={{ padding: "16px 32px", fontSize: 16, marginBottom: activePeriod ? 18 : 32 }}>
             <Icon name="play" size={16} /> Start reviewing
           </button>
+
+          {activePeriod && (
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 32 }}>
+              <BonusPennant period={activePeriod} variant="banner" />
+            </div>
+          )}
         </div>
       </div>
     </>

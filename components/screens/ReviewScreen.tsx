@@ -2,13 +2,13 @@
 
 import React from "react";
 import { Icon } from "@/components/Icon";
-import { fireConfetti, ToastApi } from "@/components/Shell";
+import { BonusPennant, fireConfetti, ToastApi, useActiveBonusPeriod } from "@/components/Shell";
 import {
   PHOTO_TAGS,
   NEGATIVE_TAGS,
   PhotoPlaceholder,
 } from "@/components/data";
-import { useSettings, activeBonusPeriod, type BonusPeriod } from "@/components/settings";
+import { useSettings } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -61,21 +61,7 @@ export function ReviewScreen({
   const [pulse, setPulse] = React.useState<null | "approve" | "flag">(null);
   const [submitting, setSubmitting] = React.useState(false);
 
-  // Recompute the active bonus period once a minute so a window that starts
-  // or ends mid-session updates without a refresh. The pennant and the
-  // points displayed on the action buttons key off this.
-  const [bonusTick, setBonusTick] = React.useState(0);
-  React.useEffect(() => {
-    const t = setInterval(() => setBonusTick((n) => n + 1), 30_000);
-    return () => clearInterval(t);
-  }, []);
-  const activePeriod = React.useMemo(
-    () => activeBonusPeriod(settings.bonusPeriods),
-    // bonusTick is intentionally part of the dep array so the memo re-evaluates
-    // on the timer; settings.bonusPeriods covers admin edits.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [settings.bonusPeriods, bonusTick],
-  );
+  const activePeriod = useActiveBonusPeriod();
   const multiplier = activePeriod?.multiplier ?? 1;
 
   // Pull the queue once on mount. Photos already reviewed in earlier sessions
@@ -213,7 +199,7 @@ export function ReviewScreen({
             <div className="progress-fill" style={{ width: progressPct + "%" }} />
           </div>
         </div>
-        {activePeriod && <BonusPennant period={activePeriod} />}
+        {activePeriod && <BonusPennant period={activePeriod} variant="compact" />}
         <button
           className={"btn " + (showExamplesDrawer ? "btn-primary" : "btn-ghost")}
           onClick={() => setShowExamplesDrawer(!showExamplesDrawer)}>
@@ -349,23 +335,6 @@ export function ReviewScreen({
   );
 }
 
-// Compact "double-points" indicator that lives in the review-screen header.
-// Driven by the admin-configured bonus periods in SettingsProvider.
-function BonusPennant({ period }: { period: BonusPeriod }) {
-  const pretty = period.multiplier % 1 === 0
-    ? `${period.multiplier}×`
-    : `${period.multiplier.toFixed(1)}×`;
-  const label = period.label?.trim() || `${pretty} POINTS`;
-  return (
-    <span
-      className="pennant"
-      style={{ fontWeight: 600 }}
-      title={`Bonus active · ${pretty} points`}
-    >
-      {pretty}&nbsp;·&nbsp;{label.toUpperCase()}
-    </span>
-  );
-}
 
 function ReviewLoading({ onExit }: { onExit: () => void }) {
   return (

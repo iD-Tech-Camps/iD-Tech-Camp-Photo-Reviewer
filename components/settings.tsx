@@ -125,6 +125,52 @@ function parseHHMM(hhmm: string): number | null {
   return h * 60 + m;
 }
 
+// Formats a `BonusPeriod`'s active window in a way reviewers can read at a
+// glance. The pennant on HomeScreen and ReviewScreen calls this so the
+// reviewer knows when the bonus runs (and crucially, when it ends so they
+// can decide whether to bank reviews now).
+//
+// Recurring → "10:00 AM – 11:00 AM" (start–end)
+// One-time, same calendar day → "Jun 5, 10:00 AM – 5:00 PM"
+// One-time, multi-day → "Jun 5, 10:00 AM – Jun 6, 5:00 PM"
+//
+// Both timestamps are rendered in the reviewer's local timezone, matching
+// how the admin scheduled them.
+export function formatBonusWindow(p: BonusPeriod): string {
+  if (p.mode === "recurring") {
+    return `${formatTime12(p.startTime)} – ${formatTime12(p.endTime)}`;
+  }
+  if (!p.startAt || !p.endAt) return "";
+  const s = new Date(p.startAt);
+  const e = new Date(p.endAt);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return "";
+  const sameDay =
+    s.getFullYear() === e.getFullYear() &&
+    s.getMonth() === e.getMonth() &&
+    s.getDate() === e.getDate();
+  const dateFmt: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+  const timeFmt: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
+  if (sameDay) {
+    return `${s.toLocaleDateString(undefined, dateFmt)}, ${s.toLocaleTimeString(undefined, timeFmt)} – ${e.toLocaleTimeString(undefined, timeFmt)}`;
+  }
+  return `${s.toLocaleDateString(undefined, dateFmt)}, ${s.toLocaleTimeString(undefined, timeFmt)} – ${e.toLocaleDateString(undefined, dateFmt)}, ${e.toLocaleTimeString(undefined, timeFmt)}`;
+}
+
+// Pretty multiplier: 2× / 1.5× rather than 2.0× / 1.5×.
+export function formatBonusMultiplier(multiplier: number): string {
+  return multiplier % 1 === 0 ? `${multiplier}×` : `${multiplier.toFixed(1)}×`;
+}
+
+function formatTime12(hhmm: string): string {
+  const [hStr, mStr] = hhmm.split(":");
+  const h = parseInt(hStr, 10);
+  if (Number.isNaN(h)) return hhmm;
+  const m = mStr ?? "00";
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = ((h + 11) % 12) + 1;
+  return `${h12}:${m} ${period}`;
+}
+
 const STORAGE_KEY = "app-settings-v1";
 
 type Ctx = {
