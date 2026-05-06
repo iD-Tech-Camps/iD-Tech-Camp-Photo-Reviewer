@@ -4,6 +4,11 @@
 -- 'reviewer'; admins promote people via UPDATE later.
 
 create table public.profiles (
+  -- The FK on `id` gets the implicit name `profiles_id_fkey`, which is
+  -- referenced by name in supabase/tests/smoke_test.sql to drop and
+  -- re-implicitly-restore the constraint inside the test transaction.
+  -- If you rename it (e.g. by adding `constraint profiles_user_fk`),
+  -- update the smoke test in lockstep.
   id              uuid primary key references auth.users(id) on delete cascade,
   email           text not null,
   full_name       text,
