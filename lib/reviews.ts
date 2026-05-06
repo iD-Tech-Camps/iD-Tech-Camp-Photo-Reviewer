@@ -66,6 +66,131 @@ export async function fetchPendingPhotos(
   });
 }
 
+// One flagged photo as the senior queue needs it. Includes the triggering
+// flag review (the latest review on the photo, which by definition is a flag
+// since photos.current_status = 'flagged' is maintained by trigger from the
+// latest review's decision) plus the reviewer's display info and tag ids.
+export type FlaggedQueueItem = {
+  id: string;
+  smugmugImageId: string;
+  caption: string | null;
+  capturedAt: string | null;
+  width: number | null;
+  height: number | null;
+  divisionName: string | null;
+  locationName: string | null;
+  campWeekName: string | null;
+  campWeekStarts: string | null;
+  campWeekEnds: string | null;
+  flagReview: {
+    id: string;
+    note: string | null;
+    quarantine: boolean;
+    createdAt: string;
+    reviewerName: string | null;
+    reviewerEmail: string | null;
+    tagIds: string[];
+  };
+};
+
+type RawFlaggedRow = {
+  id: string;
+  smugmug_image_id: string;
+  caption: string | null;
+  captured_at: string | null;
+  width: number | null;
+  height: number | null;
+  camp_weeks: {
+    name: string;
+    starts_on: string | null;
+    ends_on: string | null;
+    locations: {
+      name: string;
+      divisions: { name: string } | null;
+    } | null;
+  } | null;
+  reviews: {
+    id: string;
+    decision: string;
+    note: string | null;
+    quarantine: boolean;
+    created_at: string;
+    profiles: { full_name: string | null; email: string | null } | null;
+    review_tags: { tag_id: string }[];
+  }[] | null;
+};
+
+export async function fetchFlaggedPhotos(
+  supabase: SupabaseClient,
+): Promise<FlaggedQueueItem[]> {
+  const { data, error } = await supabase
+    .from("photos")
+    .select(
+      "id, smugmug_image_id, caption, captured_at, width, height, " +
+      "camp_weeks ( name, starts_on, ends_on, locations ( name, divisions ( name ) ) ), " +
+      "reviews ( id, decision, note, quarantine, created_at, " +
+        "profiles ( full_name, email ), review_tags ( tag_id ) )",
+    )
+    .eq("current_status", "flagged");
+
+  if (error) throw error;
+
+  const rows = (data ?? []) as unknown as RawFlaggedRow[];
+
+  const items: FlaggedQueueItem[] = [];
+  for (const p of rows) {
+    const reviews = (p.reviews ?? []).slice().sort(
+      (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
+    );
+    // The latest review should be the active flag (the trigger keeps
+    // current_status synced to the latest decision). Defend against drift
+    // by skipping any photo whose latest review isn't a flag — that would
+    // indicate trigger failure or manual DB editing.
+    const latest = reviews[0];
+    if (!latest || latest.decision !== "flag") continue;
+
+    items.push({
+      id: p.id,
+      smugmugImageId: p.smugmug_image_id,
+      caption: p.caption,
+      capturedAt: p.captured_at,
+      width: p.width,
+      height: p.height,
+      divisionName: p.camp_weeks?.locations?.divisions?.name ?? null,
+      locationName: p.camp_weeks?.locations?.name ?? null,
+      campWeekName: p.camp_weeks?.name ?? null,
+      campWeekStarts: p.camp_weeks?.starts_on ?? null,
+      campWeekEnds: p.camp_weeks?.ends_on ?? null,
+      flagReview: {
+        id: latest.id,
+        note: latest.note,
+        quarantine: latest.quarantine,
+        createdAt: latest.created_at,
+        reviewerName: latest.profiles?.full_name ?? null,
+        reviewerEmail: latest.profiles?.email ?? null,
+        tagIds: (latest.review_tags ?? []).map((t) => t.tag_id),
+      },
+    });
+  }
+
+  // Oldest flag first — seniors clear backlog top-down.
+  items.sort(
+    (a, b) => Date.parse(a.flagReview.createdAt) - Date.parse(b.flagReview.createdAt),
+  );
+  return items;
+}
+
+// Lightweight count for the sidebar badge. Cheaper than fetching the full
+// flagged queue when all the UI needs is the number.
+export async function fetchFlaggedCount(supabase: SupabaseClient): Promise<number> {
+  const { count, error } = await supabase
+    .from("photos")
+    .select("id", { count: "exact", head: true })
+    .eq("current_status", "flagged");
+  if (error) throw error;
+  return count ?? 0;
+}
+
 export type SubmitReviewInput = {
   photoId: string;
   reviewerId: string;

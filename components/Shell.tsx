@@ -5,7 +5,7 @@ import { Icon } from "@/components/Icon";
 import { createClient } from "@/lib/supabase/client";
 import { useSettings } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
-import { FLAGGED_PHOTOS } from "@/components/data";
+import { fetchFlaggedCount } from "@/lib/reviews";
 
 export function Sidebar({
   current,
@@ -19,6 +19,27 @@ export function Sidebar({
   const { settings } = useSettings();
   const { email, fullName, firstName, initials, loading, role } = useCurrentUser();
   const [signingOut, setSigningOut] = React.useState(false);
+  const [flaggedCount, setFlaggedCount] = React.useState<number | null>(null);
+
+  // Pull the live flagged-queue count for the senior badge. Only seniors and
+  // admins see the badge, so skip the query for plain reviewers to save a
+  // round-trip.
+  const canSeeFlaggedBadge = role === "senior" || role === "admin";
+  React.useEffect(() => {
+    if (!canSeeFlaggedBadge) {
+      setFlaggedCount(null);
+      return;
+    }
+    let cancelled = false;
+    const supabase = createClient();
+    fetchFlaggedCount(supabase)
+      .then((n) => { if (!cancelled) setFlaggedCount(n); })
+      .catch((err) => {
+        console.warn("[sidebar] flagged count fetch failed:", err?.message ?? err);
+        if (!cancelled) setFlaggedCount(null);
+      });
+    return () => { cancelled = true; };
+  }, [canSeeFlaggedBadge, current]);
 
   const handleSignOut = async () => {
     if (signingOut) return;
@@ -31,7 +52,7 @@ export function Sidebar({
   const displayName = fullName || firstName || (email ? email.split("@")[0] : (loading ? "…" : "Reviewer"));
   const avatarInitials = loading ? "··" : initials;
 
-  const canSeeFlagReview = role === "senior" || role === "admin";
+  const canSeeFlagReview = canSeeFlaggedBadge;
   const canSeeAdmin = role === "admin";
 
   const userItems = [
@@ -44,7 +65,7 @@ export function Sidebar({
   ].filter(Boolean) as { id: string; label: string; icon: string; badge?: number }[];
 
   const seniorItems: { id: string; label: string; icon: string; badge?: number }[] = [
-    { id: "flag-review", label: "Flag review", icon: "flag", badge: FLAGGED_PHOTOS.length },
+    { id: "flag-review", label: "Flag review", icon: "flag", badge: flaggedCount ?? undefined },
   ];
 
   const adminItems = [

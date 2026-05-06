@@ -4,47 +4,101 @@ import React from "react";
 import { Icon } from "@/components/Icon";
 import { PageHeader, ToastApi } from "@/components/Shell";
 import {
-  FLAGGED_PHOTOS,
-  FlaggedPhoto,
   PhotoPlaceholder,
   negativeTagLabel,
   photoPaletteFor,
 } from "@/components/data";
+import { useCurrentUser } from "@/lib/current-user";
+import { createClient } from "@/lib/supabase/client";
+import {
+  fetchFlaggedPhotos,
+  submitReview,
+  type FlaggedQueueItem,
+} from "@/lib/reviews";
 
 type Resolution = "accepted" | "deleted";
 
 export function FlagReviewScreen({ toast }: { toast: ToastApi }) {
-  const [queue, setQueue] = React.useState<FlaggedPhoto[]>(FLAGGED_PHOTOS);
-  const [selectedId, setSelectedId] = React.useState<string | null>(
-    FLAGGED_PHOTOS[0]?.id ?? null,
-  );
+  const { id: reviewerId } = useCurrentUser();
+  const [queue, setQueue] = React.useState<FlaggedQueueItem[] | null>(null);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [resolved, setResolved] = React.useState<
-    Record<string, { photo: FlaggedPhoto; resolution: Resolution }>
+    Record<string, { photo: FlaggedQueueItem; resolution: Resolution }>
   >({});
+  const [submitting, setSubmitting] = React.useState(false);
 
-  const selected = queue.find(p => p.id === selectedId) ?? null;
+  React.useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+    fetchFlaggedPhotos(supabase)
+      .then((rows) => {
+        if (cancelled) return;
+        setQueue(rows);
+        setSelectedId((prev) => prev ?? rows[0]?.id ?? null);
+      })
+      .catch((err) => {
+        console.error("[flag-review] fetch failed:", err);
+        if (!cancelled) {
+          setLoadError(err?.message ?? "Failed to load flagged photos");
+          setQueue([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const items = queue ?? [];
+  const selected = items.find((p) => p.id === selectedId) ?? null;
   const resolvedCount = Object.keys(resolved).length;
 
-  const resolve = (photo: FlaggedPhoto, resolution: Resolution) => {
-    const remaining = queue.filter(p => p.id !== photo.id);
-    setQueue(remaining);
-    setResolved(prev => ({ ...prev, [photo.id]: { photo, resolution } }));
-    if (selectedId === photo.id) {
-      setSelectedId(remaining[0]?.id ?? null);
+  const resolve = async (photo: FlaggedQueueItem, resolution: Resolution) => {
+    if (submitting) return;
+    if (!reviewerId) {
+      toast.show?.("Couldn't identify your account. Try refreshing.");
+      return;
     }
+    setSubmitting(true);
+    try {
+      // Senior accept = approve review (with no rating). Senior delete =
+      // delete review. Both go through the same triggers and RLS path.
+      await submitReview(createClient(), {
+        photoId: photo.id,
+        reviewerId,
+        decision: resolution === "accepted" ? "approve" : "delete",
+      });
+    } catch (err: any) {
+      console.error("[flag-review] submit failed:", err);
+      toast.show?.(err?.message ? `Couldn't save: ${err.message}` : "Couldn't save your decision.");
+      setSubmitting(false);
+      return;
+    }
+
+    setQueue((prev) => {
+      if (!prev) return prev;
+      const remaining = prev.filter((p) => p.id !== photo.id);
+      if (selectedId === photo.id) {
+        setSelectedId(remaining[0]?.id ?? null);
+      }
+      return remaining;
+    });
+    setResolved((prev) => ({ ...prev, [photo.id]: { photo, resolution } }));
+    setSubmitting(false);
+
     if (toast?.show) {
       toast.show(
         resolution === "accepted"
-          ? `Accepted ${photo.id}`
-          : `Deleted ${photo.id}`,
+          ? `Accepted ${photo.smugmugImageId}`
+          : `Deleted ${photo.smugmugImageId}`,
         resolution === "accepted" ? "check" : "x",
       );
     }
   };
 
-  const download = (photo: FlaggedPhoto) => {
+  const download = (photo: FlaggedQueueItem) => {
     downloadPhoto(photo);
-    if (toast?.show) toast.show(`Downloading ${photo.id}.png`, "download");
+    if (toast?.show) toast.show(`Downloading ${photo.smugmugImageId}.png`, "download");
   };
 
   return (
@@ -55,7 +109,7 @@ export function FlagReviewScreen({ toast }: { toast: ToastApi }) {
         sub="Review what staff reviewers couldn't decide. Accept it back into the library, delete it, or download it for a director conversation."
       >
         <span className="pill pill-sun" style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
-          {queue.length} open
+          {queue === null ? "…" : `${items.length} open`}
         </span>
         {resolvedCount > 0 && (
           <span className="pill" style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
@@ -74,19 +128,21 @@ export function FlagReviewScreen({ toast }: { toast: ToastApi }) {
         }}
       >
         <FlagQueueList
-          queue={queue}
+          queue={items}
+          loading={queue === null}
           selectedId={selectedId}
           onSelect={setSelectedId}
         />
         {selected ? (
           <FlagDetailPanel
             photo={selected}
+            disabled={submitting}
             onAccept={() => resolve(selected, "accepted")}
             onDelete={() => resolve(selected, "deleted")}
             onDownload={() => download(selected)}
           />
         ) : (
-          <EmptyState resolvedCount={resolvedCount} />
+          <EmptyState resolvedCount={resolvedCount} loading={queue === null} error={loadError} />
         )}
       </div>
     </>
@@ -95,13 +151,23 @@ export function FlagReviewScreen({ toast }: { toast: ToastApi }) {
 
 function FlagQueueList({
   queue,
+  loading,
   selectedId,
   onSelect,
 }: {
-  queue: FlaggedPhoto[];
+  queue: FlaggedQueueItem[];
+  loading: boolean;
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
+  if (loading) {
+    return (
+      <div className="card" style={{ padding: 18 }}>
+        <div className="card-eyebrow" style={{ marginBottom: 6 }}>Queue</div>
+        <div style={{ fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
+      </div>
+    );
+  }
   if (queue.length === 0) {
     return (
       <div className="card" style={{ padding: 18 }}>
@@ -132,8 +198,12 @@ function FlagQueueList({
         </span>
       </div>
       <div style={{ display: "flex", flexDirection: "column" }}>
-        {queue.map(p => {
+        {queue.map((p) => {
           const active = p.id === selectedId;
+          const reviewerLabel = p.flagReview.reviewerName
+            ?? p.flagReview.reviewerEmail
+            ?? "Unknown reviewer";
+          const campLabel = [p.divisionName, p.locationName].filter(Boolean).join(" · ");
           return (
             <button
               key={p.id}
@@ -156,7 +226,11 @@ function FlagQueueList({
                 }}
               >
                 <PhotoPlaceholder
-                  photo={{ id: p.id, camp: p.camp, activity: p.activity }}
+                  photo={{
+                    id: p.smugmugImageId,
+                    camp: campLabel,
+                    activity: p.caption ?? undefined,
+                  }}
                   hideLabel
                   compact
                 />
@@ -173,7 +247,7 @@ function FlagQueueList({
                       fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 12,
                     }}
                   >
-                    {p.id}
+                    {p.smugmugImageId}
                   </span>
                   <span
                     style={{
@@ -182,7 +256,7 @@ function FlagQueueList({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {p.flaggedAtRelative}
+                    {formatRelative(p.flagReview.createdAt)}
                   </span>
                 </div>
                 <div
@@ -191,14 +265,14 @@ function FlagQueueList({
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   }}
                 >
-                  {p.camp} · {p.flaggedBy}
+                  {campLabel} · {reviewerLabel}
                 </div>
                 <div
                   style={{
                     display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4,
                   }}
                 >
-                  {p.tags.slice(0, 2).map(t => (
+                  {p.flagReview.tagIds.slice(0, 2).map((t) => (
                     <span
                       key={t}
                       style={{
@@ -210,14 +284,14 @@ function FlagQueueList({
                       {negativeTagLabel(t)}
                     </span>
                   ))}
-                  {p.tags.length > 2 && (
+                  {p.flagReview.tagIds.length > 2 && (
                     <span
                       style={{
                         fontSize: 10, padding: "2px 6px", borderRadius: 999,
                         color: "var(--ink-3)", fontFamily: "var(--font-mono)",
                       }}
                     >
-                      +{p.tags.length - 2}
+                      +{p.flagReview.tagIds.length - 2}
                     </span>
                   )}
                 </div>
@@ -232,11 +306,13 @@ function FlagQueueList({
 
 function FlagDetailPanel({
   photo,
+  disabled,
   onAccept,
   onDelete,
   onDownload,
 }: {
-  photo: FlaggedPhoto;
+  photo: FlaggedQueueItem;
+  disabled: boolean;
   onAccept: () => void;
   onDelete: () => void;
   onDownload: () => void;
@@ -246,6 +322,13 @@ function FlagDetailPanel({
   React.useEffect(() => {
     setConfirmDelete(false);
   }, [photo.id]);
+
+  const campLabel = [photo.divisionName, photo.locationName].filter(Boolean).join(" · ");
+  const capturedDate = formatDate(photo.capturedAt);
+  const capturedTime = formatTime(photo.capturedAt);
+  const flaggedAt = `${formatDate(photo.flagReview.createdAt)} · ${formatTime(photo.flagReview.createdAt)}`;
+  const reviewerLabel = photo.flagReview.reviewerName ?? photo.flagReview.reviewerEmail ?? "Unknown reviewer";
+  const campWeekDates = formatDateRange(photo.campWeekStarts, photo.campWeekEnds);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -258,7 +341,11 @@ function FlagDetailPanel({
           }}
         >
           <PhotoPlaceholder
-            photo={{ id: photo.id, camp: photo.camp, activity: photo.activity }}
+            photo={{
+              id: photo.smugmugImageId,
+              camp: campLabel,
+              activity: photo.caption ?? undefined,
+            }}
           />
         </div>
         <div
@@ -276,14 +363,16 @@ function FlagDetailPanel({
                 letterSpacing: "0.04em",
               }}
             >
-              {photo.id}
+              {photo.smugmugImageId}
             </span>
             <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
-              {photo.camp} · {photo.activity} · {photo.capturedDate}, {photo.captured}
+              {[campLabel, photo.caption, capturedDate && capturedTime ? `${capturedDate}, ${capturedTime}` : capturedDate || capturedTime]
+                .filter(Boolean)
+                .join(" · ")}
             </span>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="btn btn-ghost" onClick={onDownload}>
+            <button className="btn btn-ghost" onClick={onDownload} disabled={disabled}>
               <Icon name="download" size={13} /> Download
             </button>
             {confirmDelete ? (
@@ -291,12 +380,14 @@ function FlagDetailPanel({
                 <button
                   className="btn btn-ghost"
                   onClick={() => setConfirmDelete(false)}
+                  disabled={disabled}
                 >
                   Cancel
                 </button>
                 <button
                   className="btn btn-rose"
                   onClick={() => { setConfirmDelete(false); onDelete(); }}
+                  disabled={disabled}
                 >
                   <Icon name="x" size={13} /> Confirm delete
                 </button>
@@ -307,10 +398,11 @@ function FlagDetailPanel({
                   className="btn btn-ghost"
                   style={{ color: "var(--rose)" }}
                   onClick={() => setConfirmDelete(true)}
+                  disabled={disabled}
                 >
                   <Icon name="x" size={13} /> Delete
                 </button>
-                <button className="btn btn-moss" onClick={onAccept}>
+                <button className="btn btn-moss" onClick={onAccept} disabled={disabled}>
                   <Icon name="check" size={13} /> Accept
                 </button>
               </>
@@ -338,52 +430,80 @@ function FlagDetailPanel({
             marginBottom: 16,
           }}
         >
-          <DetailField label="Camp" value={photo.camp} />
-          <DetailField label="Location" value={photo.campLocation} />
+          <DetailField label="Division" value={photo.divisionName ?? "—"} />
+          <DetailField label="Location" value={photo.locationName ?? "—"} />
           <DetailField
             label="Camp week"
-            value={`${photo.campWeek} · ${photo.campWeekDates}`}
+            value={
+              photo.campWeekName
+                ? campWeekDates
+                  ? `${photo.campWeekName} · ${campWeekDates}`
+                  : photo.campWeekName
+                : "—"
+            }
           />
-          <DetailField label="Activity" value={photo.activity} />
+          <DetailField label="Caption" value={photo.caption ?? "—"} />
           <DetailField
             label="Captured"
-            value={`${photo.capturedDate} · ${photo.captured}`}
+            value={[capturedDate, capturedTime].filter(Boolean).join(" · ") || "—"}
           />
           <DetailField
             label="Flagged by"
-            value={photo.flaggedBy}
-            sub={photo.flaggedByEmail}
+            value={reviewerLabel}
+            sub={photo.flagReview.reviewerName ? photo.flagReview.reviewerEmail ?? undefined : undefined}
           />
-          <DetailField label="Flagged at" value={photo.flaggedAt} />
+          <DetailField label="Flagged at" value={flaggedAt} />
           <DetailField
-            label="Photo ID"
-            value={photo.id}
+            label="SmugMug ID"
+            value={photo.smugmugImageId}
             mono
           />
         </div>
 
+        {photo.flagReview.quarantine && (
+          <div
+            style={{
+              padding: "8px 12px",
+              borderRadius: 6,
+              background: "var(--sun-soft)",
+              color: "var(--ink)",
+              fontSize: 12,
+              marginBottom: 16,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <Icon name="flag" size={12} /> Quarantined — hidden from public folder until resolved.
+          </div>
+        )}
+
         <div className="label" style={{ marginBottom: 6 }}>Negative tags</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
-          {photo.tags.map(t => (
-            <span
-              key={t}
-              style={{
-                fontSize: 12, padding: "5px 10px", borderRadius: 999,
-                background: "var(--sun-soft)", color: "var(--sun)",
-                fontWeight: 500,
-              }}
-            >
-              {negativeTagLabel(t)}
-            </span>
-          ))}
+          {photo.flagReview.tagIds.length === 0 ? (
+            <span style={{ fontSize: 12, color: "var(--ink-3)" }}>No tags applied.</span>
+          ) : (
+            photo.flagReview.tagIds.map((t) => (
+              <span
+                key={t}
+                style={{
+                  fontSize: 12, padding: "5px 10px", borderRadius: 999,
+                  background: "var(--sun-soft)", color: "var(--sun)",
+                  fontWeight: 500,
+                }}
+              >
+                {negativeTagLabel(t)}
+              </span>
+            ))
+          )}
         </div>
 
         <div className="label" style={{ marginBottom: 6 }}>
-          Reviewer note {!photo.note && (
+          Reviewer note {!photo.flagReview.note && (
             <span style={{ color: "var(--ink-3)", fontWeight: 400 }}>(none)</span>
           )}
         </div>
-        {photo.note ? (
+        {photo.flagReview.note ? (
           <div
             style={{
               padding: 12,
@@ -395,7 +515,7 @@ function FlagDetailPanel({
               fontStyle: "italic",
             }}
           >
-            “{photo.note}”
+            “{photo.flagReview.note}”
           </div>
         ) : (
           <div
@@ -457,7 +577,15 @@ function DetailField({
   );
 }
 
-function EmptyState({ resolvedCount }: { resolvedCount: number }) {
+function EmptyState({
+  resolvedCount,
+  loading,
+  error,
+}: {
+  resolvedCount: number;
+  loading: boolean;
+  error: string | null;
+}) {
   return (
     <div
       className="card"
@@ -472,27 +600,95 @@ function EmptyState({ resolvedCount }: { resolvedCount: number }) {
         <div
           style={{
             width: 64, height: 64, borderRadius: "50%",
-            background: "var(--moss-soft)", color: "var(--moss)",
+            background: error ? "var(--sun-soft)" : "var(--moss-soft)",
+            color: error ? "var(--sun)" : "var(--moss)",
             display: "grid", placeItems: "center",
             margin: "0 auto 16px",
           }}
         >
-          <Icon name="check" size={28} />
+          <Icon name={error ? "flag" : "check"} size={28} />
         </div>
         <h3 className="card-title" style={{ marginBottom: 6 }}>
-          {resolvedCount > 0 ? "Queue cleared." : "Nothing flagged right now."}
+          {error
+            ? "Couldn't load queue."
+            : loading
+              ? "Loading flagged photos…"
+              : resolvedCount > 0
+                ? "Queue cleared."
+                : "Nothing flagged right now."}
         </h3>
         <p style={{ fontSize: 13, color: "var(--ink-3)", maxWidth: 320 }}>
-          {resolvedCount > 0
-            ? `You handled ${resolvedCount} ${resolvedCount === 1 ? "photo" : "photos"} this session. Nice work.`
-            : "When staff reviewers send something up for a second opinion, it'll show up here."}
+          {error
+            ? error
+            : loading
+              ? "Pulling the senior queue from the database."
+              : resolvedCount > 0
+                ? `You handled ${resolvedCount} ${resolvedCount === 1 ? "photo" : "photos"} this session. Nice work.`
+                : "When staff reviewers send something up for a second opinion, it'll show up here."}
         </p>
       </div>
     </div>
   );
 }
 
-function downloadPhoto(photo: FlaggedPhoto) {
+// ── time helpers ────────────────────────────────────────────────────────────
+
+function formatTime(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function formatDate(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+  if (sameDay(d, today)) return "Today";
+  if (sameDay(d, yesterday)) return "Yesterday";
+  return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatDateRange(startIso: string | null, endIso: string | null): string {
+  if (!startIso || !endIso) return "";
+  const a = new Date(startIso);
+  const b = new Date(endIso);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return "";
+  const sameYear = a.getFullYear() === b.getFullYear();
+  const left = a.toLocaleDateString([], { month: "short", day: "numeric" });
+  const right = b.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    year: sameYear ? undefined : "numeric",
+  });
+  return `${left} – ${right}, ${b.getFullYear()}`;
+}
+
+function formatRelative(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const diffMs = Date.now() - d.getTime();
+  const sec = Math.round(diffMs / 1000);
+  if (sec < 60)        return `${sec}s ago`;
+  const min = Math.round(sec / 60);
+  if (min < 60)        return `${min}m ago`;
+  const hr  = Math.round(min / 60);
+  if (hr  < 24)        return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 7)         return `${day}d ago`;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+// ── download helper (procedural placeholder until SmugMug image_url lands) ─
+
+function downloadPhoto(photo: FlaggedQueueItem) {
   if (typeof document === "undefined") return;
   const W = 1600;
   const H = 1067;
@@ -502,7 +698,7 @@ function downloadPhoto(photo: FlaggedPhoto) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
-  const [c1, c2] = photoPaletteFor(photo.id);
+  const [c1, c2] = photoPaletteFor(photo.smugmugImageId);
   const grad = ctx.createLinearGradient(0, 0, W * 0.4, H);
   grad.addColorStop(0, c1);
   grad.addColorStop(1, c2);
@@ -518,24 +714,27 @@ function downloadPhoto(photo: FlaggedPhoto) {
   ctx.fillStyle = veil;
   ctx.fillRect(0, 0, W, H);
 
+  const campLabel = [photo.divisionName, photo.locationName].filter(Boolean).join(" · ");
+
   ctx.fillStyle = "rgba(255,255,255,0.92)";
   ctx.font = "500 28px ui-monospace, SFMono-Regular, Menlo, monospace";
   ctx.textBaseline = "alphabetic";
-  ctx.fillText(photo.camp.toUpperCase(), 40, H - 36);
-  const idText = photo.id;
+  ctx.fillText(campLabel.toUpperCase(), 40, H - 36);
+  const idText = photo.smugmugImageId;
   const idWidth = ctx.measureText(idText).width;
   ctx.fillText(idText, W - 40 - idWidth, H - 36);
 
   ctx.fillStyle = "rgba(255,255,255,0.7)";
   ctx.font = "400 18px ui-monospace, SFMono-Regular, Menlo, monospace";
-  ctx.fillText(`${photo.activity} · ${photo.capturedDate}`, 40, H - 64);
+  const sub = [photo.caption, formatDate(photo.capturedAt)].filter(Boolean).join(" · ");
+  ctx.fillText(sub, 40, H - 64);
 
   canvas.toBlob((blob) => {
     if (!blob) return;
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${photo.id}.png`;
+    a.download = `${photo.smugmugImageId}.png`;
     document.body.appendChild(a);
     a.click();
     a.remove();
