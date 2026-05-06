@@ -92,15 +92,16 @@ npx supabase db push --dry-run --linked   # preview
 npx supabase db push --linked             # apply
 ```
 
-Three test files under `supabase/tests/` (hand-run, not migrations):
+Four test files under `supabase/tests/` (hand-run, not migrations):
 
 ```bash
 npx supabase db query --file supabase/tests/smoke_test.sql           --linked  # schema-level
 npx supabase db query --file supabase/tests/e2e_review_flow.sql      --linked  # reviewer flow under role=authenticated
 npx supabase db query --file supabase/tests/e2e_flag_review_flow.sql --linked  # senior flow under role=authenticated
+npx supabase db query --file supabase/tests/e2e_reviewer_stats.sql   --linked  # reviewer_stats view under role=authenticated
 ```
 
-The last row of each is a sentinel string. `smoke test passed`, `e2e review flow passed`, or `flag review flow passed` means OK; anything else is an assertion failure inside the `do $$ ... $$` block.
+The last row of each is a sentinel string. `smoke test passed`, `e2e review flow passed`, `flag review flow passed`, or `reviewer stats view passed` means OK; anything else is an assertion failure inside the `do $$ ... $$` block.
 
 > **If you write a new test that exercises app-style writes, pin the role to `authenticated` and set `request.jwt.claims`** — `supabase db query` runs as the service role by default, which bypasses RLS entirely. See `e2e_review_flow.sql` for the pattern.
 
@@ -113,6 +114,7 @@ components/screens/   Top-level screens (Home, Review, FlagReview, Leaderboard, 
 lib/
   current-user.tsx    UserProvider, useCurrentUser, Role type, ROLE_LABEL — reads role from profiles
   reviews.ts          fetchPendingPhotos, fetchPendingCount, fetchFlaggedPhotos, fetchFlaggedCount, submitReview
+  profile.ts          fetchMyStats, fetchReviewerRoster — backed by the `reviewer_stats` view (migration 15)
   supabase/           browser, server, and middleware Supabase clients
 middleware.ts         Root middleware → lib/supabase/middleware.ts (session refresh + auth gating)
 styles/legacy.css     Source of truth for visual styling (Tailwind installed but unused)

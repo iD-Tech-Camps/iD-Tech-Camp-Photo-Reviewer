@@ -342,24 +342,26 @@ Each step landed as its own migration file under `supabase/migrations/` so each 
 | `20260505000012_activity_log_placeholder.sql` | Empty placeholder |
 | `20260505000013_seed_dev_data.sql` | Step 7.2: seeds the four real divisions, plus a placeholder location/week/photos chain (`smugmug_*_id` prefixed `placeholder-`). Idempotent. |
 | `20260505000014_fix_review_triggers_security.sql` | Step 7.x: re-creates the four review trigger functions with `security definer set search_path = public`, plus a one-time backfill that reconciles any photo whose `current_status` had drifted from its latest review's decision while the bug was live. |
+| `20260506000015_reviewer_stats_view.sql` | Step 7.5: adds the `public.reviewer_stats` view — a left join of `profiles` with aggregated `reviews` (count by decision, sum of points, max created_at, count where created_at >= current_date), zero-coalesced. Uses `with (security_invoker = true)` so RLS is enforced via the underlying tables' policies. Backs `lib/profile.ts → fetchMyStats / fetchReviewerRoster`. |
 
-Three tests live under `supabase/tests/` (deliberately outside `migrations/` so they aren't applied by `db push`). All three are transactions wrapped in `begin; ... rollback;`:
+Four tests live under `supabase/tests/` (deliberately outside `migrations/` so they aren't applied by `db push`). All four are transactions wrapped in `begin; ... rollback;`:
 
 | File | Role context | What it covers |
 |---|---|---|
 | `smoke_test.sql` | service role (default) | Schema-level: enums, hierarchy FKs, trigger basics, both check constraints |
 | `e2e_review_flow.sql` | `authenticated` + pinned JWT | Reviewer flow: approve + flag, all four triggers, both check constraints, RLS context as in production |
 | `e2e_flag_review_flow.sql` | `authenticated` + pinned JWT | Senior flow: flag transition, the FlagReview join shape, accept-after-flag, delete |
+| `e2e_reviewer_stats.sql` | `authenticated` + pinned JWT | `reviewer_stats` view shape: row-count parity with `profiles`, no NULL aggregates, and delta assertions on insert (totals, decisions, points, reviewed_today, last_reviewed_at) |
 
 ```bash
 npx supabase db query --file supabase/tests/<file>.sql --linked
 ```
 
-The last row of each is a sentinel string (`smoke test passed`, `e2e review flow passed`, `flag review flow passed`). Anything else means a `raise exception` triggered — read the error to find which assertion fired.
+The last row of each is a sentinel string (`smoke test passed`, `e2e review flow passed`, `flag review flow passed`, `reviewer stats view passed`). Anything else means a `raise exception` triggered — read the error to find which assertion fired.
 
-> **Don't write new client-flow tests as the service role.** `supabase db query` defaults to running as the postgres/service role, which **bypasses RLS entirely**. The original `smoke_test.sql` ran this way and missed the trigger-vs-RLS bug fixed by migration 14 because the service role had update privileges on `photos`. The two `e2e_*` tests now `set local role authenticated; set local request.jwt.claims to '{"sub": "<uid>", "role": "authenticated"}';` so RLS is enforced as in production. Keep that pattern for any test that simulates the app's own writes.
+> **Don't write new client-flow tests as the service role.** `supabase db query` defaults to running as the postgres/service role, which **bypasses RLS entirely**. The original `smoke_test.sql` ran this way and missed the trigger-vs-RLS bug fixed by migration 14 because the service role had update privileges on `photos`. The three `e2e_*` tests now `set local role authenticated; set local request.jwt.claims to '{"sub": "<uid>", "role": "authenticated"}';` so RLS is enforced as in production. Keep that pattern for any test that simulates the app's own writes.
 
-After each migration: `npm run build`, push to GitHub. The build doesn't exercise the schema directly, but confirms nothing in the codebase regressed. The schema is now exercised end-to-end by step 7's app code (sub-steps 7.1–7.4 done as of the last working session — see `PROJECT_CONTEXT.md`'s roadmap for what's left).
+After each migration: `npm run build`, push to GitHub. The build doesn't exercise the schema directly, but confirms nothing in the codebase regressed. The schema is now exercised end-to-end by step 7's app code (sub-steps 7.1–7.5 done as of the last working session — see `PROJECT_CONTEXT.md`'s roadmap for what's left).
 
 ---
 

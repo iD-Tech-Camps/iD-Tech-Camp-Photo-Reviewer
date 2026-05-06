@@ -3,118 +3,230 @@
 import React from "react";
 import { Icon } from "@/components/Icon";
 import { PageHeader } from "@/components/Shell";
-import { BADGES, EXAMPLES, PhotoPlaceholder } from "@/components/data";
+import { EXAMPLES, PhotoPlaceholder } from "@/components/data";
+import { useCurrentUser, ROLE_LABEL } from "@/lib/current-user";
+import { createClient } from "@/lib/supabase/client";
+import { fetchMyStats, type ReviewerStats } from "@/lib/profile";
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+}
+
+// Builds the "<First> <Last.>" header. The last name is wrapped in an <em>
+// because the page-title renderer accepts dangerouslySetInnerHTML — same
+// pattern used everywhere else in the app. Falls back to the email local
+// part if the Google profile didn't supply a full name.
+function buildTitle(fullName: string | null, email: string | null): string {
+  const name = (fullName ?? "").trim();
+  if (name) {
+    const parts = name.split(/\s+/);
+    if (parts.length >= 2) {
+      const first = escapeHtml(parts.slice(0, -1).join(" "));
+      const last = escapeHtml(parts[parts.length - 1]);
+      return `${first} <em>${last}.</em>`;
+    }
+    return `<em>${escapeHtml(name)}.</em>`;
+  }
+  if (email) {
+    return `<em>${escapeHtml(email.split("@")[0])}.</em>`;
+  }
+  return "<em>Reviewer.</em>";
+}
+
+function formatJoinedDate(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+}
 
 export function ProfileScreen() {
+  const { id: profileId, email, fullName, role, loading: userLoading } = useCurrentUser();
+  const [stats, setStats] = React.useState<ReviewerStats | null>(null);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!profileId) return;
+    let cancelled = false;
+    const supabase = createClient();
+    fetchMyStats(supabase, profileId)
+      .then((s) => { if (!cancelled) setStats(s); })
+      .catch((err) => {
+        console.error("[profile] fetchMyStats failed:", err);
+        if (!cancelled) setLoadError(err?.message ?? "Failed to load stats");
+      });
+    return () => { cancelled = true; };
+  }, [profileId]);
+
+  const teamLabel = stats?.team?.trim() || "—";
+  const roleLabel = ROLE_LABEL[stats?.role ?? role];
+  const joined = formatJoinedDate(stats?.createdAt ?? null);
+  const sub = [
+    teamLabel,
+    roleLabel,
+    joined ? `Joined ${joined}` : null,
+  ].filter(Boolean).join(" · ");
+
+  const title = buildTitle(stats?.fullName ?? fullName, stats?.email ?? email);
+  const eyebrow = userLoading && !stats ? "Loading profile…" : "Your profile";
+
   return (
     <>
-      <PageHeader
-        eyebrow="Your profile"
-        title="Riley <em>Turner.</em>"
-        sub="Programs · Staff Reviewer · Joined May 28, 2026"
-      />
+      <PageHeader eyebrow={eyebrow} title={title} sub={sub} />
 
       <div className="page-body" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-
-          <div className="card">
-            <div className="card-header">
-              <h3 className="card-title">Career stats</h3>
-              <span className="card-eyebrow">Since May 28</span>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 20 }}>
-              <div className="stat">
-                <span className="stat-label">Total points</span>
-                <span className="stat-value">3,720</span>
-              </div>
-              <div className="stat">
-                <span className="stat-label">Photos reviewed</span>
-                <span className="stat-value">372</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="card-header">
-              <h3 className="card-title">Badges</h3>
-              <span className="card-eyebrow">{BADGES.filter(b => b.earned).length} / {BADGES.length} earned</span>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
-              {BADGES.map(b => (
-                <div key={b.id} style={{
-                  padding: 14, borderRadius: "var(--radius-sm)",
-                  border: "1px solid var(--rule)",
-                  background: b.earned ? "var(--paper)" : "transparent",
-                  opacity: b.earned ? 1 : 0.55,
-                  textAlign: "center",
-                }}>
-                  <div style={{
-                    width: 44, height: 44, borderRadius: "50%",
-                    background: b.earned ? "var(--sun)" : "var(--paper-3)",
-                    color: b.earned ? "white" : "var(--ink-3)",
-                    display: "grid", placeItems: "center", margin: "0 auto 8px",
-                  }}>
-                    <Icon name="medal" size={22} />
-                  </div>
-                  <div style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 500 }}>
-                    {b.name}
-                  </div>
-                  <div style={{ fontSize: 10, color: "var(--ink-3)", fontFamily: "var(--font-mono)", marginTop: 4, lineHeight: 1.3 }}>
-                    {b.earned
-                      ? `EARNED ${b.earnedOn!.toUpperCase()}`
-                      : `${b.progress}/${b.total}`}
-                  </div>
-                  {!b.earned && (b.progress ?? 0) > 0 && (
-                    <div className="progress-track" style={{ marginTop: 6, height: 3 }}>
-                      <div className="progress-fill" style={{
-                        width: (((b.progress ?? 0) / (b.total ?? 1)) * 100) + "%",
-                        background: "var(--sun)",
-                      }} />
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+          <CareerStatsCard stats={stats} loadError={loadError} />
+          <DecisionBreakdownCard stats={stats} />
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-          <div className="card">
-            <div className="card-eyebrow">Current title</div>
-            <div style={{ fontFamily: "var(--font-display)", fontSize: 30, fontWeight: 500, letterSpacing: "-0.02em", marginTop: 4 }}>
-              Camp Scout
-            </div>
-            <div style={{ fontSize: 13, color: "var(--ink-3)", marginBottom: 14 }}>
-              Level 4 · 280 pts to <em>Trailblazer</em>
-            </div>
-            <div className="progress-track">
-              <div className="progress-fill" style={{ width: "65%", background: "var(--sun)" }} />
-            </div>
-          </div>
-
-          <div className="card">
-            <h3 className="card-title" style={{ marginBottom: 12 }}>By camp</h3>
-            {([
-              ["AI & ML · MIT",    142, "sun"],
-              ["Robotics · UCLA",  98,  "lake"],
-              ["Game Dev · Stanford", 72, "moss"],
-              ["Film · NYU",       40,  "rose"],
-              ["Roblox · Caltech", 20,  "ink-2"],
-            ] as [string, number, string][]).map(([camp, count, color]) => (
-              <div key={camp} style={{
-                display: "flex", justifyContent: "space-between",
-                padding: "8px 0", borderTop: "1px solid var(--rule)",
-                fontSize: 13,
-              }}>
-                <span style={{ color: "var(--ink-2)" }}>{camp}</span>
-                <span style={{ fontFamily: "var(--font-mono)", color: `var(--${color})` }}>{count}</span>
-              </div>
-            ))}
-          </div>
+          <ActivityCard stats={stats} />
         </div>
       </div>
     </>
   );
+}
+
+function CareerStatsCard({
+  stats,
+  loadError,
+}: {
+  stats: ReviewerStats | null;
+  loadError: string | null;
+}) {
+  const sinceLabel = stats?.createdAt
+    ? `Since ${new Date(stats.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}`
+    : "Career";
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <h3 className="card-title">Career stats</h3>
+        <span className="card-eyebrow">{sinceLabel}</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 20 }}>
+        <div className="stat">
+          <span className="stat-label">Total points</span>
+          <span className="stat-value">
+            {stats ? stats.totalPoints.toLocaleString() : "—"}
+          </span>
+        </div>
+        <div className="stat">
+          <span className="stat-label">Photos reviewed</span>
+          <span className="stat-value">
+            {stats ? stats.totalReviews.toLocaleString() : "—"}
+          </span>
+        </div>
+      </div>
+      {loadError && (
+        <div style={{
+          marginTop: 12, fontSize: 12, color: "var(--rose)",
+        }}>
+          {loadError}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DecisionBreakdownCard({ stats }: { stats: ReviewerStats | null }) {
+  // Approves + flags + deletes = totalReviews. Showing the breakdown is the
+  // closest analog to the old "By camp" panel, but driven by data we can
+  // actually compute from the existing schema (no photos/camp_weeks join
+  // needed). Add a real "By camp" view in step 8 once SmugMug data lands.
+  const rows: [string, number, string][] = [
+    ["Approves", stats?.approves ?? 0, "moss"],
+    ["Flags",    stats?.flags    ?? 0, "sun"],
+    ["Deletes",  stats?.deletes  ?? 0, "rose"],
+  ];
+  const total = stats?.totalReviews ?? 0;
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <h3 className="card-title">Decision breakdown</h3>
+        <span className="card-eyebrow">
+          {total === 0 ? "No reviews yet" : `${total.toLocaleString()} total`}
+        </span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        {rows.map(([label, count, color]) => {
+          const pct = total > 0 ? (count / total) * 100 : 0;
+          return (
+            <div key={label} style={{
+              display: "grid", gridTemplateColumns: "120px 1fr auto",
+              alignItems: "center", gap: 12,
+              padding: "10px 0", borderTop: "1px solid var(--rule)",
+              fontSize: 13,
+            }}>
+              <span style={{ color: "var(--ink-2)" }}>{label}</span>
+              <div className="progress-track" style={{ height: 6 }}>
+                <div className="progress-fill" style={{
+                  width: `${pct}%`,
+                  background: `var(--${color})`,
+                }} />
+              </div>
+              <span style={{
+                fontFamily: "var(--font-mono)", fontSize: 12,
+                color: "var(--ink-2)", minWidth: 36, textAlign: "right",
+              }}>
+                {count.toLocaleString()}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ActivityCard({ stats }: { stats: ReviewerStats | null }) {
+  const today = stats?.reviewedToday ?? 0;
+  const lastReviewed = stats?.lastReviewedAt
+    ? formatRelativeFromIso(stats.lastReviewedAt)
+    : null;
+
+  return (
+    <div className="card">
+      <div className="card-eyebrow">Activity</div>
+      <div style={{
+        fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 500,
+        letterSpacing: "-0.02em", marginTop: 4,
+      }}>
+        {today.toLocaleString()}
+        <span style={{
+          fontSize: 14, color: "var(--ink-3)", fontFamily: "var(--font-mono)",
+          fontWeight: 400, marginLeft: 6,
+        }}>
+          today
+        </span>
+      </div>
+      <div style={{
+        fontSize: 13, color: "var(--ink-3)", marginTop: 6, lineHeight: 1.5,
+      }}>
+        {lastReviewed
+          ? <>Last review <strong style={{ color: "var(--ink-2)", fontWeight: 500 }}>{lastReviewed}</strong>.</>
+          : <>No reviews yet — head to the <strong style={{ color: "var(--ink-2)", fontWeight: 500 }}>Review</strong> queue to start.</>}
+      </div>
+    </div>
+  );
+}
+
+function formatRelativeFromIso(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const diffMs = Date.now() - d.getTime();
+  const sec = Math.round(diffMs / 1000);
+  if (sec < 60)  return `${sec}s ago`;
+  const min = Math.round(sec / 60);
+  if (min < 60)  return `${min}m ago`;
+  const hr  = Math.round(min / 60);
+  if (hr  < 24)  return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 7)   return `${day}d ago`;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 export function GuideScreen() {

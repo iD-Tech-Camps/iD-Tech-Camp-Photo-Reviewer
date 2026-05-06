@@ -3,9 +3,11 @@
 import React from "react";
 import { Icon } from "@/components/Icon";
 import { PageHeader } from "@/components/Shell";
-import { EXAMPLES, ADMIN_USERS, PhotoPlaceholder } from "@/components/data";
+import { EXAMPLES, PhotoPlaceholder } from "@/components/data";
 import { useSettings, AppSettings, BonusPeriod, BonusPeriodMode } from "@/components/settings";
-import { useCurrentUser } from "@/lib/current-user";
+import { useCurrentUser, ROLE_LABEL } from "@/lib/current-user";
+import { createClient } from "@/lib/supabase/client";
+import { fetchReviewerRoster, type ReviewerStats } from "@/lib/profile";
 
 export function AdminAssignment() {
   const [batchSize, setBatchSize] = React.useState(10);
@@ -1158,16 +1160,70 @@ export function AdminExamples() {
 }
 
 export function AdminOverview() {
+  const [roster, setRoster] = React.useState<ReviewerStats[] | null>(null);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [search, setSearch] = React.useState("");
+
+  React.useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+    fetchReviewerRoster(supabase)
+      .then((rows) => { if (!cancelled) setRoster(rows); })
+      .catch((err) => {
+        console.error("[admin-overview] fetchReviewerRoster failed:", err);
+        if (!cancelled) {
+          setLoadError(err?.message ?? "Failed to load reviewer roster");
+          setRoster([]);
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const all = roster ?? [];
+  const accountCount = all.length;
+
+  // "Active in last 24h" = reviewed something within 24h. last_active_at on
+  // profiles bumps on every review insert (trigger 4) so it's the cleanest
+  // signal here. The first column ("Reviewed today") aggregates the live
+  // reviewed_today value across all rows.
+  const dayMs = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const activeLast24h = all.filter((r) => {
+    const t = Date.parse(r.lastActiveAt);
+    return Number.isFinite(t) && now - t <= dayMs;
+  }).length;
+  const reviewedToday = all.reduce((sum, r) => sum + r.reviewedToday, 0);
+
+  // Case-insensitive match across name/email/team. Empty search = show all.
+  const q = search.trim().toLowerCase();
+  const visible = q
+    ? all.filter((r) =>
+        (r.fullName ?? "").toLowerCase().includes(q) ||
+        r.email.toLowerCase().includes(q) ||
+        (r.team ?? "").toLowerCase().includes(q),
+      )
+    : all;
+
+  const subtitle = roster === null
+    ? "Loading roster…"
+    : `${accountCount} account${accountCount === 1 ? "" : "s"} · ${activeLast24h} active in last 24h`;
+
   return (
     <>
       <PageHeader
         eyebrow="Admin · Overview"
         title="<em>Reviewers.</em>"
-        sub={`${ADMIN_USERS.length} accounts · 31 active in last 24h`}
+        sub={subtitle}
       >
         <div style={{ position: "relative" }}>
           <Icon name="search" size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)" }} />
-          <input className="input" placeholder="Search…" style={{ paddingLeft: 30, width: 220 }} />
+          <input
+            className="input"
+            placeholder="Search…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ paddingLeft: 30, width: 220 }}
+          />
         </div>
         <button className="btn btn-primary"><Icon name="plus" size={14} /> Invite</button>
       </PageHeader>
@@ -1175,8 +1231,12 @@ export function AdminOverview() {
       <div className="page-body">
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14, marginBottom: 20 }}>
           {([
-            ["Reviewed today",   "1,204", "photos"],
-            ["Active reviewers", "31",    "/ 47"],
+            ["Reviewed today",
+              roster === null ? "—" : reviewedToday.toLocaleString(),
+              reviewedToday === 1 ? "photo" : "photos"],
+            ["Active reviewers",
+              roster === null ? "—" : activeLast24h.toLocaleString(),
+              accountCount > 0 ? `/ ${accountCount}` : ""],
           ] as [string, string, string][]).map(([l, v, u]) => (
             <div key={l} className="card">
               <span className="stat-label">{l}</span>
@@ -1189,6 +1249,17 @@ export function AdminOverview() {
             </div>
           ))}
         </div>
+
+        {loadError && (
+          <div style={{
+            padding: 12, marginBottom: 14,
+            border: "1px solid var(--rose)", borderRadius: 8,
+            background: "var(--rose-soft)", color: "var(--rose)",
+            fontSize: 13,
+          }}>
+            Couldn&apos;t load roster: {loadError}
+          </div>
+        )}
 
         <div className="card" style={{ padding: 0 }}>
           <table className="table">
@@ -1204,37 +1275,21 @@ export function AdminOverview() {
               </tr>
             </thead>
             <tbody>
-              {ADMIN_USERS.map(u => (
-                <tr key={u.email}>
-                  <td>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div className="avatar" style={{ width: 28, height: 28, fontSize: 11 }}>
-                        {u.name.split(" ").map(n => n[0]).slice(0,2).join("")}
-                      </div>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 500 }}>{u.name}</div>
-                        <div style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{u.email}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <span className={"pill " + (u.role === "Admin" ? "pill-sun" : u.role === "Senior Reviewer" ? "pill-lake" : "")}>
-                      {u.role}
-                    </span>
-                  </td>
-                  <td style={{ fontSize: 13 }}>{u.team}</td>
-                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-3)" }}>{u.reviewed}</td>
-                  <td style={{
-                    textAlign: "right",
-                    fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 500,
-                  }}>{u.pts.toLocaleString()}</td>
-                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-3)" }}>{u.last}</td>
-                  <td>
-                    <button className="btn btn-ghost" style={{ padding: "4px 6px" }}>
-                      <Icon name="dots" size={14} />
-                    </button>
+              {roster === null && <RosterSkeletonRows />}
+              {roster !== null && visible.length === 0 && (
+                <tr>
+                  <td colSpan={7} style={{
+                    textAlign: "center", padding: "24px 12px",
+                    color: "var(--ink-3)", fontSize: 13,
+                  }}>
+                    {q
+                      ? <>No reviewers match &ldquo;{search}&rdquo;.</>
+                      : "No reviewer accounts yet."}
                   </td>
                 </tr>
+              )}
+              {visible.map(u => (
+                <ReviewerRow key={u.id} user={u} />
               ))}
             </tbody>
           </table>
@@ -1242,6 +1297,100 @@ export function AdminOverview() {
       </div>
     </>
   );
+}
+
+function ReviewerRow({ user }: { user: ReviewerStats }) {
+  const displayName = user.fullName ?? user.email.split("@")[0];
+  const initials = (() => {
+    if (user.fullName) {
+      const parts = user.fullName.trim().split(/\s+/).filter(Boolean);
+      if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+      if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    }
+    const local = user.email.split("@")[0] ?? "";
+    return local.slice(0, 2).toUpperCase() || "··";
+  })();
+  const rolePillClass = user.role === "admin"  ? "pill pill-sun"
+                      : user.role === "senior" ? "pill pill-lake"
+                      : "pill";
+
+  return (
+    <tr>
+      <td>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div className="avatar" style={{ width: 28, height: 28, fontSize: 11 }}>
+            {initials}
+          </div>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 500 }}>{displayName}</div>
+            <div style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{user.email}</div>
+          </div>
+        </div>
+      </td>
+      <td>
+        <span className={rolePillClass}>{ROLE_LABEL[user.role]}</span>
+      </td>
+      <td style={{ fontSize: 13 }}>{user.team || "—"}</td>
+      <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-3)" }}>
+        {user.totalReviews.toLocaleString()}
+      </td>
+      <td style={{
+        textAlign: "right",
+        fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 500,
+      }}>
+        {user.totalPoints.toLocaleString()}
+      </td>
+      <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-3)" }}>
+        {formatLastActive(user.lastActiveAt)}
+      </td>
+      <td>
+        <button className="btn btn-ghost" style={{ padding: "4px 6px" }}>
+          <Icon name="dots" size={14} />
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+function RosterSkeletonRows() {
+  return (
+    <>
+      {Array.from({ length: 4 }).map((_, i) => (
+        <tr key={i} style={{ opacity: 0.4 }}>
+          <td>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div className="avatar" style={{ width: 28, height: 28, fontSize: 11, background: "var(--paper-3)" }} />
+              <div>
+                <div style={{ height: 12, width: 120, background: "var(--paper-3)", borderRadius: 4, marginBottom: 4 }} />
+                <div style={{ height: 10, width: 160, background: "var(--paper-3)", borderRadius: 4 }} />
+              </div>
+            </div>
+          </td>
+          <td><div style={{ height: 18, width: 80, background: "var(--paper-3)", borderRadius: 999 }} /></td>
+          <td><div style={{ height: 12, width: 70, background: "var(--paper-3)", borderRadius: 4 }} /></td>
+          <td><div style={{ height: 12, width: 30, background: "var(--paper-3)", borderRadius: 4 }} /></td>
+          <td style={{ textAlign: "right" }}><div style={{ height: 16, width: 50, background: "var(--paper-3)", borderRadius: 4, marginLeft: "auto" }} /></td>
+          <td><div style={{ height: 12, width: 60, background: "var(--paper-3)", borderRadius: 4 }} /></td>
+          <td />
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function formatLastActive(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const diffMs = Date.now() - d.getTime();
+  const sec = Math.round(diffMs / 1000);
+  if (sec < 60)  return `${sec}s ago`;
+  const min = Math.round(sec / 60);
+  if (min < 60)  return `${min}m ago`;
+  const hr  = Math.round(min / 60);
+  if (hr  < 24)  return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 30)  return `${day}d ago`;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {

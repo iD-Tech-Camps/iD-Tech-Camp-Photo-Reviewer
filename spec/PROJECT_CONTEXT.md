@@ -14,7 +14,7 @@ Reviewers move through a queue of photos and either **approve** them (share-wort
 
 ## Current status (as of last working session)
 
-**The reviewer and senior flows are now fully DB-backed.** Step 7 of the roadmap is partially complete (sub-steps 1–4 of 6 done). What works end-to-end against Supabase:
+**The reviewer and senior flows are now fully DB-backed, and the Profile + Admin Overview screens read live aggregates.** Step 7 of the roadmap is partially complete (sub-steps 1–5 of 6 done). What works end-to-end against Supabase:
 
 - Production deployment on Vercel (auto-deploys from `main`)
 - Google OAuth login restricted to `@idtech.com` accounts (Internal Workspace)
@@ -23,12 +23,13 @@ Reviewers move through a queue of photos and either **approve** them (share-wort
 - Senior queue (`FlagReview`) reads flagged photos with the joined hierarchy + flagging reviewer + tag list, and writes accept/delete reviews
 - Sidebar Review and Flag-review badges show **live** counts from the DB; HomeScreen subtitle's `{{count}}` is live too
 - All four review triggers fire correctly under RLS (see "RLS gotcha" below — this took a fix migration)
-- 14 migrations applied. Two server-side e2e tests cover the review and flag-review flows end-to-end **under the authenticated role with JWT claims pinned**, so RLS is enforced as in production.
+- ProfileScreen and AdminOverview both read from `public.reviewer_stats` (a `security_invoker = true` view that joins `profiles` with aggregated `reviews` counts/sums — see migration 15). One row per profile, zero-filled aggregates so consumers don't have to null-coalesce.
+- 15 migrations applied. **Three** server-side e2e tests now cover the review flow, the flag-review flow, and the `reviewer_stats` shape (delta assertions on insert) — all run under `role=authenticated` with JWT claims pinned, so RLS is enforced as in production.
 - **UX cleanups landed (May 6, 2026):** the admin-configured bonus-period schedule (multiplier + days/times) is now persisted via `SettingsProvider` and read by `ReviewScreen`, which renders a `pennant` in the header during active windows and inflates the points shown to the reviewer. The reviewer's `FlagModal` now exposes a "Quarantine" checkbox that flows through `submitReview` to `reviews.quarantine`; the senior queue surfaces the same flag both as a row pill and a rose-themed banner on the detail panel.
 
 **What does NOT work yet:**
 
-- **Sub-steps 7.5 and 7.6 of the persistence work are still pending** — profile, points, and the merged Admin Overview roster still read from mock data, and tags / examples / app_settings / points_config are still loaded from `data.tsx` and the SettingsProvider rather than the DB
+- **Sub-step 7.6 is still pending** — tags / examples / app_settings / points_config (incl. bonus periods) are still loaded from `data.tsx` and the SettingsProvider rather than the DB. The admin-overview "Active reviewers" denominator currently equals total profiles count; once invitations + idle/inactive transitions land we'll want to filter by `profiles.status`.
 - No SmugMug API integration (the placeholder seed data simulates one location/week with 10 photos under "iD Tech Camps → Adelphi University → May 25–29, 2026")
 - **Bonus-period multiplier is UI-only.** The pennant in the review-screen header inflates the points the reviewer sees in the toast and on the action buttons, but `reviews.points_awarded` is still the trigger-snapshotted base value (because the trigger reads `points_config`, which the app doesn't override on insert yet). Closing this loop pairs naturally with sub-step 7.6.
 - Outstanding `npm audit` issues (Next.js 14.2.35 has known high-severity advisories; major-version upgrade pending)
@@ -56,18 +57,19 @@ components/
   App.tsx                 # root client component, role-gated screen routing; owns the live pendingCount fetch
   Shell.tsx               # Sidebar (live Review + Flag-review badges, role-aware nav), PageHeader, fireConfetti, useToast
   Icon.tsx                # inline SVG icon set
-  data.tsx                # mock constants — exports NEGATIVE_TAGS (13) and PHOTO_TAGS (mixed; positives derived locally inside ReviewScreen.tsx via PHOTO_TAGS.filter(t => t.color !== "rose")). Also EXAMPLES, BADGES, ADMIN_USERS, PhotoPlaceholder. SESSION_PHOTOS and FLAGGED_PHOTOS still exist but are no longer consumed by ReviewScreen / FlagReview / Sidebar (they read from Supabase). HomeScreen still uses SESSION_PHOTOS for the decorative thumbnail strip — pending step 7.5.
+  data.tsx                # mock constants — exports NEGATIVE_TAGS (13) and PHOTO_TAGS (mixed; positives derived locally inside ReviewScreen.tsx via PHOTO_TAGS.filter(t => t.color !== "rose")). Also EXAMPLES, BADGES, ADMIN_USERS, PhotoPlaceholder. SESSION_PHOTOS / FLAGGED_PHOTOS / ADMIN_USERS / BADGES still exist but are no longer consumed by the screens (they read from Supabase via lib/reviews.ts and lib/profile.ts). HomeScreen still uses SESSION_PHOTOS for the decorative thumbnail strip — defer to step 8 with SmugMug data; the strip is purely visual.
   settings.tsx            # SettingsProvider / useSettings — branding, reviewer copy, and `bonusPeriods` (admin-configured multiplier windows + the `activeBonusPeriod` helper consumed by ReviewScreen). Still localStorage-backed; step 7.6 wires it to `app_settings` + a new bonus-periods table.
   BrowserWindow.tsx       # ported from prototype, currently orphaned
   screens/
     HomeScreen.tsx        # uses live pendingCount from App.tsx
     ReviewScreen.tsx      # DB-backed approve/flag flow
-    LeaderboardProfileGuide.tsx  # ProfileScreen + GuideScreen only (LeaderboardScreen removed in step 6); still mock — step 7.5
-    Admin.tsx             # admin sub-screens (Overview is the merged roster after step 6) — still mock — step 7.6
+    LeaderboardProfileGuide.tsx  # ProfileScreen reads live `reviewer_stats` (career stats, decision breakdown, activity card); GuideScreen still uses mock EXAMPLES — step 7.6
+    Admin.tsx             # admin sub-screens. Overview now reads live `reviewer_stats` (roster + 24h activity stats); Points/Examples/Settings still use SettingsProvider + data.tsx mocks — step 7.6
     FlagReview.tsx        # DB-backed senior queue
 lib/
   current-user.tsx        # UserProvider, useCurrentUser, Role type, ROLE_LABEL. Reads role + id from profiles.
   reviews.ts              # fetchPendingPhotos, fetchPendingCount, fetchFlaggedPhotos, fetchFlaggedCount, submitReview
+  profile.ts              # fetchMyStats (single-row), fetchReviewerRoster (full table). Backed by `reviewer_stats` view.
   supabase/
     client.ts             # browser client (createBrowserClient)
     server.ts             # server client (createServerClient with cookies)
@@ -147,8 +149,8 @@ Both set in Vercel (all environments) and in `.env.local` for local dev.
 | 7.2 | Seed `photos` from `SESSION_PHOTOS` (with division/location/week chain) | ✅ Done | `4e5bca3`, migration 13 |
 | 7.3 | Wire `ReviewScreen` to insert real `reviews` + `review_tags` | ✅ Done | `431bcd2` |
 | 7.4 | Wire `FlagReview` senior actions + sidebar live count | ✅ Done | `a955aa2`, fix in `740780d` (migration 14) |
-| 7.5 | Move points / profile reads off mock data onto live `reviews` aggregates; same for the merged Admin Overview roster | ⏭️ **Up next** | — |
-| 7.6 | Read `tags` / `examples` / `points_config` / `app_settings` (incl. `bonus_periods`) from DB | Pending | — |
+| 7.5 | Move points / profile reads off mock data onto live `reviews` aggregates; same for the merged Admin Overview roster | ✅ Done | migration 15 (`reviewer_stats` view), `lib/profile.ts`, third e2e test |
+| 7.6 | Read `tags` / `examples` / `points_config` / `app_settings` (incl. `bonus_periods`) from DB | ⏭️ **Up next** | — |
 
 ---
 
@@ -202,13 +204,14 @@ Here's what's been useful:
 
 ## Testing
 
-Three files live under `supabase/tests/`. None of them are migrations — they're hand-run.
+Four files live under `supabase/tests/`. None of them are migrations — they're hand-run.
 
 | File | Role context | What it covers |
 |---|---|---|
 | `smoke_test.sql` | service role (default) | Schema-level: enums, hierarchy FKs, trigger basics, both check constraints |
 | `e2e_review_flow.sql` | `authenticated` + pinned JWT | Reviewer flow: approve + flag, all four triggers, both check constraints, RLS context as in production |
 | `e2e_flag_review_flow.sql` | `authenticated` + pinned JWT | Senior flow: flag transition, the FlagReview join shape, accept-after-flag, delete |
+| `e2e_reviewer_stats.sql` | `authenticated` + pinned JWT | `reviewer_stats` view shape + delta assertions: row-count parity with `profiles`, no NULL aggregates, totals/decisions/points/today bump correctly on review insert |
 
 Run any of them with:
 
@@ -216,7 +219,7 @@ Run any of them with:
 npx supabase db query --file supabase/tests/<file>.sql --linked
 ```
 
-The last row of each is a sentinel string (`smoke test passed`, `e2e review flow passed`, `flag review flow passed`). Anything else is a failure — the `do $$ ... raise exception ... $$` blocks will surface the assertion that broke.
+The last row of each is a sentinel string (`smoke test passed`, `e2e review flow passed`, `flag review flow passed`, `reviewer stats view passed`). Anything else is a failure — the `do $$ ... raise exception ... $$` blocks will surface the assertion that broke.
 
 To reset the dev queue between manual UI tests:
 
