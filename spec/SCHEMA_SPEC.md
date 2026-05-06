@@ -37,6 +37,7 @@ senior_routing_rules ─── tag_triggers (text[]) → references tag ids
 
 points_config         (single-row config table)
 app_settings          (single-row config table)
+bonus_periods         (multi-row schedule for Points Multiplier Bonus)
 examples              (admin-managed example library)
 ```
 
@@ -174,9 +175,11 @@ Index on `(reviewer_id, created_at desc)` for profile/leaderboard queries.
 | `active` | bool not null | `default true` |
 | `created_at` | timestamptz | |
 
-Seed this table from the tag lists in `components/data.tsx`.
+Seed this table from the tag lists historically in `components/data.tsx`.
 
-> **Implementation note.** There is no `POSITIVE_TAGS` export. `data.tsx` exports `NEGATIVE_TAGS` (13 entries — the canonical flag-tag list) and `PHOTO_TAGS` (a mixed list with 4 positive entries and 7 deprecated negative duplicates). The 4 positive tags (`great-moment`, `hero-shot`, `group-energy`, `caption-worthy`) are derived locally inside `ReviewScreen.tsx` via `PHOTO_TAGS.filter(t => t.color !== "rose")`. Migration `20260505000004_tags.sql` seeds the 13 negatives verbatim and those 4 positives; the 7 rose duplicates in `PHOTO_TAGS` are intentionally not seeded.
+> **Implementation note (initial seed).** Migration `20260505000004_tags.sql` seeded 13 negatives verbatim from the now-removed `NEGATIVE_TAGS` constant plus 4 positives (`great-moment`, `hero-shot`, `group-energy`, `caption-worthy`). The 7 rose duplicates that used to live in `PHOTO_TAGS` were intentionally not seeded — they were short-label dupes of the negatives.
+
+> **Implementation note (step 7.6a, May 2026).** Tags are now read from the DB at the app layer too: `lib/tags.ts → fetchTags` powers ReviewScreen's positive/negative chip lists, FlagReview's tag-id-to-label lookup (using `buildTagLabelLookup`, which includes inactive tags so historical flags still get pretty labels), and the Admin TagLibrary's create/remove flow. The old `NEGATIVE_TAGS` / `PHOTO_TAGS` / `negativeTagLabel` exports in `components/data.tsx` were deleted; if you need them, that file's git history has them. Admin writes go through Supabase under the existing `tags_write_admin` RLS policy. Hard delete is attempted first; the FK from `review_tags` (`on delete restrict`) makes that fail with `23503` whenever a tag has ever been used, in which case the UI falls back to `update tags set active = false`. App reads should always filter on `active = true` for reviewer-facing chips and ignore `active` when looking up labels for historical rows.
 
 ---
 
@@ -229,16 +232,52 @@ Enforce single row with `id smallint pk default 1 check (id = 1)`.
 | `updated_at` | timestamptz | |
 
 ### `app_settings` (single-row)
-Same single-row pattern.
+Same single-row pattern. Migration 16 (sub-step 7.6c) extended this to cover everything in the runtime `AppSettings` type except `bonusPeriods` (which moved to its own table — see below).
 
 | col | type | notes |
 |---|---|---|
 | `id` | smallint pk | always 1 |
-| `brand_mark` | text | currently in `SettingsProvider` |
-| `brand_name` | text | |
-| `brand_tagline` | text | |
-| `show_leaderboard` | bool not null | `default true` |
+| `brand_mark` | text | nullable; coerced to `""` on read |
+| `brand_name` | text | nullable |
+| `brand_tagline` | text | nullable |
+| `home_greeting` | text not null | reviewer-facing — `{name}` placeholder substituted client-side |
+| `home_subtitle` | text not null | `{name}` and `{count}` placeholders |
+| `completion_title` | text not null | shown above the points total on completion |
+| `completion_message` | text not null | shown under the title |
+| `empty_queue_message` | text not null | shown on Home when no photos are pending |
+| `support_email` | text not null | help link target |
+| `theme` | text not null | `light` \| `dark` (check constraint `app_settings_theme_chk`) |
+| `accent` | text not null | `sun` \| `lake` \| `moss` \| `rose` (check constraint `app_settings_accent_chk`) |
+| `density` | text not null | `comfortable` \| `compact` (check constraint `app_settings_density_chk`) |
 | `updated_at` | timestamptz | |
+
+The dead `show_leaderboard` column from the original migration 7 was dropped in migration 16 — the corresponding feature toggle was removed from `AppSettings` during the V1 scope refactor and nothing reads it.
+
+`lib/app-settings.ts` is the only client-side reader/writer; `SettingsProvider` (`components/settings.tsx`) hydrates from it on mount and writes back through it via `updateAppSettings`. AdminSettings debounces text-input writes (500ms idle + flush on blur) so a single edit doesn't fan out to dozens of round-trips.
+
+### `bonus_periods`
+Multi-row table for the Points Multiplier Bonus schedule (migration 17, sub-step 7.6d). Replaces the previous localStorage-backed `bonusPeriods: BonusPeriod[]` slice on `AppSettings`.
+
+| col | type | notes |
+|---|---|---|
+| `id` | uuid pk | `default gen_random_uuid()` |
+| `label` | text not null | display label; `default ''` |
+| `mode` | bonus_period_mode not null | enum: `recurring` \| `one-time` |
+| `days` | smallint[] not null | weekday set for recurring (Sun=0); empty for one-time |
+| `start_time` | text not null | HH:MM, recurring only; `default '00:00'` |
+| `end_time` | text not null | HH:MM, recurring only |
+| `start_at` | timestamptz | one-time only |
+| `end_at` | timestamptz | one-time only |
+| `multiplier` | numeric(4,2) not null | bounded `1.10..10.00` |
+| `enabled` | bool not null | `default true` |
+| `created_at` | timestamptz | |
+| `updated_at` | timestamptz | bumped by `tg_bonus_periods_touch_updated_at` on update |
+
+Mode-specific check constraints (`bonus_periods_recurring_complete`, `bonus_periods_onetime_complete`) enforce that the relevant fields are populated. The unused fields are kept on safe defaults so client code doesn't have to null-check based on mode.
+
+`lib/bonus-periods.ts` exposes `fetchBonusPeriods` / `createBonusPeriod` / `updateBonusPeriod` / `setBonusPeriodEnabled` / `deleteBonusPeriod`. `BonusPeriodsProvider` in `components/settings.tsx` wraps those with optimistic-update React state.
+
+**Why the trigger doesn't read this table.** The bonus window is evaluated in the *reviewer's local browser timezone* (admins schedule in their tz, reviewers see the pennant in theirs). Postgres triggers don't have a clean timezone context for the caller, so instead of reading `bonus_periods` server-side, the client passes an explicit `points_awarded = base × multiplier` into the `reviews` insert. The existing `reviews_snapshot_points` trigger's "fall back to `points_config` when caller didn't supply one" branch is the safety net for paths that never run through a bonus pennant (FlagReview senior accept/delete).
 
 ### `examples`
 | col | type | notes |
@@ -293,9 +332,9 @@ Enable RLS on every table. Default deny.
 - `select`: any authenticated user
 - `insert`/`update`/`delete`: service role only (these are written by the SmugMug import job, not by the app)
 
-**`tags`, `examples`, `senior_routing_rules`, `points_config`, `app_settings`**
+**`tags`, `examples`, `senior_routing_rules`, `points_config`, `app_settings`, `bonus_periods`**
 - `select`: any authenticated user
-- `insert`/`update`/`delete`: admin role only
+- `insert`/`update`/`delete`: admin role only (policy `bonus_periods_write_admin` mirrors the others — `using (public.is_admin()) with check (public.is_admin())`)
 
 **`reviews`**
 - `select`: any authenticated user (the leaderboard, profile, and admin overview all need broad read)
@@ -343,6 +382,8 @@ Each step landed as its own migration file under `supabase/migrations/` so each 
 | `20260505000013_seed_dev_data.sql` | Step 7.2: seeds the four real divisions, plus a placeholder location/week/photos chain (`smugmug_*_id` prefixed `placeholder-`). Idempotent. |
 | `20260505000014_fix_review_triggers_security.sql` | Step 7.x: re-creates the four review trigger functions with `security definer set search_path = public`, plus a one-time backfill that reconciles any photo whose `current_status` had drifted from its latest review's decision while the bug was live. |
 | `20260506000015_reviewer_stats_view.sql` | Step 7.5: adds the `public.reviewer_stats` view — a left join of `profiles` with aggregated `reviews` (count by decision, sum of points, max created_at, count where created_at >= current_date), zero-coalesced. Uses `with (security_invoker = true)` so RLS is enforced via the underlying tables' policies. Backs `lib/profile.ts → fetchMyStats / fetchReviewerRoster`. |
+| `20260506000016_app_settings_extension.sql` | Step 7.6c: extends `app_settings` with the reviewer-copy strings, `support_email`, and the appearance triple (theme/accent/density) — backfills DEFAULT_SETTINGS values into the singleton row, then locks the new columns NOT NULL with check constraints. Drops the dead `show_leaderboard` column. Backs `lib/app-settings.ts` and the new `SettingsProvider` write path. |
+| `20260506000017_bonus_periods.sql` | Step 7.6d: adds the `bonus_periods` table + the `bonus_period_mode` enum + RLS (read-all / write-admin). Includes mode-specific check constraints so recurring rows have a populated weekday set + clock window and one-time rows have a valid timestamptz pair. Backs `lib/bonus-periods.ts` and the new `BonusPeriodsProvider`. |
 
 Four tests live under `supabase/tests/` (deliberately outside `migrations/` so they aren't applied by `db push`). All four are transactions wrapped in `begin; ... rollback;`:
 

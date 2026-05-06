@@ -5,6 +5,7 @@ import { Icon } from "@/components/Icon";
 import { createClient } from "@/lib/supabase/client";
 import {
   useSettings,
+  useBonusPeriods,
   activeBonusPeriod,
   formatBonusWindow,
   formatBonusMultiplier,
@@ -288,16 +289,16 @@ export type ToastApi = ReturnType<typeof useToast>;
 // 1 minute" wraps cleanly into "no bonus" without a noticeable delay, but
 // not so frequent that we waste re-renders.
 export function useActiveBonusPeriod(): BonusPeriod | null {
-  const { settings } = useSettings();
+  const { periods } = useBonusPeriods();
   const [tick, setTick] = React.useState(0);
   React.useEffect(() => {
     const t = setInterval(() => setTick((n) => n + 1), 30_000);
     return () => clearInterval(t);
   }, []);
   return React.useMemo(
-    () => activeBonusPeriod(settings.bonusPeriods),
+    () => activeBonusPeriod(periods),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [settings.bonusPeriods, tick],
+    [periods, tick],
   );
 }
 

@@ -14,7 +14,7 @@ Reviewers move through a queue of photos and either **approve** them (share-wort
 
 ## Current status (as of last working session)
 
-**The reviewer and senior flows are now fully DB-backed, and the Profile + Admin Overview screens read live aggregates.** Step 7 of the roadmap is partially complete (sub-steps 1–5 of 6 done). What works end-to-end against Supabase:
+**The reviewer and senior flows are now fully DB-backed, and the Profile + Admin Overview screens read live aggregates. Tags, app settings, points config, and the multiplier-bonus schedule are all live on Supabase as of May 6, 2026 (sub-steps 7.6a / 7.6c / 7.6d). Examples (7.6b) is the only piece of step 7.6 still on mocks — the user explicitly deferred it for a follow-up plan.** Step 7 of the roadmap is partially complete (sub-steps 1–5 done; 7.6 sub-pieces a/c/d landed; 7.6b remaining). What works end-to-end against Supabase:
 
 - Production deployment on Vercel (auto-deploys from `main`)
 - Google OAuth login restricted to `@idtech.com` accounts (Internal Workspace)
@@ -24,14 +24,18 @@ Reviewers move through a queue of photos and either **approve** them (share-wort
 - Sidebar Review and Flag-review badges show **live** counts from the DB; HomeScreen subtitle's `{{count}}` is live too
 - All four review triggers fire correctly under RLS (see "RLS gotcha" below — this took a fix migration)
 - ProfileScreen and AdminOverview both read from `public.reviewer_stats` (a `security_invoker = true` view that joins `profiles` with aggregated `reviews` counts/sums — see migration 15). One row per profile, zero-filled aggregates so consumers don't have to null-coalesce.
-- 15 migrations applied. **Three** server-side e2e tests now cover the review flow, the flag-review flow, and the `reviewer_stats` shape (delta assertions on insert) — all run under `role=authenticated` with JWT claims pinned, so RLS is enforced as in production.
+- **Tags are now read from the DB.** ReviewScreen pulls positive/negative tags from `public.tags` via `lib/tags.ts → fetchTags`, partitioned by kind via `partitionActiveTags`. FlagReview uses `buildTagLabelLookup` so historical flag rows still render friendly labels even when their tag was later deactivated. Admin → Points & rules → Tag library now reads from the same table and writes new tags / remove (hard delete with FK-aware fallback to `active = false`) directly via Supabase. The old `NEGATIVE_TAGS` / `PHOTO_TAGS` / `negativeTagLabel` exports in `components/data.tsx` are gone.
+- **AppSettings live on `app_settings` (migration 16).** The single-row table now covers everything in the runtime `AppSettings` type except `bonusPeriods`: brand_*, the four reviewer-copy strings (greeting / subtitle / completion title + message / empty-queue message), `support_email`, and the appearance triple (`theme` / `accent` / `density`). The dead `show_leaderboard` column from migration 7 was dropped. `SettingsProvider` (`components/settings.tsx`) now hydrates from the DB on mount via `lib/app-settings.ts`, and admin edits go through `updateAppSettings` (optimistic UI, rollback + `saveError` surfaced on failure). The localStorage blob is gone.
+- **Points multiplier bonus has its own table now (migration 17).** `bonus_periods` is a multi-row table with the same shape the localStorage `BonusPeriod` had — `mode` discriminates recurring (days[] + HH:MM clock window) vs one-time (timestamptz pair) rows; `multiplier` is `numeric(4,2)` with a 1.10–10.00 check. Admin → Points & rules → Points multiplier bonus now reads/writes through `lib/bonus-periods.ts` via the new `BonusPeriodsProvider` + `useBonusPeriods` hook. Shell.tsx's `useActiveBonusPeriod` reads from the same provider. Mounted from `App.tsx` directly under `SettingsProvider`.
+- **`points_config` is read from the DB in ReviewScreen.** `lib/points-config.ts → fetchPointsConfig` lands on mount; `basePointsFor` returns the per-decision base (with a `DEFAULT_POINTS_CONFIG` fallback if the fetch hasn't resolved yet). Approve / Flag buttons + the post-decision toast multiply the base by the active bonus multiplier and the result is now passed verbatim into `submitReview` as `pointsAwarded` — the DB snapshot in `reviews.points_awarded` reflects the bonus the reviewer actually saw. (The trigger keeps its "fall back to points_config" behavior so senior accept/delete decisions, which never run through a bonus pennant, still snapshot correctly.) Admin → Points & rules → Per-action points loads + saves through `updatePointsConfig`.
+- 17 migrations applied. **Four** server-side tests still pass after the DB extensions (smoke + reviewer e2e + flag e2e + reviewer_stats); migrations 16–17 didn't disturb the surface they probe.
 - **UX cleanups landed (May 6, 2026):** Points Multiplier Bonus schedules (multiplier + days/times, admin-configured) are persisted via `SettingsProvider` and read by both HomeScreen (banner) and ReviewScreen (compact pennant) through the shared `BonusPennant` + `useActiveBonusPeriod` in `Shell.tsx`; both displays show the active window so reviewers know when it ends. The reviewer's `FlagModal` now exposes a "Quarantine" checkbox that flows through `submitReview` to `reviews.quarantine`; the senior queue surfaces the same flag both as a row pill and a rose-themed banner on the detail panel.
 
 **What does NOT work yet:**
 
-- **Sub-step 7.6 is still pending** — tags / examples / app_settings / points_config (incl. the multiplier-bonus schedule) are still loaded from `data.tsx` and the SettingsProvider rather than the DB. The admin-overview "Active reviewers" denominator currently equals total profiles count; once invitations + idle/inactive transitions land we'll want to filter by `profiles.status`.
+- **Examples are still on mocks (sub-step 7.6b).** `EXAMPLES` in `components/data.tsx` is consumed by GuideScreen + AdminExamples; the user explicitly deferred this piece to revisit with an updated plan. Everything else in step 7.6 has landed.
+- The admin-overview "Active reviewers" denominator currently equals total profiles count; once invitations + idle/inactive transitions land we'll want to filter by `profiles.status`.
 - No SmugMug API integration (the placeholder seed data simulates one location/week with 10 photos under "iD Tech Camps → Adelphi University → May 25–29, 2026")
-- **Bonus-period multiplier is UI-only.** The pennant in the review-screen header inflates the points the reviewer sees in the toast and on the action buttons, but `reviews.points_awarded` is still the trigger-snapshotted base value (because the trigger reads `points_config`, which the app doesn't override on insert yet). Closing this loop pairs naturally with sub-step 7.6.
 - Outstanding `npm audit` issues (Next.js 14.2.35 has known high-severity advisories; major-version upgrade pending)
 
 ---
@@ -57,8 +61,8 @@ components/
   App.tsx                 # root client component, role-gated screen routing; owns the live pendingCount fetch
   Shell.tsx               # Sidebar (live Review + Flag-review badges, role-aware nav), PageHeader, fireConfetti, useToast
   Icon.tsx                # inline SVG icon set
-  data.tsx                # mock constants — exports NEGATIVE_TAGS (13) and PHOTO_TAGS (mixed; positives derived locally inside ReviewScreen.tsx via PHOTO_TAGS.filter(t => t.color !== "rose")). Also EXAMPLES, BADGES, ADMIN_USERS, PhotoPlaceholder. SESSION_PHOTOS / FLAGGED_PHOTOS / ADMIN_USERS / BADGES still exist but are no longer consumed by the screens (they read from Supabase via lib/reviews.ts and lib/profile.ts). HomeScreen still uses SESSION_PHOTOS for the decorative thumbnail strip — defer to step 8 with SmugMug data; the strip is purely visual.
-  settings.tsx            # SettingsProvider / useSettings — branding, reviewer copy, and `bonusPeriods` (Points Multiplier Bonus schedule + the `activeBonusPeriod` / `formatBonusWindow` helpers consumed by HomeScreen + ReviewScreen). Still localStorage-backed; step 7.6 wires it to `app_settings` + a new multiplier-bonus table.
+  data.tsx                # mock constants. Tag exports are gone as of 7.6a — ReviewScreen / FlagReview / AdminTagLibrary now read from the live `tags` table via lib/tags.ts. Still exports EXAMPLES (used by GuideScreen + AdminExamples — 7.6b), PhotoPlaceholder + photoPaletteFor (used everywhere for the decorative gradient stand-ins), and the orphaned SESSION_PHOTOS / FLAGGED_PHOTOS / ADMIN_USERS / BADGES / RECENT_ACTIVITY arrays (no longer consumed by screens; HomeScreen still uses SESSION_PHOTOS for the decorative thumbnail strip, which is purely visual until SmugMug data lands in step 8).
+  settings.tsx            # Two providers + helpers. SettingsProvider / useSettings backs the singleton AppSettings (branding, reviewer copy, appearance, supportEmail) — DB-backed via lib/app-settings.ts as of 7.6c. BonusPeriodsProvider / useBonusPeriods backs the multiplier-bonus list — DB-backed via lib/bonus-periods.ts as of 7.6d. Also exports activeBonusPeriod / formatBonusWindow / formatBonusMultiplier / fillTemplate.
   BrowserWindow.tsx       # ported from prototype, currently orphaned
   screens/
     HomeScreen.tsx        # uses live pendingCount from App.tsx
@@ -70,6 +74,10 @@ lib/
   current-user.tsx        # UserProvider, useCurrentUser, Role type, ROLE_LABEL. Reads role + id from profiles.
   reviews.ts              # fetchPendingPhotos, fetchPendingCount, fetchFlaggedPhotos, fetchFlaggedCount, submitReview
   profile.ts              # fetchMyStats (single-row), fetchReviewerRoster (full table). Backed by `reviewer_stats` view.
+  tags.ts                 # fetchTags, partitionActiveTags, buildTagLabelLookup, createTag, setTagActive, deleteTag, slugifyTagId. Backs ReviewScreen, FlagReview, and AdminTagLibrary.
+  app-settings.ts         # fetchAppSettings, updateAppSettings — single-row config (brand_*, reviewer copy, appearance, support_email). Backs SettingsProvider.
+  points-config.ts        # fetchPointsConfig, updatePointsConfig, basePointsFor, DEFAULT_POINTS_CONFIG. Backs ReviewScreen (read for points_awarded calc) + AdminPoints (read/write).
+  bonus-periods.ts        # fetchBonusPeriods, createBonusPeriod, updateBonusPeriod, deleteBonusPeriod, setBonusPeriodEnabled. Backs BonusPeriodsProvider, which Shell.tsx + AdminPoints both consume.
   supabase/
     client.ts             # browser client (createBrowserClient)
     server.ts             # server client (createServerClient with cookies)
@@ -77,7 +85,7 @@ lib/
 middleware.ts             # root middleware, delegates to lib/supabase/middleware.ts
 styles/legacy.css         # ~650 lines, source of truth for visual styling
 supabase/
-  migrations/             # 14 SQL migrations applied to the work-account project (see SCHEMA_SPEC.md for the table)
+  migrations/             # 17 SQL migrations applied to the work-account project (see SCHEMA_SPEC.md for the table)
   tests/
     smoke_test.sql              # schema-level smoke; runs as service role
     e2e_review_flow.sql         # reviewer flow end-to-end; runs under role=authenticated with pinned JWT
@@ -150,7 +158,16 @@ Both set in Vercel (all environments) and in `.env.local` for local dev.
 | 7.3 | Wire `ReviewScreen` to insert real `reviews` + `review_tags` | ✅ Done | `431bcd2` |
 | 7.4 | Wire `FlagReview` senior actions + sidebar live count | ✅ Done | `a955aa2`, fix in `740780d` (migration 14) |
 | 7.5 | Move points / profile reads off mock data onto live `reviews` aggregates; same for the merged Admin Overview roster | ✅ Done | migration 15 (`reviewer_stats` view), `lib/profile.ts`, third e2e test |
-| 7.6 | Read `tags` / `examples` / `points_config` / `app_settings` (incl. multiplier-bonus schedule) from DB | ⏭️ **Up next** | — |
+| 7.6 | Read `tags` / `examples` / `points_config` / `app_settings` (incl. multiplier-bonus schedule) from DB | 🟡 In progress (1 / 4 pieces done — see breakdown below) | — |
+
+**Step 7.6 sub-pieces** (tackled one at a time per the working-style rule):
+
+| # | Piece | Status | Landed in |
+|---|---|---|---|
+| 7.6a | Tags — wire ReviewScreen / FlagReview / AdminTagLibrary to the live `tags` table via `lib/tags.ts`; drop NEGATIVE_TAGS / PHOTO_TAGS / negativeTagLabel | ✅ Done | 2026-05-06 |
+| 7.6b | Examples — wire GuideScreen + AdminExamples to the live `examples` table | ⏸️ Deferred | user requested an updated plan before tackling |
+| 7.6c | App settings — migration 16 added `home_greeting` / `home_subtitle` / `completion_title` / `completion_message` / `empty_queue_message` / `support_email` / `theme` / `accent` / `density` to `app_settings` and dropped the dead `show_leaderboard`. `lib/app-settings.ts` is the SettingsProvider's source of truth; AdminSettings debounces text input writes (500ms idle + flush on blur) to avoid hammering the DB. | ✅ Done | 2026-05-06 |
+| 7.6d | Points & bonus — `lib/points-config.ts` reads/writes the singleton row; ReviewScreen passes an explicit `pointsAwarded = base × multiplier` into `submitReview` so the DB snapshot reflects the bonus the reviewer saw. Migration 17 added the `bonus_periods` table; `lib/bonus-periods.ts` + `BonusPeriodsProvider` (in `components/settings.tsx`) replace the localStorage schedule. AdminPoints loads + saves both. | ✅ Done | 2026-05-06 |
 
 ---
 
@@ -182,7 +199,7 @@ Here's what's been useful:
 - **Review trigger functions are `SECURITY DEFINER`.** Originally they were invoker-rights and got silently zero-rowed by RLS on real client inserts (see "RLS gotcha" below). Migration 14 fixes this and the e2e tests now pin `role=authenticated` so the regression can't sneak past us again.
 - **`Role` enum in code uses `reviewer` (not `staff`).** The DB enum is `('reviewer', 'senior', 'admin')`; the code matches it. The friendly label "Staff Reviewer" is preserved in `ROLE_LABEL.reviewer`.
 - **No runtime feature toggles in V1.** Leaderboard and streaks are deferred to a post-V1 release; confetti is always on. Feature availability is controlled by versioning, not admin-facing switches. The four removed `AppSettings` keys (`confettiOnComplete`, `showLeaderboard`, `showStreaks`, `showDoublePoints`) are gone from the type, defaults, and every consumer; pre-existing values in `localStorage` are silently ignored by the spread merge. The multiplier-bonus pennant *is* back as of May 6, 2026, but it's data-driven (off when no bonus is enabled and active) — not a global feature flag.
-- **Points Multiplier Bonus lives in `SettingsProvider`, not in its own DB table yet.** `settings.bonusPeriods: BonusPeriod[]` is persisted via the same localStorage blob as the rest of `AppSettings`. HomeScreen and ReviewScreen consume it through `useActiveBonusPeriod()` + `BonusPennant` (shared in `Shell.tsx`), which re-evaluates on a 30s tick so windows can start/end mid-session, and inflate the points displayed by the active multiplier. `reviews.points_awarded` is **not** yet inflated — the trigger snapshots base values from `points_config`. Closing that gap is part of 7.6, when both `points_config` and the multiplier-bonus schedule move to the DB. (Internal code identifiers — `BonusPeriod`, `bonusPeriods`, `activeBonusPeriod` — stay; only the user-facing copy renamed to "Points Multiplier Bonus".)
+- **Points Multiplier Bonus is fully DB-backed (migration 17).** `bonus_periods` is its own multi-row table; `BonusPeriodsProvider` (in `components/settings.tsx`) hydrates from the DB on mount and exposes optimistic `create` / `update` / `remove` / `toggle` methods. Shell.tsx's `useActiveBonusPeriod()` + `BonusPennant` reads from that provider and re-evaluates on a 30s tick so windows start/end mid-session correctly. ReviewScreen now passes an explicit `pointsAwarded = base × multiplier` into `submitReview`, so `reviews.points_awarded` snapshots the bonused value rather than the base. The trigger keeps its "fall back to points_config" path so non-bonused decisions (senior accept / delete on FlagReview) still snapshot correctly.
 - **Admin Overview merged with Users.** One screen showing the reviewer roster with per-user stats (reviewed, points, last active, role, team), plus a small `Reviewed today` / `Active reviewers` stat row above the table. The old operational stat cards, "Queue depth by camp" panel, and "Flagged for review" snippet are gone. The standalone Users screen is gone too — its search + Invite buttons live on the merged Overview header. The queue-depth panel is deferred until SmugMug data is wired in step 8.
 
 ---
@@ -194,7 +211,7 @@ Here's what's been useful:
 - **`npm audit` reports 4 high-severity issues in Next.js 14.x.** The fix is a major-version upgrade (14 → 16). Deferred until after core features are working. **Don't run `npm audit fix --force`** — it will break the project mid-development.
 - **Pre-existing build warning:** `no-page-custom-font` in `app/layout.tsx`. Cosmetic only. Google Fonts are loaded via `<link>` rather than `next/font` to preserve the existing CSS font stacks unchanged.
 - **Vercel does not follow GitHub redirects.** If the repo is moved/transferred again in the future, the Vercel project must be manually reconnected to the new repo location. (Same for the local `origin` remote URL — that was updated to the new canonical work-org URL on 2026-05-05.)
-- **`data.tsx` tag exports do not match what the spec wording suggests.** There is no `POSITIVE_TAGS` export — only `NEGATIVE_TAGS` (13 entries) and `PHOTO_TAGS` (mixed). Positives are derived locally inside `ReviewScreen.tsx` via `PHOTO_TAGS.filter(t => t.color !== "rose")`. The 7 rose-colored entries in `PHOTO_TAGS` are deprecated duplicates of `NEGATIVE_TAGS` with shorter labels — ignore them. The `tags` migration seeds the 13 negatives plus the 4 positives only. The DB tag ids match the UI tag ids exactly, so no translation is needed when writing `review_tags`.
+- **Tag deletes can soft-fail (by design).** `review_tags.tag_id → tags.id` is `on delete restrict`, so once a tag has ever been used on a flag/approve, hard-deleting it raises `23503`. The Admin TagLibrary catches that and falls back to flipping `active = false`, which hides the tag from the review modals while keeping historical labels intact via `buildTagLabelLookup` (which includes inactive rows). If you ever need to bulk-purge truly unused tags, hitting the DB with `delete from public.tags where active = false and id not in (select tag_id from public.review_tags)` is safe.
 - **Placeholder seed data is keyed by an obvious prefix.** All the placeholder rows seeded by migration 13 (4 divisions, 1 location, 1 camp week, 10 photos) use `smugmug_*_id` values that start with `placeholder-`. The SmugMug import job (step 8) should `update ... where smugmug_*_id like 'placeholder-%'` to swap in real ids — or `delete` them outright before the first real import.
 - **Smoke test gotchas (for anyone editing `supabase/tests/smoke_test.sql`).** These also apply to the e2e tests:
   - `set local session_replication_role = replica;` skips FK enforcement *and every user-defined trigger* in the same transaction. The four review triggers are exactly what the tests are meant to verify, so don't reach for that setting. Drop the FK temporarily inside the transaction instead — DDL is transactional in Postgres, so the trailing `rollback;` restores it automatically.

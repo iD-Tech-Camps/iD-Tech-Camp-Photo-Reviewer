@@ -44,14 +44,14 @@ Reviewers see one photo at a time and have two actions:
 
 There is no separate reject action — if a photo isn't acceptable, flag it.
 
-If an admin has scheduled a **Points Multiplier Bonus** (Admin → Points & rules → Points multiplier bonus), reviewers see a pennant on the home screen and in the review-screen header during the active window, and the points shown on the Approve / Flag buttons + the post-decision toast are multiplied accordingly. Note: the DB `reviews.points_awarded` snapshot still records the base values from `points_config`; bringing the multiplier into the persisted points lands with step 7.6.
+If an admin has scheduled a **Points Multiplier Bonus** (Admin → Points & rules → Points multiplier bonus), reviewers see a pennant on the home screen and in the review-screen header during the active window, and the points shown on the Approve / Flag buttons + the post-decision toast are multiplied accordingly. The bonused value is also what gets written into `reviews.points_awarded` — the client passes it explicitly on insert; the trigger's `points_config` lookup is the fallback for non-bonused write paths (senior accept/delete on Flag review).
 
 Each decision writes a `reviews` row plus matching `review_tags` rows to Supabase. A trigger automatically:
 
 - Updates `photos.current_status` (`pending` → `approved` / `flagged` / `deleted`)
 - Maintains `photos.is_quarantined` for flag-with-quarantine
 - Bumps `profiles.last_active_at` on the reviewer
-- Snapshots `points_awarded` from `points_config` so future rate changes don't rewrite history
+- Snapshots `points_awarded` from `points_config` when the client didn't pass an explicit value (so future rate changes don't rewrite history)
 
 The `reviews` log is **immutable** by design — corrections are recorded as a new review row, not by updating an old one. RLS enforces that the only inserts allowed are `reviewer_id = auth.uid()` (with `delete` decisions further restricted to seniors and admins).
 
@@ -115,11 +115,15 @@ lib/
   current-user.tsx    UserProvider, useCurrentUser, Role type, ROLE_LABEL — reads role from profiles
   reviews.ts          fetchPendingPhotos, fetchPendingCount, fetchFlaggedPhotos, fetchFlaggedCount, submitReview
   profile.ts          fetchMyStats, fetchReviewerRoster — backed by the `reviewer_stats` view (migration 15)
+  tags.ts             fetchTags + admin write helpers — backs ReviewScreen, FlagReview, and Admin TagLibrary
+  app-settings.ts     fetchAppSettings + updateAppSettings — backs SettingsProvider
+  points-config.ts    fetchPointsConfig + updatePointsConfig + basePointsFor — backs ReviewScreen + AdminPoints
+  bonus-periods.ts    fetch / create / update / delete / setEnabled — backs BonusPeriodsProvider
   supabase/           browser, server, and middleware Supabase clients
 middleware.ts         Root middleware → lib/supabase/middleware.ts (session refresh + auth gating)
 styles/legacy.css     Source of truth for visual styling (Tailwind installed but unused)
 supabase/
-  migrations/         14 SQL migrations, applied to the work-account project
+  migrations/         17 SQL migrations, applied to the work-account project
   tests/              smoke + two e2e tests (run under role=authenticated)
 spec/
   PROJECT_CONTEXT.md  Working-session handoff doc — read this first

@@ -212,6 +212,12 @@ export type SubmitReviewInput = {
   note?: string;
   tags?: string[];
   quarantine?: boolean;
+  // When supplied, written verbatim into reviews.points_awarded. When
+  // omitted (or 0), the reviews_snapshot_points trigger fills it in from
+  // points_config at insert time. ReviewScreen passes an explicit value
+  // so an active Points Multiplier Bonus is reflected in the DB snapshot
+  // (the trigger doesn't know about bonuses — that lives in the client).
+  pointsAwarded?: number;
 };
 
 // Inserts a `reviews` row and (if any tags supplied) the matching `review_tags`
@@ -224,16 +230,25 @@ export async function submitReview(
   supabase: SupabaseClient,
   input: SubmitReviewInput,
 ): Promise<{ reviewId: string }> {
+  const insertRow: Record<string, unknown> = {
+    photo_id:    input.photoId,
+    reviewer_id: input.reviewerId,
+    decision:    input.decision,
+    rating:      input.rating ?? null,
+    note:        input.note ?? null,
+    quarantine:  input.quarantine ?? false,
+  };
+  // Only set points_awarded when the caller supplied a non-zero value.
+  // The trigger's "if 0/null then snapshot from points_config" branch
+  // is the safety net for the FlagReview senior actions, which don't
+  // run through the bonus pennant.
+  if (typeof input.pointsAwarded === "number" && input.pointsAwarded > 0) {
+    insertRow.points_awarded = input.pointsAwarded;
+  }
+
   const { data: review, error: reviewError } = await supabase
     .from("reviews")
-    .insert({
-      photo_id:     input.photoId,
-      reviewer_id:  input.reviewerId,
-      decision:     input.decision,
-      rating:       input.rating ?? null,
-      note:         input.note ?? null,
-      quarantine:   input.quarantine ?? false,
-    })
+    .insert(insertRow)
     .select("id")
     .single();
 

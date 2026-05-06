@@ -3,11 +3,7 @@
 import React from "react";
 import { Icon } from "@/components/Icon";
 import { BonusPennant, fireConfetti, ToastApi, useActiveBonusPeriod } from "@/components/Shell";
-import {
-  PHOTO_TAGS,
-  NEGATIVE_TAGS,
-  PhotoPlaceholder,
-} from "@/components/data";
+import { PhotoPlaceholder } from "@/components/data";
 import { useSettings } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
 import { createClient } from "@/lib/supabase/client";
@@ -16,6 +12,12 @@ import {
   submitReview,
   type ReviewQueuePhoto,
 } from "@/lib/reviews";
+import { fetchTags, partitionActiveTags, type Tag } from "@/lib/tags";
+import {
+  basePointsFor,
+  fetchPointsConfig,
+  type PointsConfig,
+} from "@/lib/points-config";
 
 type Decision = {
   decision: "approve" | "flag";
@@ -55,6 +57,8 @@ export function ReviewScreen({
   const { settings } = useSettings();
   const [photos, setPhotos] = React.useState<Photo[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [tags, setTags] = React.useState<Tag[] | null>(null);
+  const [pointsConfig, setPointsConfig] = React.useState<PointsConfig | null>(null);
   const [index, setIndex] = React.useState(0);
   const [decisions, setDecisions] = React.useState<Record<string, Decision>>({});
   const [modal, setModal] = React.useState<null | "approve" | "flag">(null);
@@ -63,10 +67,14 @@ export function ReviewScreen({
 
   const activePeriod = useActiveBonusPeriod();
   const multiplier = activePeriod?.multiplier ?? 1;
+  const approveBase = basePointsFor(pointsConfig, "approve");
+  const flagBase    = basePointsFor(pointsConfig, "flag");
 
   // Pull the queue once on mount. Photos already reviewed in earlier sessions
   // are filtered server-side by `current_status = 'pending'`, so no client-side
-  // dedupe is needed.
+  // dedupe is needed. Tags load in parallel — the modals open instantly with
+  // an empty chip list and fill in once tags arrive (typically in the same
+  // tick), instead of blocking the photo render on the tag round-trip.
   React.useEffect(() => {
     const supabase = createClient();
     let cancelled = false;
@@ -81,10 +89,33 @@ export function ReviewScreen({
           setPhotos([]);
         }
       });
+    fetchTags(supabase)
+      .then((rows) => {
+        if (!cancelled) setTags(rows);
+      })
+      .catch((err) => {
+        console.error("[review-screen] tags fetch failed:", err);
+        if (!cancelled) setTags([]);
+      });
+    // points_config drives the base points shown on action buttons and
+    // saved into reviews.points_awarded. Failure → log; basePointsFor()
+    // falls back to DEFAULT_POINTS_CONFIG so reviewers can still submit.
+    fetchPointsConfig(supabase)
+      .then((cfg) => {
+        if (!cancelled) setPointsConfig(cfg);
+      })
+      .catch((err) => {
+        console.warn("[review-screen] points_config fetch failed:", err?.message ?? err);
+      });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const { positives: positiveTags, negatives: negativeTags } = React.useMemo(
+    () => partitionActiveTags(tags ?? []),
+    [tags],
+  );
 
   const total = photos?.length ?? 0;
   const photo: Photo | undefined = photos ? photos[index] : undefined;
@@ -100,16 +131,25 @@ export function ReviewScreen({
       return;
     }
 
+    // Base points come from the live points_config (with DEFAULT fallback
+    // if the fetch hasn't landed yet). The active multiplier bonus, if
+    // any, inflates the base. The result is what reviewers see *and* what
+    // the DB snapshots into reviews.points_awarded — no more drift between
+    // the toast and the recorded value.
+    const basePts = basePointsFor(pointsConfig, d.decision);
+    const pts = Math.round(basePts * multiplier);
+
     setSubmitting(true);
     try {
       await submitReview(createClient(), {
-        photoId:    photo.id,
+        photoId:       photo.id,
         reviewerId,
-        decision:   d.decision,
-        rating:     d.rating,
-        note:       d.note,
-        tags:       d.tags,
-        quarantine: d.quarantine,
+        decision:      d.decision,
+        rating:        d.rating,
+        note:          d.note,
+        tags:          d.tags,
+        quarantine:    d.quarantine,
+        pointsAwarded: pts,
       });
     } catch (err: any) {
       console.error("[review-screen] submit failed:", err);
@@ -118,13 +158,6 @@ export function ReviewScreen({
       return;
     }
 
-    // Base points match the seeded points_config defaults; the active
-    // Points Multiplier Bonus (admin-configured) inflates what the reviewer
-    // sees in the toast and on the completion screen. The DB snapshot in
-    // `reviews.points_awarded` still comes from the trigger (base values) —
-    // closing that gap is part of the 7.6 wiring of points_config to the DB.
-    const basePts = d.decision === "approve" ? 10 : 15;
-    const pts = Math.round(basePts * multiplier);
     const full: Decision = { ...d, pts };
     setDecisions(prev => ({ ...prev, [photo.id]: full }));
     setPulse(d.decision);
@@ -317,6 +350,8 @@ export function ReviewScreen({
         <ApproveModal
           photo={photo}
           multiplier={multiplier}
+          basePoints={approveBase}
+          tags={positiveTags}
           onCancel={() => setModal(null)}
           onConfirm={(rating, tags) => commitDecision({ decision: "approve", rating, tags })}
         />
@@ -325,6 +360,8 @@ export function ReviewScreen({
         <FlagModal
           photo={photo}
           multiplier={multiplier}
+          basePoints={flagBase}
+          tags={negativeTags}
           onCancel={() => setModal(null)}
           onConfirm={(tags, note, quarantine) =>
             commitDecision({ decision: "flag", tags, note, quarantine })
@@ -520,16 +557,18 @@ function ModalHeader({ eyebrow, title, tone }: { eyebrow: string; title: string;
   );
 }
 
-const POSITIVE_TAGS = PHOTO_TAGS.filter(t => t.color !== "rose");
-
 function ApproveModal({
   photo,
   multiplier,
+  basePoints,
+  tags: positiveTags,
   onCancel,
   onConfirm,
 }: {
   photo: Photo;
   multiplier: number;
+  basePoints: number;
+  tags: Tag[];
   onCancel: () => void;
   onConfirm: (rating: number, tags: string[]) => void;
 }) {
@@ -589,7 +628,11 @@ function ApproveModal({
 
       <div className="label" style={{ marginBottom: 8 }}>Tags (optional)</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 20 }}>
-        {POSITIVE_TAGS.map(t => (
+        {positiveTags.length === 0 ? (
+          <span style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
+            No approve tags configured.
+          </span>
+        ) : positiveTags.map(t => (
           <button
             key={t.id}
             className={"tag-chip" + (tags.includes(t.id) ? " active" : "")}
@@ -608,7 +651,7 @@ function ApproveModal({
           style={{ opacity: rating ? 1 : 0.5, cursor: rating ? "pointer" : "not-allowed" }}
           onClick={() => onConfirm(rating, tags)}
         >
-          <Icon name="check" size={13} /> Approve · +{Math.round(10 * multiplier)} pts
+          <Icon name="check" size={13} /> Approve · +{Math.round(basePoints * multiplier)} pts
         </button>
       </div>
     </Modal>
@@ -618,11 +661,15 @@ function ApproveModal({
 function FlagModal({
   photo,
   multiplier,
+  basePoints,
+  tags: negativeTags,
   onCancel,
   onConfirm,
 }: {
   photo: Photo;
   multiplier: number;
+  basePoints: number;
+  tags: Tag[];
   onCancel: () => void;
   onConfirm: (tags: string[], note: string, quarantine: boolean) => void;
 }) {
@@ -645,7 +692,11 @@ function FlagModal({
 
       <div className="label" style={{ marginBottom: 8 }}>Tags</div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 18 }}>
-        {NEGATIVE_TAGS.map(r => (
+        {negativeTags.length === 0 ? (
+          <span style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
+            No flag tags configured. Ask an admin to add some in Admin → Points &amp; rules → Tag library.
+          </span>
+        ) : negativeTags.map(r => (
           <button
             key={r.id}
             onClick={() => toggle(r.id)}
@@ -681,7 +732,7 @@ function FlagModal({
           style={{ opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "not-allowed" }}
           onClick={() => onConfirm(tags, note.trim(), quarantine)}
         >
-          <Icon name="flag" size={13} /> Flag & continue · +{Math.round(15 * multiplier)} pts
+          <Icon name="flag" size={13} /> Flag & continue · +{Math.round(basePoints * multiplier)} pts
         </button>
       </div>
     </Modal>

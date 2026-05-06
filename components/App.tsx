@@ -16,7 +16,7 @@ import {
   AdminSettings,
 } from "@/components/screens/Admin";
 import { FlagReviewScreen } from "@/components/screens/FlagReview";
-import { SettingsProvider, useSettings } from "@/components/settings";
+import { BonusPeriodsProvider, SettingsProvider, useSettings } from "@/components/settings";
 import { UserProvider, useCurrentUser, type Role } from "@/lib/current-user";
 import { createClient } from "@/lib/supabase/client";
 import { fetchPendingCount } from "@/lib/reviews";
@@ -52,7 +52,9 @@ export default function App() {
   return (
     <UserProvider>
       <SettingsProvider>
-        <AppInner />
+        <BonusPeriodsProvider>
+          <AppInner />
+        </BonusPeriodsProvider>
       </SettingsProvider>
     </UserProvider>
   );

@@ -1,26 +1,25 @@
 "use client";
 
 import React from "react";
+import { createClient } from "@/lib/supabase/client";
+import {
+  fetchAppSettings,
+  updateAppSettings,
+  type DbAppSettings,
+} from "@/lib/app-settings";
+import {
+  fetchBonusPeriods,
+  createBonusPeriod as dbCreateBonusPeriod,
+  updateBonusPeriod as dbUpdateBonusPeriod,
+  deleteBonusPeriod as dbDeleteBonusPeriod,
+  setBonusPeriodEnabled as dbSetBonusPeriodEnabled,
+  type BonusPeriod,
+  type BonusPeriodMode,
+} from "@/lib/bonus-periods";
 
-export type BonusPeriodMode = "recurring" | "one-time";
-
-// Persisted shape for an admin-configured Points Multiplier Bonus — a
-// scheduled window during which all earned points are multiplied. `mode =
-// recurring` uses `days[]` + `startTime`/`endTime` (HH:MM, local browser
-// timezone). `mode = one-time` uses `startAt`/`endAt` as `datetime-local`
-// strings (no zone — interpreted in the reviewer's local tz).
-export type BonusPeriod = {
-  id: string;
-  label: string;
-  mode: BonusPeriodMode;
-  days: number[];
-  startTime: string;
-  endTime: string;
-  startAt: string;
-  endAt: string;
-  multiplier: number;
-  enabled: boolean;
-};
+// Re-export so existing imports (`@/components/settings`) keep resolving.
+// The canonical source of these types is now `lib/bonus-periods.ts`.
+export type { BonusPeriod, BonusPeriodMode };
 
 export type AppSettings = {
   brandName: string;
@@ -39,8 +38,6 @@ export type AppSettings = {
   density: "comfortable" | "compact";
 
   supportEmail: string;
-
-  bonusPeriods: BonusPeriod[];
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -60,25 +57,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   density: "comfortable",
 
   supportEmail: "support@idtech.com",
-
-  // One sample multiplier bonus seeded so the admin UI isn't empty out of
-  // the box. Label is left blank — the row UI falls back to "<n>× bonus"
-  // until an admin gives it something more specific. Disabled by default so
-  // reviewers don't see a pennant until someone opts in.
-  bonusPeriods: [
-    {
-      id: "bp_default_sample",
-      label: "",
-      mode: "recurring",
-      days: [0, 1, 2, 3, 4, 5, 6],
-      startTime: "10:00",
-      endTime: "11:00",
-      startAt: "",
-      endAt: "",
-      multiplier: 2,
-      enabled: false,
-    },
-  ],
 };
 
 // Returns the highest-multiplier BonusPeriod that is currently active,
@@ -174,49 +152,117 @@ function formatTime12(hhmm: string): string {
   return `${h12}:${m} ${period}`;
 }
 
-const STORAGE_KEY = "app-settings-v1";
+// ── App settings (single-row) ───────────────────────────────────────────────
 
 type Ctx = {
   settings: AppSettings;
-  update: (patch: Partial<AppSettings>) => void;
-  reset: () => void;
+  // hydrated = false during initial DB fetch. UI can show skeletons or
+  // just render with DEFAULT_SETTINGS until the real values land.
+  hydrated: boolean;
+  update: (patch: Partial<AppSettings>) => Promise<void>;
+  reset: () => Promise<void>;
+  // Surfaced so admins see when a write to the DB fails (e.g. they lost
+  // their admin role mid-session and the RLS policy now rejects writes).
+  saveError: string | null;
 };
 
 const SettingsContext = React.createContext<Ctx | null>(null);
 
+// Subset of AppSettings keys that map 1:1 to the `app_settings` row.
+// Keeping the list explicit means a future "in-memory only" settings key
+// (e.g. a per-tab debug flag) can be added without accidentally writing
+// to the DB.
+const DB_BACKED_KEYS = [
+  "brandName",
+  "brandTagline",
+  "brandMark",
+  "homeGreeting",
+  "homeSubtitle",
+  "completionTitle",
+  "completionMessage",
+  "emptyQueueMessage",
+  "supportEmail",
+  "theme",
+  "accent",
+  "density",
+] as const satisfies readonly (keyof DbAppSettings)[];
+
+function pickDbPatch(patch: Partial<AppSettings>): Partial<DbAppSettings> {
+  const out: Partial<DbAppSettings> = {};
+  for (const key of DB_BACKED_KEYS) {
+    if (key in patch) {
+      (out as Record<string, unknown>)[key] = patch[key as keyof AppSettings];
+    }
+  }
+  return out;
+}
+
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettings] = React.useState<AppSettings>(DEFAULT_SETTINGS);
   const [hydrated, setHydrated] = React.useState(false);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
+  const supabase = React.useMemo(() => createClient(), []);
 
+  // Pull the DB-backed slice once on mount. Failure → log and keep the
+  // defaults so the app still renders rather than getting stuck on a
+  // skeleton. Concretely, this means the first session after a DB outage
+  // shows the seeded defaults rather than an empty page.
   React.useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        setSettings({ ...DEFAULT_SETTINGS, ...parsed });
+    let cancelled = false;
+    fetchAppSettings(supabase)
+      .then((row) => {
+        if (cancelled) return;
+        if (row) setSettings((prev) => ({ ...prev, ...row }));
+        setHydrated(true);
+      })
+      .catch((err) => {
+        console.warn("[settings] fetch failed:", err?.message ?? err);
+        if (!cancelled) setHydrated(true);
+      });
+    return () => { cancelled = true; };
+  }, [supabase]);
+
+  const update = React.useCallback(
+    async (patch: Partial<AppSettings>) => {
+      // Apply optimistically so the UI updates immediately. Roll back on
+      // DB failure so admins see what actually persisted.
+      const previous = settings;
+      setSettings((prev) => ({ ...prev, ...patch }));
+      setSaveError(null);
+
+      const dbPatch = pickDbPatch(patch);
+      if (Object.keys(dbPatch).length === 0) return;
+
+      try {
+        const updated = await updateAppSettings(supabase, dbPatch);
+        // Replace with the canonical row in case the DB normalized any
+        // values (whitespace, casing, etc.).
+        setSettings((prev) => ({ ...prev, ...updated }));
+      } catch (err: any) {
+        console.error("[settings] update failed:", err);
+        setSaveError(err?.message ?? "Couldn't save settings.");
+        setSettings(previous);
       }
-    } catch {}
-    setHydrated(true);
-  }, []);
+    },
+    [settings, supabase],
+  );
 
-  React.useEffect(() => {
-    if (!hydrated || typeof window === "undefined") return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-    } catch {}
-  }, [settings, hydrated]);
-
-  const update = React.useCallback((patch: Partial<AppSettings>) => {
-    setSettings(prev => ({ ...prev, ...patch }));
-  }, []);
-
-  const reset = React.useCallback(() => {
+  const reset = React.useCallback(async () => {
+    setSaveError(null);
+    const previous = settings;
     setSettings(DEFAULT_SETTINGS);
-  }, []);
+    try {
+      const updated = await updateAppSettings(supabase, pickDbPatch(DEFAULT_SETTINGS));
+      setSettings((prev) => ({ ...prev, ...updated }));
+    } catch (err: any) {
+      console.error("[settings] reset failed:", err);
+      setSaveError(err?.message ?? "Couldn't reset settings.");
+      setSettings(previous);
+    }
+  }, [settings, supabase]);
 
   return (
-    <SettingsContext.Provider value={{ settings, update, reset }}>
+    <SettingsContext.Provider value={{ settings, hydrated, update, reset, saveError }}>
       {children}
     </SettingsContext.Provider>
   );
@@ -225,10 +271,147 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 export function useSettings(): Ctx {
   const ctx = React.useContext(SettingsContext);
   if (!ctx) {
-    return { settings: DEFAULT_SETTINGS, update: () => {}, reset: () => {} };
+    return {
+      settings: DEFAULT_SETTINGS,
+      hydrated: false,
+      update: async () => {},
+      reset: async () => {},
+      saveError: null,
+    };
   }
   return ctx;
 }
+
+// ── Bonus periods (multi-row) ───────────────────────────────────────────────
+// Step 7.6d split the schedule out of AppSettings into its own DB table
+// (`bonus_periods`, migration 17). It needed its own provider because the
+// shape is a list rather than a singleton object, and CRUD is row-based.
+//
+// Consumers:
+//   - Shell.tsx → useActiveBonusPeriod uses the `periods` slice
+//   - HomeScreen / ReviewScreen render a pennant when an active period exists
+//   - Admin → Points & rules → Points multiplier bonus reads + writes here
+
+type BonusPeriodsCtx = {
+  periods: BonusPeriod[];
+  hydrated: boolean;
+  saveError: string | null;
+  create: (period: Omit<BonusPeriod, "id">) => Promise<void>;
+  update: (id: string, period: Partial<BonusPeriod> & { mode: BonusPeriodMode }) => Promise<void>;
+  remove: (id: string) => Promise<void>;
+  toggle: (id: string, enabled: boolean) => Promise<void>;
+};
+
+const BonusPeriodsContext = React.createContext<BonusPeriodsCtx | null>(null);
+
+export function BonusPeriodsProvider({ children }: { children: React.ReactNode }) {
+  const [periods, setPeriods] = React.useState<BonusPeriod[]>([]);
+  const [hydrated, setHydrated] = React.useState(false);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
+  const supabase = React.useMemo(() => createClient(), []);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchBonusPeriods(supabase)
+      .then((rows) => {
+        if (cancelled) return;
+        setPeriods(rows);
+        setHydrated(true);
+      })
+      .catch((err) => {
+        console.warn("[bonus-periods] fetch failed:", err?.message ?? err);
+        if (!cancelled) setHydrated(true);
+      });
+    return () => { cancelled = true; };
+  }, [supabase]);
+
+  // Each mutation does the optimistic update locally and reconciles with
+  // the DB result. On error we surface it via `saveError` and roll the
+  // local list back to the pre-write snapshot.
+
+  const create = React.useCallback(async (period: Omit<BonusPeriod, "id">) => {
+    setSaveError(null);
+    const previous = periods;
+    // Temporary id placeholder for the optimistic insertion.
+    const placeholder: BonusPeriod = { ...period, id: `temp_${Date.now()}` };
+    setPeriods([...previous, placeholder]);
+    try {
+      const created = await dbCreateBonusPeriod(supabase, period);
+      setPeriods((prev) => prev.map((p) => (p.id === placeholder.id ? created : p)));
+    } catch (err: any) {
+      console.error("[bonus-periods] create failed:", err);
+      setSaveError(err?.message ?? "Couldn't save bonus period.");
+      setPeriods(previous);
+    }
+  }, [periods, supabase]);
+
+  const update = React.useCallback(
+    async (id: string, period: Partial<BonusPeriod> & { mode: BonusPeriodMode }) => {
+      setSaveError(null);
+      const previous = periods;
+      setPeriods((prev) => prev.map((p) => (p.id === id ? { ...p, ...period } : p)));
+      try {
+        const updated = await dbUpdateBonusPeriod(supabase, id, period);
+        setPeriods((prev) => prev.map((p) => (p.id === id ? updated : p)));
+      } catch (err: any) {
+        console.error("[bonus-periods] update failed:", err);
+        setSaveError(err?.message ?? "Couldn't save bonus period.");
+        setPeriods(previous);
+      }
+    },
+    [periods, supabase],
+  );
+
+  const remove = React.useCallback(async (id: string) => {
+    setSaveError(null);
+    const previous = periods;
+    setPeriods((prev) => prev.filter((p) => p.id !== id));
+    try {
+      await dbDeleteBonusPeriod(supabase, id);
+    } catch (err: any) {
+      console.error("[bonus-periods] delete failed:", err);
+      setSaveError(err?.message ?? "Couldn't remove bonus period.");
+      setPeriods(previous);
+    }
+  }, [periods, supabase]);
+
+  const toggle = React.useCallback(async (id: string, enabled: boolean) => {
+    setSaveError(null);
+    const previous = periods;
+    setPeriods((prev) => prev.map((p) => (p.id === id ? { ...p, enabled } : p)));
+    try {
+      await dbSetBonusPeriodEnabled(supabase, id, enabled);
+    } catch (err: any) {
+      console.error("[bonus-periods] toggle failed:", err);
+      setSaveError(err?.message ?? "Couldn't update bonus period.");
+      setPeriods(previous);
+    }
+  }, [periods, supabase]);
+
+  return (
+    <BonusPeriodsContext.Provider value={{ periods, hydrated, saveError, create, update, remove, toggle }}>
+      {children}
+    </BonusPeriodsContext.Provider>
+  );
+}
+
+export function useBonusPeriods(): BonusPeriodsCtx {
+  const ctx = React.useContext(BonusPeriodsContext);
+  if (!ctx) {
+    return {
+      periods: [],
+      hydrated: false,
+      saveError: null,
+      create: async () => {},
+      update: async () => {},
+      remove: async () => {},
+      toggle: async () => {},
+    };
+  }
+  return ctx;
+}
+
+// ── Templating ──────────────────────────────────────────────────────────────
 
 export function fillTemplate(
   template: string,

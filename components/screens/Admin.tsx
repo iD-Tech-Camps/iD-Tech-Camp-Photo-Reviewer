@@ -8,6 +8,20 @@ import { useSettings, AppSettings, BonusPeriod, BonusPeriodMode } from "@/compon
 import { useCurrentUser, ROLE_LABEL } from "@/lib/current-user";
 import { createClient } from "@/lib/supabase/client";
 import { fetchReviewerRoster, type ReviewerStats } from "@/lib/profile";
+import {
+  createTag,
+  deleteTag,
+  fetchTags,
+  setTagActive,
+  slugifyTagId,
+  type Tag,
+} from "@/lib/tags";
+import {
+  fetchPointsConfig,
+  updatePointsConfig,
+  type PointsConfig,
+} from "@/lib/points-config";
+import { useBonusPeriods } from "@/components/settings";
 
 export function AdminAssignment() {
   const [batchSize, setBatchSize] = React.useState(10);
@@ -309,19 +323,86 @@ function FlagNotifications() {
 }
 
 export function AdminPoints() {
-  const [pts, setPts] = React.useState<Record<string, number>>({
-    approve: 10, flag: 15,
-  });
+  const supabase = React.useMemo(() => createClient(), []);
+  const [config, setConfig] = React.useState<PointsConfig | null>(null);
+  const [draft, setDraft] = React.useState<PointsConfig | null>(null);
+  const [saving, setSaving] = React.useState(false);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchPointsConfig(supabase)
+      .then((row) => {
+        if (cancelled) return;
+        setConfig(row);
+        setDraft(row);
+      })
+      .catch((err) => {
+        console.error("[admin-points] fetch failed:", err);
+        if (!cancelled) setSaveError(err?.message ?? "Couldn't load points config");
+      });
+    return () => { cancelled = true; };
+  }, [supabase]);
+
+  const dirty = draft !== null && config !== null && (
+    draft.approvePoints !== config.approvePoints ||
+    draft.flagPoints    !== config.flagPoints    ||
+    draft.deletePoints  !== config.deletePoints
+  );
+
+  const save = async () => {
+    if (!draft || !dirty || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const updated = await updatePointsConfig(supabase, draft);
+      setConfig(updated);
+      setDraft(updated);
+    } catch (err: any) {
+      console.error("[admin-points] save failed:", err);
+      setSaveError(err?.message ?? "Couldn't save points config");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const adjust = (key: keyof PointsConfig, delta: number) => {
+    setDraft((prev) => {
+      if (!prev) return prev;
+      const next = Math.max(0, prev[key] + delta);
+      return { ...prev, [key]: next };
+    });
+  };
 
   return (
     <>
       <PageHeader
         eyebrow="Admin · Points"
         title="Points &amp; <em>rules.</em>"
-        sub="Tune the economy. Changes go live immediately."
+        sub={config === null ? "Loading current points config…" : "Tune the economy. Click Save to push changes live."}
       >
-        <button className="btn btn-primary">Save</button>
+        <button
+          className="btn btn-primary"
+          onClick={save}
+          disabled={!dirty || saving}
+          style={{ opacity: dirty && !saving ? 1 : 0.5, cursor: dirty && !saving ? "pointer" : "not-allowed" }}
+        >
+          {saving ? "Saving…" : dirty ? "Save changes" : "Saved"}
+        </button>
       </PageHeader>
+
+      {saveError && (
+        <div className="page-body" style={{ paddingTop: 0, paddingBottom: 0 }}>
+          <div style={{
+            padding: 12, marginBottom: 14,
+            border: "1px solid var(--rose)", borderRadius: 8,
+            background: "var(--rose-soft)", color: "var(--rose)",
+            fontSize: 13,
+          }}>
+            {saveError}
+          </div>
+        </div>
+      )}
 
       <div className="page-body" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -329,9 +410,9 @@ export function AdminPoints() {
             <h3 className="card-title" style={{ marginBottom: 14 }}>Per-action points</h3>
             <div style={{ display: "grid", gap: 2 }}>
               {([
-                ["approve", "Approve photo", "Standard approve action"],
-                ["flag",    "Flag for admin","Flag anything that isn't a clear approve — admin makes the final call"],
-              ] as [string, string, string][]).map(([key, label, note]) => (
+                ["approvePoints", "Approve photo", "Standard approve action"],
+                ["flagPoints",    "Flag for senior", "Flag anything that isn't a clear approve — a senior makes the final call"],
+              ] as [keyof PointsConfig, string, string][]).map(([key, label, note]) => (
                 <div key={key} style={{
                   display: "grid", gridTemplateColumns: "1fr auto",
                   padding: "12px 0", borderBottom: "1px solid var(--rule)",
@@ -343,15 +424,17 @@ export function AdminPoints() {
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <button className="btn btn-ghost" style={{ padding: "4px 10px" }}
-                      onClick={() => setPts({ ...pts, [key]: Math.max(0, pts[key] - 5) })}>−</button>
+                      onClick={() => adjust(key, -5)}
+                      disabled={draft === null}>−</button>
                     <div style={{
                       fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 500,
                       minWidth: 50, textAlign: "center",
                     }}>
-                      {pts[key]}
+                      {draft ? draft[key] : "—"}
                     </div>
                     <button className="btn btn-ghost" style={{ padding: "4px 10px" }}
-                      onClick={() => setPts({ ...pts, [key]: pts[key] + 5 })}>+</button>
+                      onClick={() => adjust(key, 5)}
+                      disabled={draft === null}>+</button>
                     <span className="pill" style={{ marginLeft: 6 }}>pts</span>
                   </div>
                 </div>
@@ -382,8 +465,6 @@ export function AdminPoints() {
     </>
   );
 }
-
-type TagRow = { id: string; label: string; type: "approve" | "flag" };
 
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAY_SHORT  = ["S", "M", "T", "W", "T", "F", "S"];
@@ -443,19 +524,12 @@ function roundedNowLocalInput(offsetMinutes: number = 0): string {
 }
 
 function BonusEvents() {
-  const { settings, update } = useSettings();
-  const periods = settings.bonusPeriods;
-  const setPeriods = React.useCallback(
-    (next: BonusPeriod[] | ((prev: BonusPeriod[]) => BonusPeriod[])) => {
-      const value = typeof next === "function" ? (next as (p: BonusPeriod[]) => BonusPeriod[])(periods) : next;
-      update({ bonusPeriods: value });
-    },
-    [periods, update],
-  );
+  const { periods, hydrated, saveError, create, update, remove: removePeriod, toggle: togglePeriod } =
+    useBonusPeriods();
   const [editing, setEditing] = React.useState<BonusPeriod | null>(null);
 
   const startNew = () => setEditing({
-    id: "bp_" + Date.now(),
+    id: "",
     label: "",
     mode: "recurring",
     days: [...ALL_DAYS],
@@ -467,21 +541,25 @@ function BonusEvents() {
     enabled: true,
   });
 
-  const save = (period: BonusPeriod) => {
-    setPeriods(prev => {
-      const exists = prev.some(p => p.id === period.id);
-      return exists ? prev.map(p => p.id === period.id ? period : p) : [...prev, period];
-    });
+  const save = async (period: BonusPeriod) => {
+    // The form's `existing` flag is the source of truth for create-vs-update;
+    // pass it via the second arg so we don't have to re-derive it here.
+    if (period.id && periods.some((p) => p.id === period.id)) {
+      await update(period.id, period);
+    } else {
+      const { id: _omit, ...rest } = period;
+      await create(rest);
+    }
     setEditing(null);
   };
 
-  const remove = (id: string) => {
-    setPeriods(prev => prev.filter(p => p.id !== id));
+  const remove = async (id: string) => {
+    await removePeriod(id);
     if (editing?.id === id) setEditing(null);
   };
 
-  const toggle = (id: string) => {
-    setPeriods(prev => prev.map(p => p.id === id ? { ...p, enabled: !p.enabled } : p));
+  const toggle = async (id: string, enabled: boolean) => {
+    await togglePeriod(id, enabled);
   };
 
   return (
@@ -489,15 +567,28 @@ function BonusEvents() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
         <h3 className="card-title">Points multiplier bonus</h3>
         <span style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)", letterSpacing: "0.08em" }}>
-          {periods.filter(p => p.enabled).length} ACTIVE · {periods.length} TOTAL
+          {hydrated
+            ? `${periods.filter(p => p.enabled).length} ACTIVE · ${periods.length} TOTAL`
+            : "LOADING…"}
         </span>
       </div>
       <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
         Schedule windows where all earned points are multiplied. Reviewers see a pennant during active windows.
       </div>
 
+      {saveError && (
+        <div style={{
+          padding: 10, marginBottom: 12,
+          border: "1px solid var(--rose)", borderRadius: 6,
+          background: "var(--rose-soft)", color: "var(--rose)",
+          fontSize: 12,
+        }}>
+          {saveError}
+        </div>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
-        {periods.length === 0 && !editing && (
+        {hydrated && periods.length === 0 && !editing && (
           <div style={{
             padding: 20, borderRadius: "var(--radius-sm)",
             border: "1px dashed var(--rule-2)",
@@ -510,7 +601,7 @@ function BonusEvents() {
           <BonusPeriodRow
             key={p.id}
             period={p}
-            onToggle={() => toggle(p.id)}
+            onToggle={() => toggle(p.id, !p.enabled)}
             onEdit={() => setEditing(p)}
             onRemove={() => remove(p.id)}
           />
@@ -520,10 +611,10 @@ function BonusEvents() {
       {editing ? (
         <BonusPeriodForm
           period={editing}
-          existing={periods.some(p => p.id === editing.id)}
+          existing={!!editing.id && periods.some(p => p.id === editing.id)}
           onCancel={() => setEditing(null)}
           onSave={save}
-          onRemove={() => remove(editing.id)}
+          onRemove={() => editing.id && remove(editing.id)}
         />
       ) : (
         <button
@@ -618,7 +709,7 @@ function BonusPeriodForm({
   period: BonusPeriod;
   existing: boolean;
   onCancel: () => void;
-  onSave: (p: BonusPeriod) => void;
+  onSave: (p: BonusPeriod) => void | Promise<void>;
   onRemove: () => void;
 }) {
   const [draft, setDraft] = React.useState<BonusPeriod>(period);
@@ -880,74 +971,170 @@ function MultiplierInput({
   );
 }
 
+// Live-DB tag library. Loads `tags` rows on mount and writes admin
+// changes (create / soft-delete / hard-delete) directly via lib/tags.
+// Both ReviewScreen and FlagReview consume the same table, so anything an
+// admin does here flows through to reviewers on their next page load.
+//
+// Delete strategy: try a hard delete first; if Postgres rejects it because
+// a `review_tags` row references the tag (FK is `on delete restrict`), fall
+// back to flipping `active = false` so the tag stops showing in the review
+// modals while preserving historical flag-row labels.
 function TagLibrary() {
-  const [tags, setTags] = React.useState<TagRow[]>([
-    { id: "hero",          label: "Hero shot",          type: "approve" },
-    { id: "group-energy",  label: "Group energy",       type: "approve" },
-    { id: "activity",      label: "Activity context",   type: "approve" },
-    { id: "blurry",        label: "Blurry",             type: "flag"    },
-    { id: "bad-expression",label: "Bad expression",     type: "flag"    },
-    { id: "messy-setup",   label: "Messy setup",        type: "flag"    },
-    { id: "bad-lighting",  label: "Bad lighting",       type: "flag"    },
-    { id: "inappropriate", label: "Inappropriate",      type: "flag"    },
-  ]);
+  const [tags, setTags] = React.useState<Tag[] | null>(null);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [adding, setAdding] = React.useState(false);
   const [newLabel, setNewLabel] = React.useState("");
-  const [newType, setNewType]   = React.useState<"approve" | "flag">("approve");
+  const [newKind, setNewKind] = React.useState<"positive" | "negative">("positive");
+  const [busy, setBusy] = React.useState(false);
+  const [opError, setOpError] = React.useState<string | null>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const supabase = React.useMemo(() => createClient(), []);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchTags(supabase)
+      .then((rows) => { if (!cancelled) setTags(rows); })
+      .catch((err) => {
+        console.error("[admin-tags] fetch failed:", err);
+        if (!cancelled) {
+          setLoadError(err?.message ?? "Failed to load tags");
+          setTags([]);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [supabase]);
 
   React.useEffect(() => { if (adding && inputRef.current) inputRef.current.focus(); }, [adding]);
 
-  const canSave = newLabel.trim().length > 0;
-  const save = () => {
+  const activeTags = (tags ?? []).filter((t) => t.active);
+  const positives = activeTags.filter((t) => t.kind === "positive");
+  const negatives = activeTags.filter((t) => t.kind === "negative");
+
+  const canSave = newLabel.trim().length > 0 && !busy;
+
+  const save = async () => {
     if (!canSave) return;
-    const id = newLabel.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    setTags([...tags, { id: id || "tag-" + Date.now(), label: newLabel.trim(), type: newType }]);
-    setNewLabel("");
-    setNewType("approve");
-    setAdding(false);
+    const label = newLabel.trim();
+    const slug = slugifyTagId(label) || `tag-${Date.now()}`;
+    if ((tags ?? []).some((t) => t.id === slug)) {
+      setOpError(`A tag with id "${slug}" already exists. Try a different label.`);
+      return;
+    }
+    setBusy(true);
+    setOpError(null);
+    try {
+      const nextOrder = Math.max(0, ...activeTags
+        .filter((t) => t.kind === newKind)
+        .map((t) => t.displayOrder)) + 1;
+      const created = await createTag(supabase, {
+        id: slug, label, kind: newKind, displayOrder: nextOrder,
+      });
+      setTags((prev) => [...(prev ?? []), created]);
+      setNewLabel("");
+      setNewKind("positive");
+      setAdding(false);
+    } catch (err: any) {
+      console.error("[admin-tags] create failed:", err);
+      setOpError(err?.message ?? "Couldn't create tag");
+    } finally {
+      setBusy(false);
+    }
   };
-  const cancel = () => { setAdding(false); setNewLabel(""); setNewType("approve"); };
-  const remove = (id: string) => setTags(ts => ts.filter(t => t.id !== id));
 
-  const approve = tags.filter(t => t.type === "approve");
-  const flag    = tags.filter(t => t.type === "flag");
+  const cancel = () => {
+    setAdding(false);
+    setNewLabel("");
+    setNewKind("positive");
+    setOpError(null);
+  };
 
-  const chipStyle = (type: "approve" | "flag"): React.CSSProperties => ({
+  const remove = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
+    setOpError(null);
+    try {
+      await deleteTag(supabase, id);
+      setTags((prev) => (prev ?? []).filter((t) => t.id !== id));
+    } catch (err: any) {
+      // FK-restrict on review_tags → fall back to soft-delete.
+      const code = err?.code ?? "";
+      const looksLikeFkViolation = code === "23503" ||
+        /violates foreign key/i.test(err?.message ?? "");
+      if (looksLikeFkViolation) {
+        try {
+          await setTagActive(supabase, id, false);
+          setTags((prev) =>
+            (prev ?? []).map((t) => (t.id === id ? { ...t, active: false } : t)),
+          );
+        } catch (softErr: any) {
+          console.error("[admin-tags] soft-delete failed:", softErr);
+          setOpError(softErr?.message ?? "Couldn't deactivate tag");
+        }
+      } else {
+        console.error("[admin-tags] delete failed:", err);
+        setOpError(err?.message ?? "Couldn't remove tag");
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const chipStyle = (kind: "positive" | "negative"): React.CSSProperties => ({
     display: "inline-flex", alignItems: "center", gap: 6,
     padding: "5px 10px", borderRadius: 999,
     fontSize: 12, fontWeight: 500,
-    background: type === "approve" ? "var(--moss-soft)" : "var(--sun-soft)",
-    color:      type === "approve" ? "var(--moss)"      : "var(--sun)",
+    background: kind === "positive" ? "var(--moss-soft)" : "var(--sun-soft)",
+    color:      kind === "positive" ? "var(--moss)"      : "var(--sun)",
     border: "1px solid transparent",
   });
+
+  const headerCount = tags === null ? "…" : `${activeTags.length} TAGS`;
 
   return (
     <div className="card">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
         <h3 className="card-title">Tag library</h3>
         <span style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)", letterSpacing: "0.08em" }}>
-          {tags.length} TAGS
+          {headerCount}
         </span>
       </div>
+
+      {loadError && (
+        <div style={{
+          padding: 10, marginBottom: 12,
+          border: "1px solid var(--rose)", borderRadius: 6,
+          background: "var(--rose-soft)", color: "var(--rose)",
+          fontSize: 12,
+        }}>
+          Couldn&apos;t load tags: {loadError}
+        </div>
+      )}
 
       <div style={{ marginBottom: 14 }}>
         <div className="card-eyebrow" style={{ color: "var(--moss)", marginBottom: 6 }}>
           Approve tags · positive
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {approve.map(t => (
-            <span key={t.id} style={chipStyle("approve")}>
+          {positives.map(t => (
+            <span key={t.id} style={chipStyle("positive")}>
               {t.label}
-              <button onClick={() => remove(t.id)} style={{
-                marginLeft: 2, color: "var(--moss)", opacity: 0.6,
-                display: "grid", placeItems: "center",
-              }}>
+              <button
+                onClick={() => remove(t.id)}
+                disabled={busy}
+                style={{
+                  marginLeft: 2, color: "var(--moss)", opacity: busy ? 0.3 : 0.6,
+                  display: "grid", placeItems: "center",
+                  cursor: busy ? "not-allowed" : "pointer",
+                }}
+                title="Remove"
+              >
                 <Icon name="x" size={10} />
               </button>
             </span>
           ))}
-          {approve.length === 0 && (
+          {tags !== null && positives.length === 0 && (
             <span style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
               No approve tags yet
             </span>
@@ -960,24 +1147,41 @@ function TagLibrary() {
           Flag tags · reasons
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {flag.map(t => (
-            <span key={t.id} style={chipStyle("flag")}>
+          {negatives.map(t => (
+            <span key={t.id} style={chipStyle("negative")}>
               {t.label}
-              <button onClick={() => remove(t.id)} style={{
-                marginLeft: 2, color: "var(--sun)", opacity: 0.6,
-                display: "grid", placeItems: "center",
-              }}>
+              <button
+                onClick={() => remove(t.id)}
+                disabled={busy}
+                style={{
+                  marginLeft: 2, color: "var(--sun)", opacity: busy ? 0.3 : 0.6,
+                  display: "grid", placeItems: "center",
+                  cursor: busy ? "not-allowed" : "pointer",
+                }}
+                title="Remove"
+              >
                 <Icon name="x" size={10} />
               </button>
             </span>
           ))}
-          {flag.length === 0 && (
+          {tags !== null && negatives.length === 0 && (
             <span style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
               No flag tags yet
             </span>
           )}
         </div>
       </div>
+
+      {opError && (
+        <div style={{
+          padding: 10, marginBottom: 12,
+          border: "1px solid var(--rose)", borderRadius: 6,
+          background: "var(--rose-soft)", color: "var(--rose)",
+          fontSize: 12,
+        }}>
+          {opError}
+        </div>
+      )}
 
       {adding ? (
         <div style={{
@@ -1000,23 +1204,26 @@ function TagLibrary() {
                 if (e.key === "Escape") cancel();
               }}
               placeholder="e.g. Candid moment"
-              maxLength={32}
+              maxLength={48}
             />
+            <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4, fontFamily: "var(--font-mono)" }}>
+              id: {slugifyTagId(newLabel) || "—"}
+            </div>
           </div>
           <div>
             <label className="label" style={{ marginBottom: 4 }}>Type</label>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
               <button
-                onClick={() => setNewType("approve")}
+                onClick={() => setNewKind("positive")}
                 style={{
                   padding: "10px 12px",
                   borderRadius: 8,
-                  border: newType === "approve" ? "1.5px solid var(--moss)" : "1px solid var(--rule)",
-                  background: newType === "approve" ? "var(--moss-soft)" : "var(--paper)",
-                  color: newType === "approve" ? "var(--moss)" : "var(--ink-2)",
+                  border: newKind === "positive" ? "1.5px solid var(--moss)" : "1px solid var(--rule)",
+                  background: newKind === "positive" ? "var(--moss-soft)" : "var(--paper)",
+                  color: newKind === "positive" ? "var(--moss)" : "var(--ink-2)",
                   textAlign: "left", cursor: "pointer",
                   display: "flex", alignItems: "center", gap: 8,
-                  fontSize: 13, fontWeight: newType === "approve" ? 500 : 400,
+                  fontSize: 13, fontWeight: newKind === "positive" ? 500 : 400,
                 }}>
                 <span style={{
                   width: 12, height: 12, borderRadius: 6,
@@ -1025,16 +1232,16 @@ function TagLibrary() {
                 Approve tag
               </button>
               <button
-                onClick={() => setNewType("flag")}
+                onClick={() => setNewKind("negative")}
                 style={{
                   padding: "10px 12px",
                   borderRadius: 8,
-                  border: newType === "flag" ? "1.5px solid var(--sun)" : "1px solid var(--rule)",
-                  background: newType === "flag" ? "var(--sun-soft)" : "var(--paper)",
-                  color: newType === "flag" ? "var(--sun)" : "var(--ink-2)",
+                  border: newKind === "negative" ? "1.5px solid var(--sun)" : "1px solid var(--rule)",
+                  background: newKind === "negative" ? "var(--sun-soft)" : "var(--paper)",
+                  color: newKind === "negative" ? "var(--sun)" : "var(--ink-2)",
                   textAlign: "left", cursor: "pointer",
                   display: "flex", alignItems: "center", gap: 8,
-                  fontSize: 13, fontWeight: newType === "flag" ? 500 : 400,
+                  fontSize: 13, fontWeight: newKind === "negative" ? 500 : 400,
                 }}>
                 <span style={{
                   width: 12, height: 12, borderRadius: 6,
@@ -1046,12 +1253,12 @@ function TagLibrary() {
           </div>
           <div>
             <label className="label" style={{ marginBottom: 4 }}>Preview</label>
-            <span style={chipStyle(newType)}>
+            <span style={chipStyle(newKind)}>
               {newLabel.trim() || "Tag label"}
             </span>
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 2 }}>
-            <button className="btn btn-ghost" onClick={cancel}>Cancel</button>
+            <button className="btn btn-ghost" onClick={cancel} disabled={busy}>Cancel</button>
             <button className="btn btn-primary" disabled={!canSave}
               style={{ opacity: canSave ? 1 : 0.5, cursor: canSave ? "pointer" : "not-allowed" }}
               onClick={save}>
@@ -1062,6 +1269,7 @@ function TagLibrary() {
       ) : (
         <button
           onClick={() => setAdding(true)}
+          disabled={tags === null}
           style={{
             width: "100%",
             padding: "10px 12px",
@@ -1070,7 +1278,8 @@ function TagLibrary() {
             background: "transparent",
             color: "var(--ink-2)",
             fontSize: 13, fontWeight: 500,
-            cursor: "pointer",
+            cursor: tags === null ? "wait" : "pointer",
+            opacity: tags === null ? 0.5 : 1,
             display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
           }}
         >
@@ -1473,8 +1682,67 @@ const ACCENT_OPTIONS: { id: AppSettings["accent"]; label: string; color: string 
   { id: "rose", label: "Rose", color: "oklch(0.62 0.16 25)" },
 ];
 
+// Debounced text input that mirrors a settings field. Renders on every
+// keystroke (instant feedback), but only calls onCommit after the user
+// stops typing for `delay` ms, plus immediately on blur. Without this,
+// every keystroke would punch through to a Supabase round-trip — fine
+// for prototyping in localStorage, painfully chatty against a real DB.
+function DebouncedTextInput({
+  value,
+  onCommit,
+  delay = 500,
+  className,
+  type = "text",
+  maxLength,
+  style,
+  transform,
+}: {
+  value: string;
+  onCommit: (next: string) => void;
+  delay?: number;
+  className?: string;
+  type?: string;
+  maxLength?: number;
+  style?: React.CSSProperties;
+  transform?: (raw: string) => string;
+}) {
+  const [draft, setDraft] = React.useState(value);
+  // Keep draft in sync if the canonical settings value changes from elsewhere
+  // (e.g. a different tab, or an optimistic rollback after a save error).
+  React.useEffect(() => { setDraft(value); }, [value]);
+
+  const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flush = React.useCallback((next: string) => {
+    if (next !== value) onCommit(next);
+  }, [value, onCommit]);
+
+  React.useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+
+  return (
+    <input
+      type={type}
+      className={className}
+      maxLength={maxLength}
+      style={style}
+      value={draft}
+      onChange={(e) => {
+        const next = transform ? transform(e.target.value) : e.target.value;
+        setDraft(next);
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => flush(next), delay);
+      }}
+      onBlur={() => {
+        if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+        flush(draft);
+      }}
+    />
+  );
+}
+
 export function AdminSettings() {
-  const { settings, update, reset } = useSettings();
+  const { settings, hydrated, update, reset, saveError } = useSettings();
   const { firstName } = useCurrentUser();
   const previewName = firstName || "Riley";
   const [confirmReset, setConfirmReset] = React.useState(false);
@@ -1487,7 +1755,9 @@ export function AdminSettings() {
       <PageHeader
         eyebrow="Admin · Settings"
         title="App <em>settings.</em>"
-        sub="Branding and reviewer copy. Changes save automatically."
+        sub={hydrated
+          ? "Branding and reviewer copy. Changes save to the database automatically."
+          : "Loading current settings from the database…"}
       >
         {confirmReset ? (
           <>
@@ -1507,6 +1777,19 @@ export function AdminSettings() {
         )}
       </PageHeader>
 
+      {saveError && (
+        <div className="page-body" style={{ paddingTop: 0, paddingBottom: 0 }}>
+          <div style={{
+            padding: 12, marginBottom: 14,
+            border: "1px solid var(--rose)", borderRadius: 8,
+            background: "var(--rose-soft)", color: "var(--rose)",
+            fontSize: 13,
+          }}>
+            Couldn&apos;t save: {saveError}
+          </div>
+        </div>
+      )}
+
       <div className="page-body" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
@@ -1517,22 +1800,23 @@ export function AdminSettings() {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 14 }}>
               <FieldRow label="App name">
-                <input className="input"
+                <DebouncedTextInput className="input"
                   value={settings.brandName}
-                  onChange={(e) => set("brandName", e.target.value)}
+                  onCommit={(v) => set("brandName", v)}
                   maxLength={32} />
               </FieldRow>
               <FieldRow label="Tagline">
-                <input className="input"
+                <DebouncedTextInput className="input"
                   value={settings.brandTagline}
-                  onChange={(e) => set("brandTagline", e.target.value)}
+                  onCommit={(v) => set("brandTagline", v)}
                   maxLength={48} />
               </FieldRow>
               <FieldRow label="Mark" hint="1 char">
-                <input className="input"
+                <DebouncedTextInput className="input"
                   style={{ textAlign: "center", fontFamily: "var(--font-display)", fontSize: 20 }}
                   value={settings.brandMark}
-                  onChange={(e) => set("brandMark", e.target.value.slice(0, 2))}
+                  onCommit={(v) => set("brandMark", v)}
+                  transform={(raw) => raw.slice(0, 2)}
                   maxLength={2} />
               </FieldRow>
             </div>
@@ -1547,15 +1831,15 @@ export function AdminSettings() {
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <FieldRow label="Home greeting" hint={`{name} is replaced with the reviewer's first name from their Google profile. Currently signed in as ${previewName}.`}>
-                <input className="input"
+                <DebouncedTextInput className="input"
                   value={settings.homeGreeting}
-                  onChange={(e) => set("homeGreeting", e.target.value)}
+                  onCommit={(v) => set("homeGreeting", v)}
                   maxLength={120} />
               </FieldRow>
               <FieldRow label="Home subtitle">
-                <input className="input"
+                <DebouncedTextInput className="input"
                   value={settings.homeSubtitle}
-                  onChange={(e) => set("homeSubtitle", e.target.value)}
+                  onCommit={(v) => set("homeSubtitle", v)}
                   maxLength={160} />
               </FieldRow>
             </div>
@@ -1566,28 +1850,28 @@ export function AdminSettings() {
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 14 }}>
                 <FieldRow label="Completion pennant" hint="Shown above the points total.">
-                  <input className="input"
+                  <DebouncedTextInput className="input"
                     value={settings.completionTitle}
-                    onChange={(e) => set("completionTitle", e.target.value)}
+                    onCommit={(v) => set("completionTitle", v)}
                     maxLength={40} />
                 </FieldRow>
                 <FieldRow label="Completion message">
-                  <input className="input"
+                  <DebouncedTextInput className="input"
                     value={settings.completionMessage}
-                    onChange={(e) => set("completionMessage", e.target.value)}
+                    onCommit={(v) => set("completionMessage", v)}
                     maxLength={120} />
                 </FieldRow>
               </div>
               <FieldRow label="Empty queue message" hint="Shown when there are no photos waiting.">
-                <input className="input"
+                <DebouncedTextInput className="input"
                   value={settings.emptyQueueMessage}
-                  onChange={(e) => set("emptyQueueMessage", e.target.value)}
+                  onCommit={(v) => set("emptyQueueMessage", v)}
                   maxLength={160} />
               </FieldRow>
               <FieldRow label="Support email" hint="Where reviewers go for help.">
-                <input className="input" type="email"
+                <DebouncedTextInput className="input" type="email"
                   value={settings.supportEmail}
-                  onChange={(e) => set("supportEmail", e.target.value)} />
+                  onCommit={(v) => set("supportEmail", v)} />
               </FieldRow>
             </div>
           </div>
@@ -1708,7 +1992,7 @@ export function AdminSettings() {
           <div className="card" style={{ background: "var(--lake-soft)", borderColor: "transparent" }}>
             <div className="card-eyebrow">About</div>
             <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.5, color: "var(--ink-2)" }}>
-              Settings persist in this browser. In production, sync these to your backend so every reviewer sees the same brand and copy.
+              Settings live on the <code style={{ fontFamily: "var(--font-mono)", fontSize: 11, background: "var(--paper)", padding: "1px 4px", borderRadius: 3 }}>app_settings</code> table in Supabase. Edits here are seen by every reviewer on their next page load.
             </div>
           </div>
         </div>

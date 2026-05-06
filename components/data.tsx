@@ -1,40 +1,12 @@
 "use client";
 
+// Tags moved to the live `tags` table (migration 4) and are read via
+// lib/tags.ts → fetchTags(). Step 7.6a (May 2026) removed the NEGATIVE_TAGS,
+// PHOTO_TAGS, and negativeTagLabel exports that previously lived here. If
+// you need a label for a tag id, use buildTagLabelLookup(tags) — it covers
+// inactive ids too, which negativeTagLabel didn't.
+
 import React from "react";
-
-export const NEGATIVE_TAGS = [
-  { id: "blurry",         label: "Blurry / out of focus" },
-  { id: "bad-expression", label: "Bad expression" },
-  { id: "bad-lighting",   label: "Bad lighting" },
-  { id: "messy-setup",    label: "Messy background" },
-  { id: "no-faces",       label: "No faces / camper not visible" },
-  { id: "duplicate",      label: "Duplicate shot" },
-  { id: "off-brand",      label: "Off-brand / not camp context" },
-  { id: "low-quality",    label: "Technical issue (resolution, crop)" },
-  { id: "inappropriate",  label: "Possibly inappropriate" },
-  { id: "gesture",        label: "Questionable gesture" },
-  { id: "consent",        label: "Consent / media release unclear" },
-  { id: "minor-ident",    label: "Identifying info visible" },
-  { id: "safety",         label: "Safety concern" },
-];
-
-export function negativeTagLabel(id: string): string {
-  return NEGATIVE_TAGS.find(t => t.id === id)?.label ?? id;
-}
-
-export const PHOTO_TAGS = [
-  { id: "blurry",        label: "Blurry",              color: "rose" },
-  { id: "bad-expression",label: "Bad expression",      color: "rose" },
-  { id: "messy-setup",   label: "Messy setup",         color: "rose" },
-  { id: "bad-lighting",  label: "Bad lighting",        color: "rose" },
-  { id: "no-faces",      label: "No faces visible",    color: "rose" },
-  { id: "inappropriate", label: "Inappropriate",       color: "rose" },
-  { id: "duplicate",     label: "Duplicate",           color: "rose" },
-  { id: "great-moment",  label: "Great moment",        color: "moss" },
-  { id: "hero-shot",     label: "Hero shot",           color: "sun"  },
-  { id: "group-energy",  label: "Group energy",        color: "lake" },
-  { id: "caption-worthy",label: "Caption-worthy",      color: "sun"  },
-];
 
 export const SESSION_PHOTOS = [
   { id: "IMG_4821", camp: "Game Dev · Stanford",      activity: "Unity workshop",   captured: "10:42 AM",  w: 1600, h: 1067 },

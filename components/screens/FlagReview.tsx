@@ -5,7 +5,6 @@ import { Icon } from "@/components/Icon";
 import { PageHeader, ToastApi } from "@/components/Shell";
 import {
   PhotoPlaceholder,
-  negativeTagLabel,
   photoPaletteFor,
 } from "@/components/data";
 import { useCurrentUser } from "@/lib/current-user";
@@ -15,6 +14,7 @@ import {
   submitReview,
   type FlaggedQueueItem,
 } from "@/lib/reviews";
+import { buildTagLabelLookup, fetchTags } from "@/lib/tags";
 
 type Resolution = "accepted" | "deleted";
 
@@ -23,6 +23,9 @@ export function FlagReviewScreen({ toast }: { toast: ToastApi }) {
   const [queue, setQueue] = React.useState<FlaggedQueueItem[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [tagLabel, setTagLabel] = React.useState<(id: string) => string>(
+    () => (id: string) => id,
+  );
   const [resolved, setResolved] = React.useState<
     Record<string, { photo: FlaggedQueueItem; resolution: Resolution }>
   >({});
@@ -43,6 +46,19 @@ export function FlagReviewScreen({ toast }: { toast: ToastApi }) {
           setLoadError(err?.message ?? "Failed to load flagged photos");
           setQueue([]);
         }
+      });
+    // Load tag labels in parallel. Until they arrive, the chips render the
+    // raw tag id as their label — readable, just less polished than the
+    // friendly text. Includes inactive tags so historical flags still get
+    // a label even if an admin has since hidden the tag.
+    fetchTags(supabase)
+      .then((tags) => {
+        if (cancelled) return;
+        const lookup = buildTagLabelLookup(tags);
+        setTagLabel(() => lookup);
+      })
+      .catch((err) => {
+        console.warn("[flag-review] tags fetch failed:", err?.message ?? err);
       });
     return () => {
       cancelled = true;
@@ -132,11 +148,13 @@ export function FlagReviewScreen({ toast }: { toast: ToastApi }) {
           loading={queue === null}
           selectedId={selectedId}
           onSelect={setSelectedId}
+          tagLabel={tagLabel}
         />
         {selected ? (
           <FlagDetailPanel
             photo={selected}
             disabled={submitting}
+            tagLabel={tagLabel}
             onAccept={() => resolve(selected, "accepted")}
             onDelete={() => resolve(selected, "deleted")}
             onDownload={() => download(selected)}
@@ -154,11 +172,13 @@ function FlagQueueList({
   loading,
   selectedId,
   onSelect,
+  tagLabel,
 }: {
   queue: FlaggedQueueItem[];
   loading: boolean;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  tagLabel: (id: string) => string;
 }) {
   if (loading) {
     return (
@@ -303,7 +323,7 @@ function FlagQueueList({
                         fontWeight: 500,
                       }}
                     >
-                      {negativeTagLabel(t)}
+                      {tagLabel(t)}
                     </span>
                   ))}
                   {p.flagReview.tagIds.length > 2 && (
@@ -329,12 +349,14 @@ function FlagQueueList({
 function FlagDetailPanel({
   photo,
   disabled,
+  tagLabel,
   onAccept,
   onDelete,
   onDownload,
 }: {
   photo: FlaggedQueueItem;
   disabled: boolean;
+  tagLabel: (id: string) => string;
   onAccept: () => void;
   onDelete: () => void;
   onDownload: () => void;
@@ -515,7 +537,7 @@ function FlagDetailPanel({
                   fontWeight: 500,
                 }}
               >
-                {negativeTagLabel(t)}
+                {tagLabel(t)}
               </span>
             ))
           )}
