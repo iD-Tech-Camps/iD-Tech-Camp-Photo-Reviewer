@@ -4,7 +4,7 @@ import React from "react";
 import { Icon } from "@/components/Icon";
 import { PageHeader } from "@/components/Shell";
 import { EXAMPLES, ADMIN_USERS, PhotoPlaceholder } from "@/components/data";
-import { useSettings, AppSettings } from "@/components/settings";
+import { useSettings, AppSettings, BonusPeriod, BonusPeriodMode } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
 
 export function AdminAssignment() {
@@ -383,21 +383,6 @@ export function AdminPoints() {
 
 type TagRow = { id: string; label: string; type: "approve" | "flag" };
 
-type BonusPeriodMode = "recurring" | "one-time";
-
-type BonusPeriod = {
-  id: string;
-  label: string;
-  mode: BonusPeriodMode;
-  days: number[];
-  startTime: string;
-  endTime: string;
-  startAt: string;
-  endAt: string;
-  multiplier: number;
-  enabled: boolean;
-};
-
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAY_SHORT  = ["S", "M", "T", "W", "T", "F", "S"];
 const ALL_DAYS   = [0, 1, 2, 3, 4, 5, 6];
@@ -456,20 +441,15 @@ function roundedNowLocalInput(offsetMinutes: number = 0): string {
 }
 
 function BonusEvents() {
-  const [periods, setPeriods] = React.useState<BonusPeriod[]>([
-    {
-      id: "bp_1",
-      label: "Double-points hour",
-      mode: "recurring",
-      days: [...ALL_DAYS],
-      startTime: "10:00",
-      endTime: "11:00",
-      startAt: "",
-      endAt: "",
-      multiplier: 2,
-      enabled: true,
+  const { settings, update } = useSettings();
+  const periods = settings.bonusPeriods;
+  const setPeriods = React.useCallback(
+    (next: BonusPeriod[] | ((prev: BonusPeriod[]) => BonusPeriod[])) => {
+      const value = typeof next === "function" ? (next as (p: BonusPeriod[]) => BonusPeriod[])(periods) : next;
+      update({ bonusPeriods: value });
     },
-  ]);
+    [periods, update],
+  );
   const [editing, setEditing] = React.useState<BonusPeriod | null>(null);
 
   const startNew = () => setEditing({

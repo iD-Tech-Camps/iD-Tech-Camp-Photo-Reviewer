@@ -244,10 +244,32 @@ function FlagQueueList({
                 >
                   <span
                     style={{
-                      fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 12,
+                      display: "flex", alignItems: "center", gap: 6,
+                      minWidth: 0,
                     }}
                   >
-                    {p.smugmugImageId}
+                    <span
+                      style={{
+                        fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 12,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}
+                    >
+                      {p.smugmugImageId}
+                    </span>
+                    {p.flagReview.quarantine && (
+                      <span
+                        title="Quarantined — hidden from public folder"
+                        style={{
+                          fontSize: 9, padding: "2px 6px", borderRadius: 999,
+                          background: "var(--rose-soft)", color: "var(--rose)",
+                          fontWeight: 600, fontFamily: "var(--font-mono)",
+                          letterSpacing: "0.08em", textTransform: "uppercase",
+                          flexShrink: 0,
+                        }}
+                      >
+                        Quarantined
+                      </span>
+                    )}
                   </span>
                   <span
                     style={{
@@ -465,9 +487,10 @@ function FlagDetailPanel({
             style={{
               padding: "8px 12px",
               borderRadius: 6,
-              background: "var(--sun-soft)",
-              color: "var(--ink)",
+              background: "var(--rose-soft)",
+              color: "var(--rose)",
               fontSize: 12,
+              fontWeight: 500,
               marginBottom: 16,
               display: "inline-flex",
               alignItems: "center",

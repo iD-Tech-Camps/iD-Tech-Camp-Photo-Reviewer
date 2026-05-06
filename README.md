@@ -40,9 +40,11 @@ Both are also set in Vercel (all environments). Domain-restriction is enforced a
 Reviewers see one photo at a time and have two actions:
 
 - **Approve** (`A`) — share-worthy. Pick a star rating (1–5) and optional positive tags.
-- **Flag** (`F`) — anything that isn't a clear approve. Tag every issue you see (quality, safety, consent, etc.) and add an optional reason note. A senior reviewer makes the final call.
+- **Flag** (`F`) — anything that isn't a clear approve. Tag every issue you see (quality, safety, consent, etc.) and add an optional reason note. A senior reviewer makes the final call. The flag dialog also exposes a **Quarantine** checkbox; tick it for clear safety / dress-code / consent issues so the photo is hidden from the public folder until a senior resolves it (the trigger flips `photos.is_quarantined` on insert; the SmugMug folder move lands with step 8).
 
 There is no separate reject action — if a photo isn't acceptable, flag it.
+
+If an admin has scheduled a **bonus period** (Admin → Points & rules → Bonus events), reviewers see a `pennant` in the review-screen header during the active window and the points shown on the Approve / Flag buttons + the post-decision toast are multiplied accordingly. Note: the DB `reviews.points_awarded` snapshot still records the base values from `points_config`; bringing the multiplier into the persisted points lands with step 7.6.
 
 Each decision writes a `reviews` row plus matching `review_tags` rows to Supabase. A trigger automatically:
 

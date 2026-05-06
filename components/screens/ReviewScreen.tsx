@@ -8,7 +8,7 @@ import {
   NEGATIVE_TAGS,
   PhotoPlaceholder,
 } from "@/components/data";
-import { useSettings } from "@/components/settings";
+import { useSettings, activeBonusPeriod, type BonusPeriod } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -23,6 +23,7 @@ type Decision = {
   tags?: string[];
   note?: string;
   pts?: number;
+  quarantine?: boolean;
 };
 
 type Photo = ReviewQueuePhoto;
@@ -51,6 +52,7 @@ export function ReviewScreen({
   toast: ToastApi;
 }) {
   const { id: reviewerId } = useCurrentUser();
+  const { settings } = useSettings();
   const [photos, setPhotos] = React.useState<Photo[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [index, setIndex] = React.useState(0);
@@ -58,6 +60,23 @@ export function ReviewScreen({
   const [modal, setModal] = React.useState<null | "approve" | "flag">(null);
   const [pulse, setPulse] = React.useState<null | "approve" | "flag">(null);
   const [submitting, setSubmitting] = React.useState(false);
+
+  // Recompute the active bonus period once a minute so a window that starts
+  // or ends mid-session updates without a refresh. The pennant and the
+  // points displayed on the action buttons key off this.
+  const [bonusTick, setBonusTick] = React.useState(0);
+  React.useEffect(() => {
+    const t = setInterval(() => setBonusTick((n) => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const activePeriod = React.useMemo(
+    () => activeBonusPeriod(settings.bonusPeriods),
+    // bonusTick is intentionally part of the dep array so the memo re-evaluates
+    // on the timer; settings.bonusPeriods covers admin edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [settings.bonusPeriods, bonusTick],
+  );
+  const multiplier = activePeriod?.multiplier ?? 1;
 
   // Pull the queue once on mount. Photos already reviewed in earlier sessions
   // are filtered server-side by `current_status = 'pending'`, so no client-side
@@ -104,6 +123,7 @@ export function ReviewScreen({
         rating:     d.rating,
         note:       d.note,
         tags:       d.tags,
+        quarantine: d.quarantine,
       });
     } catch (err: any) {
       console.error("[review-screen] submit failed:", err);
@@ -112,10 +132,13 @@ export function ReviewScreen({
       return;
     }
 
-    // Points displayed in the toast match the seeded points_config defaults.
-    // The actual snapshot lives on `reviews.points_awarded` (set by trigger);
-    // we'll read those back when sub-step 5 wires the leaderboard to the DB.
-    const pts = d.decision === "approve" ? 10 : 15;
+    // Base points match the seeded points_config defaults; the active
+    // bonus-period multiplier (admin-configured) inflates what the reviewer
+    // sees in the toast and on the completion screen. The DB snapshot in
+    // `reviews.points_awarded` still comes from the trigger (base values) —
+    // closing that gap is part of the 7.6 wiring of points_config to the DB.
+    const basePts = d.decision === "approve" ? 10 : 15;
+    const pts = Math.round(basePts * multiplier);
     const full: Decision = { ...d, pts };
     setDecisions(prev => ({ ...prev, [photo.id]: full }));
     setPulse(d.decision);
@@ -190,6 +213,7 @@ export function ReviewScreen({
             <div className="progress-fill" style={{ width: progressPct + "%" }} />
           </div>
         </div>
+        {activePeriod && <BonusPennant period={activePeriod} />}
         <button
           className={"btn " + (showExamplesDrawer ? "btn-primary" : "btn-ghost")}
           onClick={() => setShowExamplesDrawer(!showExamplesDrawer)}>
@@ -306,6 +330,7 @@ export function ReviewScreen({
       {modal === "approve" && (
         <ApproveModal
           photo={photo}
+          multiplier={multiplier}
           onCancel={() => setModal(null)}
           onConfirm={(rating, tags) => commitDecision({ decision: "approve", rating, tags })}
         />
@@ -313,11 +338,32 @@ export function ReviewScreen({
       {modal === "flag" && (
         <FlagModal
           photo={photo}
+          multiplier={multiplier}
           onCancel={() => setModal(null)}
-          onConfirm={(tags, note) => commitDecision({ decision: "flag", tags, note })}
+          onConfirm={(tags, note, quarantine) =>
+            commitDecision({ decision: "flag", tags, note, quarantine })
+          }
         />
       )}
     </div>
+  );
+}
+
+// Compact "double-points" indicator that lives in the review-screen header.
+// Driven by the admin-configured bonus periods in SettingsProvider.
+function BonusPennant({ period }: { period: BonusPeriod }) {
+  const pretty = period.multiplier % 1 === 0
+    ? `${period.multiplier}×`
+    : `${period.multiplier.toFixed(1)}×`;
+  const label = period.label?.trim() || `${pretty} POINTS`;
+  return (
+    <span
+      className="pennant"
+      style={{ fontWeight: 600 }}
+      title={`Bonus active · ${pretty} points`}
+    >
+      {pretty}&nbsp;·&nbsp;{label.toUpperCase()}
+    </span>
   );
 }
 
@@ -509,10 +555,12 @@ const POSITIVE_TAGS = PHOTO_TAGS.filter(t => t.color !== "rose");
 
 function ApproveModal({
   photo,
+  multiplier,
   onCancel,
   onConfirm,
 }: {
   photo: Photo;
+  multiplier: number;
   onCancel: () => void;
   onConfirm: (rating: number, tags: string[]) => void;
 }) {
@@ -591,7 +639,7 @@ function ApproveModal({
           style={{ opacity: rating ? 1 : 0.5, cursor: rating ? "pointer" : "not-allowed" }}
           onClick={() => onConfirm(rating, tags)}
         >
-          <Icon name="check" size={13} /> Approve · +10 pts
+          <Icon name="check" size={13} /> Approve · +{Math.round(10 * multiplier)} pts
         </button>
       </div>
     </Modal>
@@ -600,15 +648,18 @@ function ApproveModal({
 
 function FlagModal({
   photo,
+  multiplier,
   onCancel,
   onConfirm,
 }: {
   photo: Photo;
+  multiplier: number;
   onCancel: () => void;
-  onConfirm: (tags: string[], note: string) => void;
+  onConfirm: (tags: string[], note: string, quarantine: boolean) => void;
 }) {
   const [tags, setTags] = React.useState<string[]>([]);
   const [note, setNote] = React.useState("");
+  const [quarantine, setQuarantine] = React.useState(false);
   const toggle = (id: string) => setTags(r => r.includes(id) ? r.filter(x => x !== id) : [...r, id]);
   const canSubmit = tags.length > 0;
 
@@ -648,21 +699,76 @@ function FlagModal({
         value={note}
         onChange={(e) => setNote(e.target.value)}
         placeholder="Add context for the admin — e.g. unsure if the gesture is OK, or want a second opinion on framing."
-        style={{ marginBottom: 20 }}
+        style={{ marginBottom: 16 }}
       />
 
-      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+      <QuarantineCheckbox value={quarantine} onChange={setQuarantine} />
+
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 20 }}>
         <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
         <button
           className="btn btn-sun"
           disabled={!canSubmit}
           style={{ opacity: canSubmit ? 1 : 0.5, cursor: canSubmit ? "pointer" : "not-allowed" }}
-          onClick={() => onConfirm(tags, note.trim())}
+          onClick={() => onConfirm(tags, note.trim(), quarantine)}
         >
-          <Icon name="flag" size={13} /> Flag & continue · +15 pts
+          <Icon name="flag" size={13} /> Flag & continue · +{Math.round(15 * multiplier)} pts
         </button>
       </div>
     </Modal>
+  );
+}
+
+// "Quarantine" elevates a flag from a routine second-opinion request to a
+// hide-now action — the photo stops being publicly visible until a senior
+// resolves it. Schema-wise this just sets `reviews.quarantine = true`; a
+// trigger flips `photos.is_quarantined` and the SmugMug import job (step 8)
+// will mirror that into the hidden folder.
+function QuarantineCheckbox({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label
+      style={{
+        display: "flex",
+        gap: 12,
+        alignItems: "flex-start",
+        padding: "12px 14px",
+        borderRadius: 8,
+        border: value ? "1.5px solid var(--rose)" : "1px solid var(--rule)",
+        background: value ? "var(--rose-soft)" : "var(--paper-2)",
+        cursor: "pointer",
+        transition: "border-color 0.15s, background 0.15s",
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={value}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ marginTop: 2, accentColor: "var(--rose)", flexShrink: 0 }}
+      />
+      <div style={{ minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 500,
+            color: value ? "var(--rose)" : "var(--ink)",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          <Icon name="flag" size={12} /> Quarantine — hide from public until a senior reviews
+        </div>
+        <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 4, lineHeight: 1.4 }}>
+          Use only for clear safety, dress code, or consent issues. Routine quality flags don&apos;t need this — they stay visible while the senior queue catches up.
+        </div>
+      </div>
+    </label>
   );
 }
 
