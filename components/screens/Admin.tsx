@@ -487,13 +487,13 @@ function BonusEvents() {
   return (
     <div className="card">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-        <h3 className="card-title">Bonus events</h3>
+        <h3 className="card-title">Points multiplier bonus</h3>
         <span style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)", letterSpacing: "0.08em" }}>
           {periods.filter(p => p.enabled).length} ACTIVE · {periods.length} TOTAL
         </span>
       </div>
       <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
-        Multiply all points earned during a scheduled window.
+        Schedule windows where all earned points are multiplied. Reviewers see a pennant during active windows.
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
@@ -503,7 +503,7 @@ function BonusEvents() {
             border: "1px dashed var(--rule-2)",
             textAlign: "center", fontSize: 13, color: "var(--ink-3)",
           }}>
-            No bonus periods scheduled.
+            No multiplier bonuses scheduled.
           </div>
         )}
         {periods.map(p => (
@@ -540,7 +540,7 @@ function BonusEvents() {
             display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
           }}
         >
-          <Icon name="plus" size={12} /> Schedule a bonus period
+          <Icon name="plus" size={12} /> Schedule a multiplier bonus
         </button>
       )}
     </div>
@@ -660,10 +660,10 @@ function BonusPeriodForm({
       display: "flex", flexDirection: "column", gap: 14,
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <div className="card-eyebrow">{existing ? "Edit bonus period" : "New bonus period"}</div>
+        <div className="card-eyebrow">{existing ? "Edit multiplier bonus" : "New multiplier bonus"}</div>
       </div>
 
-      <FieldRow label="Label" hint="Optional — shown to reviewers during the bonus window.">
+      <FieldRow label="Label" hint="Optional — shown to reviewers in the pennant during the active window.">
         <input
           className="input"
           value={draft.label}
@@ -845,7 +845,7 @@ function BonusPeriodForm({
             style={{ opacity: canSave ? 1 : 0.5, cursor: canSave ? "pointer" : "not-allowed" }}
             onClick={() => onSave(draft)}
           >
-            <Icon name="check" size={12} /> {existing ? "Save changes" : "Add bonus period"}
+            <Icon name="check" size={12} /> {existing ? "Save changes" : "Add multiplier bonus"}
           </button>
         </div>
       </div>

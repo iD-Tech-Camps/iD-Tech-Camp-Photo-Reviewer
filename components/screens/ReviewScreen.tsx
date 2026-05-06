@@ -119,7 +119,7 @@ export function ReviewScreen({
     }
 
     // Base points match the seeded points_config defaults; the active
-    // bonus-period multiplier (admin-configured) inflates what the reviewer
+    // Points Multiplier Bonus (admin-configured) inflates what the reviewer
     // sees in the toast and on the completion screen. The DB snapshot in
     // `reviews.points_awarded` still comes from the trigger (base values) —
     // closing that gap is part of the 7.6 wiring of points_config to the DB.

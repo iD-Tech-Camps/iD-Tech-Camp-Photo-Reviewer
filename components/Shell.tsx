@@ -281,12 +281,12 @@ export function useToast() {
 
 export type ToastApi = ReturnType<typeof useToast>;
 
-// Returns the currently-active bonus period (if any) and re-evaluates on a
-// timer so windows that start or end mid-session update without a refresh.
-// Both HomeScreen and ReviewScreen subscribe so they stay in sync. Tick
-// interval is 30s — fine-grained enough that "ends in 1 minute" wraps
-// cleanly into "no bonus" without a noticeable delay, but not so frequent
-// that we waste re-renders.
+// Returns the currently-active Points Multiplier Bonus (if any) and
+// re-evaluates on a timer so windows that start or end mid-session update
+// without a refresh. Both HomeScreen and ReviewScreen subscribe so they
+// stay in sync. Tick interval is 30s — fine-grained enough that "ends in
+// 1 minute" wraps cleanly into "no bonus" without a noticeable delay, but
+// not so frequent that we waste re-renders.
 export function useActiveBonusPeriod(): BonusPeriod | null {
   const { settings } = useSettings();
   const [tick, setTick] = React.useState(0);
@@ -301,15 +301,15 @@ export function useActiveBonusPeriod(): BonusPeriod | null {
   );
 }
 
-// Visible callout that the active bonus period is ending soon enough that
-// the reviewer should care. Two presentation modes:
+// Visible callout that a Points Multiplier Bonus is currently active.
+// Two presentation modes:
 //
 //   * `compact` — a single `pennant`-styled flag with multiplier + label +
 //     window. Used inside the ReviewScreen header where horizontal space
 //     is at a premium.
-//   * default — a banner (~2 lines) with the same info plus a softer
-//     visual treatment, intended for the HomeScreen where the reviewer is
-//     still deciding whether to start a session.
+//   * `banner` — a softer, ~2-line callout with the same info, intended
+//     for the HomeScreen where the reviewer is still deciding whether to
+//     start a session.
 //
 // Both share the same source data and the same window-formatter, so the
 // content is consistent — only the chrome differs.
@@ -321,7 +321,7 @@ export function BonusPennant({
   variant?: "compact" | "banner";
 }) {
   const mult = formatBonusMultiplier(period.multiplier);
-  const label = period.label?.trim() || `${mult} points`;
+  const label = period.label?.trim() || `${mult} bonus`;
   const window = formatBonusWindow(period);
 
   if (variant === "compact") {
@@ -329,7 +329,7 @@ export function BonusPennant({
       <span
         className="pennant"
         style={{ fontWeight: 600 }}
-        title={`Bonus active — ${label}, ${window}`}
+        title={`Multiplier bonus active — ${label}, ${window}`}
       >
         {mult}&nbsp;·&nbsp;{label.toUpperCase()}
         {window && <>&nbsp;·&nbsp;{window.toUpperCase()}</>}

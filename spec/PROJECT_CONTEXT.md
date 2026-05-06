@@ -25,11 +25,11 @@ Reviewers move through a queue of photos and either **approve** them (share-wort
 - All four review triggers fire correctly under RLS (see "RLS gotcha" below — this took a fix migration)
 - ProfileScreen and AdminOverview both read from `public.reviewer_stats` (a `security_invoker = true` view that joins `profiles` with aggregated `reviews` counts/sums — see migration 15). One row per profile, zero-filled aggregates so consumers don't have to null-coalesce.
 - 15 migrations applied. **Three** server-side e2e tests now cover the review flow, the flag-review flow, and the `reviewer_stats` shape (delta assertions on insert) — all run under `role=authenticated` with JWT claims pinned, so RLS is enforced as in production.
-- **UX cleanups landed (May 6, 2026):** the admin-configured bonus-period schedule (multiplier + days/times) is now persisted via `SettingsProvider` and read by `ReviewScreen`, which renders a `pennant` in the header during active windows and inflates the points shown to the reviewer. The reviewer's `FlagModal` now exposes a "Quarantine" checkbox that flows through `submitReview` to `reviews.quarantine`; the senior queue surfaces the same flag both as a row pill and a rose-themed banner on the detail panel.
+- **UX cleanups landed (May 6, 2026):** Points Multiplier Bonus schedules (multiplier + days/times, admin-configured) are persisted via `SettingsProvider` and read by both HomeScreen (banner) and ReviewScreen (compact pennant) through the shared `BonusPennant` + `useActiveBonusPeriod` in `Shell.tsx`; both displays show the active window so reviewers know when it ends. The reviewer's `FlagModal` now exposes a "Quarantine" checkbox that flows through `submitReview` to `reviews.quarantine`; the senior queue surfaces the same flag both as a row pill and a rose-themed banner on the detail panel.
 
 **What does NOT work yet:**
 
-- **Sub-step 7.6 is still pending** — tags / examples / app_settings / points_config (incl. bonus periods) are still loaded from `data.tsx` and the SettingsProvider rather than the DB. The admin-overview "Active reviewers" denominator currently equals total profiles count; once invitations + idle/inactive transitions land we'll want to filter by `profiles.status`.
+- **Sub-step 7.6 is still pending** — tags / examples / app_settings / points_config (incl. the multiplier-bonus schedule) are still loaded from `data.tsx` and the SettingsProvider rather than the DB. The admin-overview "Active reviewers" denominator currently equals total profiles count; once invitations + idle/inactive transitions land we'll want to filter by `profiles.status`.
 - No SmugMug API integration (the placeholder seed data simulates one location/week with 10 photos under "iD Tech Camps → Adelphi University → May 25–29, 2026")
 - **Bonus-period multiplier is UI-only.** The pennant in the review-screen header inflates the points the reviewer sees in the toast and on the action buttons, but `reviews.points_awarded` is still the trigger-snapshotted base value (because the trigger reads `points_config`, which the app doesn't override on insert yet). Closing this loop pairs naturally with sub-step 7.6.
 - Outstanding `npm audit` issues (Next.js 14.2.35 has known high-severity advisories; major-version upgrade pending)
@@ -58,7 +58,7 @@ components/
   Shell.tsx               # Sidebar (live Review + Flag-review badges, role-aware nav), PageHeader, fireConfetti, useToast
   Icon.tsx                # inline SVG icon set
   data.tsx                # mock constants — exports NEGATIVE_TAGS (13) and PHOTO_TAGS (mixed; positives derived locally inside ReviewScreen.tsx via PHOTO_TAGS.filter(t => t.color !== "rose")). Also EXAMPLES, BADGES, ADMIN_USERS, PhotoPlaceholder. SESSION_PHOTOS / FLAGGED_PHOTOS / ADMIN_USERS / BADGES still exist but are no longer consumed by the screens (they read from Supabase via lib/reviews.ts and lib/profile.ts). HomeScreen still uses SESSION_PHOTOS for the decorative thumbnail strip — defer to step 8 with SmugMug data; the strip is purely visual.
-  settings.tsx            # SettingsProvider / useSettings — branding, reviewer copy, and `bonusPeriods` (admin-configured multiplier windows + the `activeBonusPeriod` helper consumed by ReviewScreen). Still localStorage-backed; step 7.6 wires it to `app_settings` + a new bonus-periods table.
+  settings.tsx            # SettingsProvider / useSettings — branding, reviewer copy, and `bonusPeriods` (Points Multiplier Bonus schedule + the `activeBonusPeriod` / `formatBonusWindow` helpers consumed by HomeScreen + ReviewScreen). Still localStorage-backed; step 7.6 wires it to `app_settings` + a new multiplier-bonus table.
   BrowserWindow.tsx       # ported from prototype, currently orphaned
   screens/
     HomeScreen.tsx        # uses live pendingCount from App.tsx
@@ -135,7 +135,7 @@ Both set in Vercel (all environments) and in `.env.local` for local dev.
 | 3 | Deploy to Vercel | ✅ Done |
 | 4 | Supabase + Google OAuth | ✅ Done |
 | 5 | Database schema design | ✅ Done |
-| 6 | **MVP scope refactor** — remove feature toggles, defer leaderboard/streaks/double-points/accuracy, merge Admin Overview + Users | 🟡 In progress |
+| 6 | **MVP scope refactor** — remove feature toggles, defer leaderboard/streaks/multiplier-bonus/accuracy, merge Admin Overview + Users | 🟡 In progress |
 | 7 | Replace `localStorage` with Supabase persistence | 🟡 In progress (4/6 sub-steps done) |
 | 8 | SmugMug API integration | Pending |
 | 9 | Next.js security upgrade (resolves audit warnings) | Pending |
@@ -150,7 +150,7 @@ Both set in Vercel (all environments) and in `.env.local` for local dev.
 | 7.3 | Wire `ReviewScreen` to insert real `reviews` + `review_tags` | ✅ Done | `431bcd2` |
 | 7.4 | Wire `FlagReview` senior actions + sidebar live count | ✅ Done | `a955aa2`, fix in `740780d` (migration 14) |
 | 7.5 | Move points / profile reads off mock data onto live `reviews` aggregates; same for the merged Admin Overview roster | ✅ Done | migration 15 (`reviewer_stats` view), `lib/profile.ts`, third e2e test |
-| 7.6 | Read `tags` / `examples` / `points_config` / `app_settings` (incl. `bonus_periods`) from DB | ⏭️ **Up next** | — |
+| 7.6 | Read `tags` / `examples` / `points_config` / `app_settings` (incl. multiplier-bonus schedule) from DB | ⏭️ **Up next** | — |
 
 ---
 
@@ -181,8 +181,8 @@ Here's what's been useful:
 - **Year folders inside SmugMug locations are not modeled in the schema.** SmugMug nests `Location → Year (2025/2026) → Camp Week`; our schema goes `Location → Camp Week` directly. Year is recoverable from `camp_weeks.starts_on`. The SmugMug import job (step 8) walks year folders as a pass-through layer.
 - **Review trigger functions are `SECURITY DEFINER`.** Originally they were invoker-rights and got silently zero-rowed by RLS on real client inserts (see "RLS gotcha" below). Migration 14 fixes this and the e2e tests now pin `role=authenticated` so the regression can't sneak past us again.
 - **`Role` enum in code uses `reviewer` (not `staff`).** The DB enum is `('reviewer', 'senior', 'admin')`; the code matches it. The friendly label "Staff Reviewer" is preserved in `ROLE_LABEL.reviewer`.
-- **No runtime feature toggles in V1.** Leaderboard and streaks are deferred to a post-V1 release; confetti is always on. Feature availability is controlled by versioning, not admin-facing switches. The four removed `AppSettings` keys (`confettiOnComplete`, `showLeaderboard`, `showStreaks`, `showDoublePoints`) are gone from the type, defaults, and every consumer; pre-existing values in `localStorage` are silently ignored by the spread merge. The double-points pennant *is* back as of May 6, 2026, but it's data-driven (off when no bonus period is enabled and active) — not a global feature flag.
-- **Bonus periods live in `SettingsProvider`, not in their own DB table yet.** `settings.bonusPeriods: BonusPeriod[]` is persisted via the same localStorage blob as the rest of `AppSettings`. `ReviewScreen` reads it through the `activeBonusPeriod()` helper, re-evaluates on a 30s tick so windows can start/end mid-session, and inflates the points it displays by the active multiplier. `reviews.points_awarded` is **not** yet inflated — the trigger snapshots base values from `points_config`. Closing that gap is part of 7.6, when both `points_config` and `bonus_periods` move to the DB.
+- **No runtime feature toggles in V1.** Leaderboard and streaks are deferred to a post-V1 release; confetti is always on. Feature availability is controlled by versioning, not admin-facing switches. The four removed `AppSettings` keys (`confettiOnComplete`, `showLeaderboard`, `showStreaks`, `showDoublePoints`) are gone from the type, defaults, and every consumer; pre-existing values in `localStorage` are silently ignored by the spread merge. The multiplier-bonus pennant *is* back as of May 6, 2026, but it's data-driven (off when no bonus is enabled and active) — not a global feature flag.
+- **Points Multiplier Bonus lives in `SettingsProvider`, not in its own DB table yet.** `settings.bonusPeriods: BonusPeriod[]` is persisted via the same localStorage blob as the rest of `AppSettings`. HomeScreen and ReviewScreen consume it through `useActiveBonusPeriod()` + `BonusPennant` (shared in `Shell.tsx`), which re-evaluates on a 30s tick so windows can start/end mid-session, and inflate the points displayed by the active multiplier. `reviews.points_awarded` is **not** yet inflated — the trigger snapshots base values from `points_config`. Closing that gap is part of 7.6, when both `points_config` and the multiplier-bonus schedule move to the DB. (Internal code identifiers — `BonusPeriod`, `bonusPeriods`, `activeBonusPeriod` — stay; only the user-facing copy renamed to "Points Multiplier Bonus".)
 - **Admin Overview merged with Users.** One screen showing the reviewer roster with per-user stats (reviewed, points, last active, role, team), plus a small `Reviewed today` / `Active reviewers` stat row above the table. The old operational stat cards, "Queue depth by camp" panel, and "Flagged for review" snippet are gone. The standalone Users screen is gone too — its search + Invite buttons live on the merged Overview header. The queue-depth panel is deferred until SmugMug data is wired in step 8.
 
 ---

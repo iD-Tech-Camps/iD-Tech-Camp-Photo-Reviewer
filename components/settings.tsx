@@ -4,10 +4,11 @@ import React from "react";
 
 export type BonusPeriodMode = "recurring" | "one-time";
 
-// Persisted shape for an admin-configured "double points" (or any multiplier)
-// window. `mode = recurring` uses `days[]` + `startTime`/`endTime` (HH:MM,
-// local browser timezone). `mode = one-time` uses `startAt`/`endAt` as
-// `datetime-local` strings (no zone — interpreted in the reviewer's local tz).
+// Persisted shape for an admin-configured Points Multiplier Bonus — a
+// scheduled window during which all earned points are multiplied. `mode =
+// recurring` uses `days[]` + `startTime`/`endTime` (HH:MM, local browser
+// timezone). `mode = one-time` uses `startAt`/`endAt` as `datetime-local`
+// strings (no zone — interpreted in the reviewer's local tz).
 export type BonusPeriod = {
   id: string;
   label: string;
@@ -60,12 +61,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
   supportEmail: "support@idtech.com",
 
-  // One sample period seeded so the admin UI isn't empty out of the box.
-  // Disabled by default so reviewers don't see a pennant until an admin opts in.
+  // One sample multiplier bonus seeded so the admin UI isn't empty out of
+  // the box. Label is left blank — the row UI falls back to "<n>× bonus"
+  // until an admin gives it something more specific. Disabled by default so
+  // reviewers don't see a pennant until someone opts in.
   bonusPeriods: [
     {
-      id: "bp_default_double",
-      label: "Double-points hour",
+      id: "bp_default_sample",
+      label: "",
       mode: "recurring",
       days: [0, 1, 2, 3, 4, 5, 6],
       startTime: "10:00",

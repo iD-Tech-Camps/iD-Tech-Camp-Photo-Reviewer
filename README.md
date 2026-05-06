@@ -44,7 +44,7 @@ Reviewers see one photo at a time and have two actions:
 
 There is no separate reject action — if a photo isn't acceptable, flag it.
 
-If an admin has scheduled a **bonus period** (Admin → Points & rules → Bonus events), reviewers see a `pennant` in the review-screen header during the active window and the points shown on the Approve / Flag buttons + the post-decision toast are multiplied accordingly. Note: the DB `reviews.points_awarded` snapshot still records the base values from `points_config`; bringing the multiplier into the persisted points lands with step 7.6.
+If an admin has scheduled a **Points Multiplier Bonus** (Admin → Points & rules → Points multiplier bonus), reviewers see a pennant on the home screen and in the review-screen header during the active window, and the points shown on the Approve / Flag buttons + the post-decision toast are multiplied accordingly. Note: the DB `reviews.points_awarded` snapshot still records the base values from `points_config`; bringing the multiplier into the persisted points lands with step 7.6.
 
 Each decision writes a `reviews` row plus matching `review_tags` rows to Supabase. A trigger automatically:
 
