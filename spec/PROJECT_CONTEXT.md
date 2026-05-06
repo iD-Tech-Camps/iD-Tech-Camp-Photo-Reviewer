@@ -14,7 +14,7 @@ Reviewers move through a queue of photos and either **approve** them (share-wort
 
 ## Current status (as of last working session)
 
-**The reviewer and senior flows are now fully DB-backed.** Step 6 of the roadmap is partially complete (sub-steps 1–4 of 6 done). What works end-to-end against Supabase:
+**The reviewer and senior flows are now fully DB-backed.** Step 7 of the roadmap is partially complete (sub-steps 1–4 of 6 done). What works end-to-end against Supabase:
 
 - Production deployment on Vercel (auto-deploys from `main`)
 - Google OAuth login restricted to `@idtech.com` accounts (Internal Workspace)
@@ -27,7 +27,7 @@ Reviewers move through a queue of photos and either **approve** them (share-wort
 
 **What does NOT work yet:**
 
-- **Sub-steps 6.5 and 6.6 of the persistence work are still pending** — leaderboard / profile / points displays still read from mock data, and tags / examples / app_settings / points_config are still loaded from `data.tsx` and the SettingsProvider rather than the DB
+- **Sub-steps 7.5 and 7.6 of the persistence work are still pending** — profile, points, and the merged Admin Overview roster still read from mock data, and tags / examples / app_settings / points_config are still loaded from `data.tsx` and the SettingsProvider rather than the DB
 - No SmugMug API integration (the placeholder seed data simulates one location/week with 10 photos under "iD Tech Camps → Adelphi University → May 25–29, 2026")
 - The reviewer's flag UI doesn't expose a `quarantine` toggle — every flag submits with `quarantine: false`. The schema and FlagReview detail panel both support it; just need to add the checkbox.
 - Outstanding `npm audit` issues (Next.js 14.2.35 has known high-severity advisories; major-version upgrade pending)
@@ -55,14 +55,14 @@ components/
   App.tsx                 # root client component, role-gated screen routing; owns the live pendingCount fetch
   Shell.tsx               # Sidebar (live Review + Flag-review badges, role-aware nav), PageHeader, fireConfetti, useToast
   Icon.tsx                # inline SVG icon set
-  data.tsx                # mock constants — exports NEGATIVE_TAGS (13) and PHOTO_TAGS (mixed; positives derived locally inside ReviewScreen.tsx via PHOTO_TAGS.filter(t => t.color !== "rose")). Also EXAMPLES, BADGES, PhotoPlaceholder. SESSION_PHOTOS and FLAGGED_PHOTOS still exist but are no longer consumed by ReviewScreen / FlagReview / Sidebar (they read from Supabase). HomeScreen still uses SESSION_PHOTOS for the decorative thumbnail strip — pending step 6.5.
-  settings.tsx            # SettingsProvider / useSettings (brand, leaderboard toggle, etc.) — still hardcoded; step 6.6 wires this to app_settings
+  data.tsx                # mock constants — exports NEGATIVE_TAGS (13) and PHOTO_TAGS (mixed; positives derived locally inside ReviewScreen.tsx via PHOTO_TAGS.filter(t => t.color !== "rose")). Also EXAMPLES, BADGES, ADMIN_USERS, PhotoPlaceholder. SESSION_PHOTOS and FLAGGED_PHOTOS still exist but are no longer consumed by ReviewScreen / FlagReview / Sidebar (they read from Supabase). HomeScreen still uses SESSION_PHOTOS for the decorative thumbnail strip — pending step 7.5.
+  settings.tsx            # SettingsProvider / useSettings (branding + reviewer copy only after the MVP scope refactor in step 6) — still hardcoded; step 7.6 wires this to app_settings
   BrowserWindow.tsx       # ported from prototype, currently orphaned
   screens/
     HomeScreen.tsx        # uses live pendingCount from App.tsx
     ReviewScreen.tsx      # DB-backed approve/flag flow
-    LeaderboardProfileGuide.tsx  # still mock — step 6.5
-    Admin.tsx             # admin sub-screens — still mock — step 6.6
+    LeaderboardProfileGuide.tsx  # ProfileScreen + GuideScreen only (LeaderboardScreen removed in step 6); still mock — step 7.5
+    Admin.tsx             # admin sub-screens (Overview is the merged roster after step 6) — still mock — step 7.6
     FlagReview.tsx        # DB-backed senior queue
 lib/
   current-user.tsx        # UserProvider, useCurrentUser, Role type, ROLE_LABEL. Reads role + id from profiles.
@@ -95,7 +95,7 @@ Three roles, matching the Postgres `role` enum exactly:
 | `senior` | "Senior Reviewer" | Everything a reviewer sees, plus **Flag review** | Reviews photos that regular reviewers flagged |
 | `admin` | "Admin" | Everything, plus the **Admin** section | Full control |
 
-`Role` in `lib/current-user.tsx` was renamed from `staff` to `reviewer` to match the DB enum. The user-facing label "Staff Reviewer" is preserved in `ROLE_LABEL.reviewer`. Role assignment is read from `profiles.role` after sign-in; promoting users still happens by hand-editing the `profiles` table (an Admin Users screen will eventually be wired up to do this in step 6.6).
+`Role` in `lib/current-user.tsx` was renamed from `staff` to `reviewer` to match the DB enum. The user-facing label "Staff Reviewer" is preserved in `ROLE_LABEL.reviewer`. Role assignment is read from `profiles.role` after sign-in; promoting users still happens by hand-editing the `profiles` table (the merged Admin Overview screen will eventually be wired up to do this in step 7.6).
 
 ---
 
@@ -132,23 +132,24 @@ Both set in Vercel (all environments) and in `.env.local` for local dev.
 | 3 | Deploy to Vercel | ✅ Done |
 | 4 | Supabase + Google OAuth | ✅ Done |
 | 5 | Database schema design | ✅ Done |
-| 6 | **Replace `localStorage` with Supabase persistence** | 🟡 In progress (4/6 sub-steps done) |
-| 7 | SmugMug API integration | Pending |
-| 8 | Next.js security upgrade (resolves audit warnings) | Pending |
-| 9 | Polish + team rollout | Pending |
+| 6 | **MVP scope refactor** — remove feature toggles, defer leaderboard/streaks/double-points/accuracy, merge Admin Overview + Users | 🟡 In progress |
+| 7 | Replace `localStorage` with Supabase persistence | 🟡 In progress (4/6 sub-steps done) |
+| 8 | SmugMug API integration | Pending |
+| 9 | Next.js security upgrade (resolves audit warnings) | Pending |
+| 10 | Polish + team rollout | Pending |
 
-### Step 6 sub-steps (resume here)
+### Step 7 sub-steps (resume here)
 
 | # | Sub-step | Status | Landed in |
 |---|---|---|---|
-| 6.1 | Read role from `profiles` (drop dev role switcher) | ✅ Done | `dc1f644` |
-| 6.2 | Seed `photos` from `SESSION_PHOTOS` (with division/location/week chain) | ✅ Done | `4e5bca3`, migration 13 |
-| 6.3 | Wire `ReviewScreen` to insert real `reviews` + `review_tags` | ✅ Done | `431bcd2` |
-| 6.4 | Wire `FlagReview` senior actions + sidebar live count | ✅ Done | `a955aa2`, fix in `740780d` (migration 14) |
-| 6.5 | Move points / leaderboard / profile reads off mock data onto live `reviews` aggregates | ⏭️ **Up next** | — |
-| 6.6 | Read `tags` / `examples` / `points_config` / `app_settings` from DB | Pending | — |
+| 7.1 | Read role from `profiles` (drop dev role switcher) | ✅ Done | `dc1f644` |
+| 7.2 | Seed `photos` from `SESSION_PHOTOS` (with division/location/week chain) | ✅ Done | `4e5bca3`, migration 13 |
+| 7.3 | Wire `ReviewScreen` to insert real `reviews` + `review_tags` | ✅ Done | `431bcd2` |
+| 7.4 | Wire `FlagReview` senior actions + sidebar live count | ✅ Done | `a955aa2`, fix in `740780d` (migration 14) |
+| 7.5 | Move points / profile reads off mock data onto live `reviews` aggregates; same for the merged Admin Overview roster | ⏭️ **Up next** | — |
+| 7.6 | Read `tags` / `examples` / `points_config` / `app_settings` from DB | Pending | — |
 
-There's also one small UX gap to fold in either as part of 6.5 or as a tiny standalone fix: the reviewer's `FlagModal` doesn't expose a quarantine checkbox, so every flag submits with `quarantine: false`. The schema and FlagReview detail panel are ready for it.
+There's also one small UX gap to fold in either as part of 7.5 or as a tiny standalone fix: the reviewer's `FlagModal` doesn't expose a quarantine checkbox, so every flag submits with `quarantine: false`. The schema and FlagReview detail panel are ready for it.
 
 ---
 
@@ -175,9 +176,11 @@ For the human picking up this work in a fresh thread, here's what's been useful:
 - **Three roles, not two.** `reviewer` / `senior` / `admin`. Senior exists specifically to handle flagged photos — keeps regular reviewers from being final arbiters on edge cases.
 - **`camp_weeks.is_active` is a view, not a stored generated column.** Postgres requires stored generated columns to use `IMMUTABLE` expressions; `current_date` is `STABLE`, so the original spec definition was rejected on push. The boolean is exposed through `public.camp_weeks_with_status`. App code reads the view when it wants the flag; writes still go to the base table. Don't try to add it back as a column without picking up the immutability constraint.
 - **Schema migrations live under `supabase/migrations/`; no `supabase init` was run.** No `config.toml`, no `seed.sql`, no functions templates. The repo is linked via `npx supabase link`; CLI cache lives in `supabase/.temp/` (gitignored). Use `npx supabase db push` to apply, `npx supabase db query --file ... --linked` to verify.
-- **Year folders inside SmugMug locations are not modeled in the schema.** SmugMug nests `Location → Year (2025/2026) → Camp Week`; our schema goes `Location → Camp Week` directly. Year is recoverable from `camp_weeks.starts_on`. The SmugMug import job (step 7) walks year folders as a pass-through layer.
+- **Year folders inside SmugMug locations are not modeled in the schema.** SmugMug nests `Location → Year (2025/2026) → Camp Week`; our schema goes `Location → Camp Week` directly. Year is recoverable from `camp_weeks.starts_on`. The SmugMug import job (step 8) walks year folders as a pass-through layer.
 - **Review trigger functions are `SECURITY DEFINER`.** Originally they were invoker-rights and got silently zero-rowed by RLS on real client inserts (see "RLS gotcha" below). Migration 14 fixes this and the e2e tests now pin `role=authenticated` so the regression can't sneak past us again.
 - **`Role` enum in code uses `reviewer` (not `staff`).** The DB enum is `('reviewer', 'senior', 'admin')`; the code matches it. The friendly label "Staff Reviewer" is preserved in `ROLE_LABEL.reviewer`.
+- **No runtime feature toggles in V1.** Leaderboard and streaks are deferred to a post-V1 release; confetti is always on; the double-points pennant has been removed and will return when bonus periods are wired to persisted admin settings (the `BonusPeriod` UI in `AdminPoints` already exists but its data lives in local component state). Feature availability is controlled by versioning, not admin-facing switches. The four removed `AppSettings` keys (`confettiOnComplete`, `showLeaderboard`, `showStreaks`, `showDoublePoints`) are gone from the type, defaults, and every consumer; pre-existing values in `localStorage` are silently ignored by the spread merge.
+- **Admin Overview merged with Users.** One screen showing the reviewer roster with per-user stats (reviewed, points, last active, role, team), plus a small `Reviewed today` / `Active reviewers` stat row above the table. The old operational stat cards, "Queue depth by camp" panel, and "Flagged for review" snippet are gone. The standalone Users screen is gone too — its search + Invite buttons live on the merged Overview header. The queue-depth panel is deferred until SmugMug data is wired in step 8.
 
 ---
 
@@ -189,7 +192,7 @@ For the human picking up this work in a fresh thread, here's what's been useful:
 - **Pre-existing build warning:** `no-page-custom-font` in `app/layout.tsx`. Cosmetic only. Google Fonts are loaded via `<link>` rather than `next/font` to preserve the existing CSS font stacks unchanged.
 - **Vercel does not follow GitHub redirects.** If the repo is moved/transferred again in the future, the Vercel project must be manually reconnected to the new repo location. (Same for the local `origin` remote URL — that was updated to the new canonical work-org URL on 2026-05-05.)
 - **`data.tsx` tag exports do not match what the spec wording suggests.** There is no `POSITIVE_TAGS` export — only `NEGATIVE_TAGS` (13 entries) and `PHOTO_TAGS` (mixed). Positives are derived locally inside `ReviewScreen.tsx` via `PHOTO_TAGS.filter(t => t.color !== "rose")`. The 7 rose-colored entries in `PHOTO_TAGS` are deprecated duplicates of `NEGATIVE_TAGS` with shorter labels — ignore them. The `tags` migration seeds the 13 negatives plus the 4 positives only. The DB tag ids match the UI tag ids exactly, so no translation is needed when writing `review_tags`.
-- **Placeholder seed data is keyed by an obvious prefix.** All the placeholder rows seeded by migration 13 (4 divisions, 1 location, 1 camp week, 10 photos) use `smugmug_*_id` values that start with `placeholder-`. The SmugMug import job (step 7) should `update ... where smugmug_*_id like 'placeholder-%'` to swap in real ids — or `delete` them outright before the first real import.
+- **Placeholder seed data is keyed by an obvious prefix.** All the placeholder rows seeded by migration 13 (4 divisions, 1 location, 1 camp week, 10 photos) use `smugmug_*_id` values that start with `placeholder-`. The SmugMug import job (step 8) should `update ... where smugmug_*_id like 'placeholder-%'` to swap in real ids — or `delete` them outright before the first real import.
 - **Smoke test gotchas (for anyone editing `supabase/tests/smoke_test.sql`).** These also apply to the e2e tests:
   - `set local session_replication_role = replica;` skips FK enforcement *and every user-defined trigger* in the same transaction. The four review triggers are exactly what the tests are meant to verify, so don't reach for that setting. Drop the FK temporarily inside the transaction instead — DDL is transactional in Postgres, so the trailing `rollback;` restores it automatically.
   - Inside one transaction, `now()` returns the transaction's start time, identical for every row inserted in that script. `order by created_at desc limit 1` is therefore non-deterministic when more than one review exists. Filter by `decision` (or another distinguishing column) instead.
@@ -238,6 +241,6 @@ where smugmug_image_id like 'placeholder-%';
 
 Open a new conversation and paste this whole document, or attach it as a file. Then say something like:
 
-> Picking up where I left off on the iD Photo Reviewer. Context attached. Step 6 sub-steps 1–4 are done; ready to start sub-step 6.5 (move points / leaderboard / profile reads onto live `reviews` aggregates).
+> Picking up where I left off on the iD Photo Reviewer. Context attached. Step 7 sub-steps 1–4 are done; ready to start sub-step 7.5 (move points / profile reads onto live `reviews` aggregates).
 
 That's enough to get a fresh Claude oriented and moving in the same direction without re-explaining the journey.

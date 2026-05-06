@@ -152,27 +152,6 @@ export function PhotoPlaceholder({
   );
 }
 
-export const LEADERBOARD = [
-  { rank: 1,  name: "Priya Shah",      team: "Operations",      pts: 4820, streak: 18, reviews: 482, you: false },
-  { rank: 2,  name: "Marcus Webb",     team: "Programs",        pts: 4615, streak: 12, reviews: 461, you: false },
-  { rank: 3,  name: "Ana Flores",      team: "Marketing",       pts: 4410, streak: 21, reviews: 441, you: false },
-  { rank: 4,  name: "Jordan Kim",      team: "Support",         pts: 3990, streak: 7,  reviews: 399, you: false },
-  { rank: 5,  name: "You — Riley T.",  team: "Programs",        pts: 3720, streak: 9,  reviews: 372, you: true  },
-  { rank: 6,  name: "Sam Okafor",      team: "Programs",        pts: 3540, streak: 4,  reviews: 354, you: false },
-  { rank: 7,  name: "Leo Chen",        team: "Operations",      pts: 3200, streak: 2,  reviews: 320, you: false },
-  { rank: 8,  name: "Mira Patel",      team: "Marketing",       pts: 2980, streak: 11, reviews: 298, you: false },
-  { rank: 9,  name: "Tomás Ruiz",      team: "Curriculum",      pts: 2710, streak: 5,  reviews: 271, you: false },
-  { rank: 10, name: "Harper Lee",      team: "Support",         pts: 2440, streak: 3,  reviews: 244, you: false },
-];
-
-export const TEAMS = [
-  { name: "Operations",  pts: 12540, members: 14 },
-  { name: "Programs",    pts: 11870, members: 12 },
-  { name: "Marketing",   pts: 11250, members: 11 },
-  { name: "Support",     pts: 10410, members: 13 },
-  { name: "Curriculum",  pts: 9630,  members: 10 },
-];
-
 export const BADGES = [
   { id: "first-10",    name: "First Ten",         desc: "Reviewed your first 10 photos",       earned: true,  earnedOn: "May 29" },
   { id: "streak-7",    name: "Week Warrior",      desc: "7-day review streak",                 earned: true,  earnedOn: "Jun 04" },
@@ -209,15 +188,15 @@ export const EXAMPLES = {
 };
 
 export const ADMIN_USERS = [
-  { name: "Priya Shah",      email: "priya.s@idtech.com",  role: "Senior Reviewer", team: "Operations", status: "Active", last: "2m ago" },
-  { name: "Marcus Webb",     email: "marcus.w@idtech.com", role: "Staff Reviewer",  team: "Programs",   status: "Active", last: "14m ago" },
-  { name: "Ana Flores",      email: "ana.f@idtech.com",    role: "Senior Reviewer", team: "Marketing",  status: "Active", last: "1h ago" },
-  { name: "Jordan Kim",      email: "jordan.k@idtech.com", role: "Staff Reviewer",  team: "Support",    status: "Active", last: "3h ago" },
-  { name: "Riley Turner",    email: "riley.t@idtech.com",  role: "Staff Reviewer",  team: "Programs",   status: "Active", last: "now" },
-  { name: "Sam Okafor",      email: "sam.o@idtech.com",    role: "Staff Reviewer",  team: "Programs",   status: "Active", last: "4h ago" },
-  { name: "Leo Chen",        email: "leo.c@idtech.com",    role: "Staff Reviewer",  team: "Operations", status: "Idle",   last: "2d ago" },
-  { name: "Mira Patel",      email: "mira.p@idtech.com",   role: "Staff Reviewer",  team: "Marketing",  status: "Active", last: "28m ago" },
-  { name: "Dr. Harper Rowe", email: "harper.r@idtech.com", role: "Admin",           team: "—",          status: "Active", last: "now" },
+  { name: "Priya Shah",      email: "priya.s@idtech.com",  role: "Senior Reviewer", team: "Operations", reviewed: 482, pts: 4820, last: "2m ago" },
+  { name: "Marcus Webb",     email: "marcus.w@idtech.com", role: "Staff Reviewer",  team: "Programs",   reviewed: 461, pts: 4615, last: "14m ago" },
+  { name: "Ana Flores",      email: "ana.f@idtech.com",    role: "Senior Reviewer", team: "Marketing",  reviewed: 441, pts: 4410, last: "1h ago" },
+  { name: "Jordan Kim",      email: "jordan.k@idtech.com", role: "Staff Reviewer",  team: "Support",    reviewed: 399, pts: 3990, last: "3h ago" },
+  { name: "Riley Turner",    email: "riley.t@idtech.com",  role: "Staff Reviewer",  team: "Programs",   reviewed: 372, pts: 3720, last: "now" },
+  { name: "Sam Okafor",      email: "sam.o@idtech.com",    role: "Staff Reviewer",  team: "Programs",   reviewed: 354, pts: 3540, last: "4h ago" },
+  { name: "Leo Chen",        email: "leo.c@idtech.com",    role: "Staff Reviewer",  team: "Operations", reviewed: 320, pts: 3200, last: "2d ago" },
+  { name: "Mira Patel",      email: "mira.p@idtech.com",   role: "Staff Reviewer",  team: "Marketing",  reviewed: 298, pts: 2980, last: "28m ago" },
+  { name: "Dr. Harper Rowe", email: "harper.r@idtech.com", role: "Admin",           team: "—",          reviewed: 0,   pts: 0,    last: "now" },
 ];
 
 export type FlaggedPhoto = {

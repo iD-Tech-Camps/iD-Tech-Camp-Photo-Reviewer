@@ -72,13 +72,6 @@ export function HomeScreen({
             ))}
           </div>
 
-          {settings.showDoublePoints && (
-            <div className="pennant" style={{ marginBottom: 16 }}>
-              <Icon name="bolt" size={11} style={{ marginRight: 6 }} />
-              Double-points hour · ends 11:00
-            </div>
-          )}
-
           <h2 style={{
             fontFamily: "var(--font-display)",
             fontSize: 44, fontWeight: 450, letterSpacing: "-0.02em",
@@ -110,20 +103,6 @@ export function HomeScreen({
             style={{ padding: "16px 32px", fontSize: 16, marginBottom: 32 }}>
             <Icon name="play" size={16} /> Start reviewing
           </button>
-
-          {settings.showLeaderboard && (
-            <div style={{
-              display: "flex", justifyContent: "center",
-              fontSize: 12, color: "var(--ink-3)",
-              fontFamily: "var(--font-mono)",
-              letterSpacing: "0.06em", textTransform: "uppercase",
-            }}>
-              <button onClick={() => onNav("leaderboard")}
-                style={{ color: "var(--ink-2)", textDecoration: "underline", fontFamily: "inherit", fontSize: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>
-                See your stats
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </>

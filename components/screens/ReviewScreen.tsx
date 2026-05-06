@@ -714,31 +714,6 @@ export function SessionComplete({
           </div>
         </div>
 
-        {settings.showStreaks && (
-          <div style={{
-            padding: 16, borderRadius: "var(--radius)",
-            background: "var(--sun-soft)",
-            marginBottom: 24,
-            display: "flex", alignItems: "center", gap: 12,
-          }}>
-            <div style={{
-              width: 40, height: 40, borderRadius: 8, flexShrink: 0,
-              background: "var(--sun)", color: "white",
-              display: "grid", placeItems: "center",
-            }}>
-              <Icon name="fire" size={20} />
-            </div>
-            <div style={{ textAlign: "left" }}>
-              <div style={{ fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 500 }}>
-                Streak extended to day 10
-              </div>
-              <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
-                4 more days to earn &quot;Week Warrior+&quot;
-              </div>
-            </div>
-          </div>
-        )}
-
         <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
           <button className="btn btn-ghost btn-lg" onClick={onHome}>
             Back to Review

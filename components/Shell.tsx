@@ -55,25 +55,21 @@ export function Sidebar({
   const canSeeFlagReview = canSeeFlaggedBadge;
   const canSeeAdmin = role === "admin";
 
-  const userItems = [
-    { id: "review",      label: "Review",             icon: "review", badge: pendingCount },
-    settings.showLeaderboard
-      ? { id: "leaderboard", label: "Stats & Leaderboard",icon: "trophy" }
-      : null,
-    { id: "profile",     label: "My profile",         icon: "user" },
-    { id: "guide",       label: "Guide & examples",   icon: "book" },
-  ].filter(Boolean) as { id: string; label: string; icon: string; badge?: number }[];
+  const userItems: { id: string; label: string; icon: string; badge?: number }[] = [
+    { id: "review",   label: "Review",           icon: "review", badge: pendingCount },
+    { id: "profile",  label: "My profile",       icon: "user" },
+    { id: "guide",    label: "Guide & examples", icon: "book" },
+  ];
 
   const seniorItems: { id: string; label: string; icon: string; badge?: number }[] = [
     { id: "flag-review", label: "Flag review", icon: "flag", badge: flaggedCount ?? undefined },
   ];
 
   const adminItems = [
-    { id: "admin-overview",   label: "Overview",       icon: "bolt" },
+    { id: "admin-overview",   label: "Overview",       icon: "users" },
     { id: "admin-assignment", label: "Assignment",     icon: "sliders" },
     { id: "admin-points",     label: "Points & rules", icon: "medal" },
     { id: "admin-examples",   label: "Example library",icon: "image" },
-    { id: "admin-users",      label: "Users",          icon: "users" },
     { id: "admin-settings",   label: "App settings",   icon: "gear" },
   ];
 

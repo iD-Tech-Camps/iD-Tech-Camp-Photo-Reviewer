@@ -7,97 +7,6 @@ import { EXAMPLES, ADMIN_USERS, PhotoPlaceholder } from "@/components/data";
 import { useSettings, AppSettings } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
 
-export function AdminOverview() {
-  return (
-    <>
-      <PageHeader
-        eyebrow="Admin"
-        title="<em>Overview.</em>"
-        sub="The whole operation at a glance."
-      >
-        <button className="btn btn-ghost"><Icon name="download" size={14} /> Export CSV</button>
-        <button className="btn btn-primary"><Icon name="bolt" size={14} /> Start double-points</button>
-      </PageHeader>
-
-      <div className="page-body">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14, marginBottom: 20 }}>
-          {([
-            ["In queue",       "2,481", "photos"],
-            ["Reviewed today", "1,204", "photos"],
-            ["Avg time/photo", "22",    "sec"],
-            ["Flag rate",      "4.7",   "%"],
-            ["Active reviewers","31",   "/ 47"],
-          ] as [string, string, string][]).map(([l, v, u]) => (
-            <div key={l} className="card">
-              <span className="stat-label">{l}</span>
-              <div style={{
-                fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 450,
-                letterSpacing: "-0.02em", lineHeight: 1, marginTop: 6,
-              }}>
-                {v}<small style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--ink-3)", marginLeft: 4, fontWeight: "normal" }}>{u}</small>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
-          <div className="card">
-            <div className="card-header">
-              <h3 className="card-title">Queue depth by camp</h3>
-              <span className="card-eyebrow">Live · from SmugMug</span>
-            </div>
-            {([
-              ["Game Dev · Stanford", 412, "sun"],
-              ["Robotics · UCLA",     389, "lake"],
-              ["AI & ML · MIT",       521, "moss"],
-              ["Film · NYU",          298, "rose"],
-              ["Roblox · Caltech",    602, "ink-2"],
-              ["Creative · USC",      259, "ink-3"],
-            ] as [string, number, string][]).map(([camp, n, c]) => {
-              const max = 602;
-              return (
-                <div key={camp} style={{ marginBottom: 10 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 13 }}>
-                    <span style={{ color: "var(--ink-2)" }}>{camp}</span>
-                    <span style={{ fontFamily: "var(--font-mono)", color: "var(--ink-3)" }}>{n} photos</span>
-                  </div>
-                  <div className="progress-track" style={{ height: 8 }}>
-                    <div className="progress-fill" style={{ width: ((n/max)*100)+"%", background: `var(--${c})` }} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="card">
-            <div className="card-header">
-              <h3 className="card-title">Flagged for review</h3>
-              <span className="pill pill-sun">14 open</span>
-            </div>
-            {([
-              ["IMG_4612", "Riley T.",   "Gesture unclear"],
-              ["IMG_4590", "Marcus W.",  "Could be hero shot?"],
-              ["IMG_4588", "Ana F.",     "Lighting borderline"],
-              ["IMG_4571", "Priya S.",   "Duplicate of 4570?"],
-            ] as [string, string, string][]).map(([id, who, note]) => (
-              <div key={id} style={{ padding: "10px 0", borderTop: "1px solid var(--rule)", fontSize: 13 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
-                  <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600 }}>{id}</span>
-                  <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{who}</span>
-                </div>
-                <div style={{ color: "var(--ink-3)", fontSize: 12 }}>{note}</div>
-              </div>
-            ))}
-            <button className="btn btn-ghost" style={{ width: "100%", marginTop: 10 }}>
-              Review all flags <Icon name="arrow-r" size={12} />
-            </button>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
 export function AdminAssignment() {
   const [batchSize, setBatchSize] = React.useState(10);
   const [reminderDays, setReminderDays] = React.useState(2);
@@ -399,8 +308,7 @@ function FlagNotifications() {
 
 export function AdminPoints() {
   const [pts, setPts] = React.useState<Record<string, number>>({
-    approve: 10, flag: 15, streakBonus: 25,
-    teamWin: 100, accurateFlag: 15, perfectBatch: 50,
+    approve: 10, flag: 15,
   });
 
   return (
@@ -421,10 +329,6 @@ export function AdminPoints() {
               {([
                 ["approve", "Approve photo", "Standard approve action"],
                 ["flag",    "Flag for admin","Flag anything that isn't a clear approve — admin makes the final call"],
-                ["accurateFlag", "Accurate flag bonus", "When admin agrees with your flag"],
-                ["perfectBatch", "Perfect batch bonus", "All 10 decisions confirmed by admin"],
-                ["streakBonus",  "Daily streak bonus", "Per day on a 3+ day streak"],
-                ["teamWin",      "Team weekly win", "To every member of the winning team"],
               ] as [string, string, string][]).map(([key, label, note]) => (
                 <div key={key} style={{
                   display: "grid", gridTemplateColumns: "1fr auto",
@@ -1273,11 +1177,11 @@ export function AdminExamples() {
   );
 }
 
-export function AdminUsers() {
+export function AdminOverview() {
   return (
     <>
       <PageHeader
-        eyebrow="Admin · Users"
+        eyebrow="Admin · Overview"
         title="<em>Reviewers.</em>"
         sub={`${ADMIN_USERS.length} accounts · 31 active in last 24h`}
       >
@@ -1289,6 +1193,23 @@ export function AdminUsers() {
       </PageHeader>
 
       <div className="page-body">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14, marginBottom: 20 }}>
+          {([
+            ["Reviewed today",   "1,204", "photos"],
+            ["Active reviewers", "31",    "/ 47"],
+          ] as [string, string, string][]).map(([l, v, u]) => (
+            <div key={l} className="card">
+              <span className="stat-label">{l}</span>
+              <div style={{
+                fontFamily: "var(--font-display)", fontSize: 32, fontWeight: 450,
+                letterSpacing: "-0.02em", lineHeight: 1, marginTop: 6,
+              }}>
+                {v}<small style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--ink-3)", marginLeft: 4, fontWeight: "normal" }}>{u}</small>
+              </div>
+            </div>
+          ))}
+        </div>
+
         <div className="card" style={{ padding: 0 }}>
           <table className="table">
             <thead>
@@ -1296,8 +1217,9 @@ export function AdminUsers() {
                 <th>Name</th>
                 <th>Role</th>
                 <th>Team</th>
-                <th>Last active</th>
-                <th>Status</th>
+                <th style={{ width: 110 }}>Reviewed</th>
+                <th style={{ width: 110, textAlign: "right" }}>Points</th>
+                <th style={{ width: 110 }}>Last active</th>
                 <th style={{ width: 50 }}></th>
               </tr>
             </thead>
@@ -1321,16 +1243,12 @@ export function AdminUsers() {
                     </span>
                   </td>
                   <td style={{ fontSize: 13 }}>{u.team}</td>
+                  <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-3)" }}>{u.reviewed}</td>
+                  <td style={{
+                    textAlign: "right",
+                    fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 500,
+                  }}>{u.pts.toLocaleString()}</td>
                   <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-3)" }}>{u.last}</td>
-                  <td>
-                    <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-                      <span style={{
-                        width: 8, height: 8, borderRadius: "50%",
-                        background: u.status === "Active" ? "var(--moss)" : "var(--rule-2)",
-                      }} />
-                      {u.status}
-                    </span>
-                  </td>
                   <td>
                     <button className="btn btn-ghost" style={{ padding: "4px 6px" }}>
                       <Icon name="dots" size={14} />
@@ -1440,7 +1358,7 @@ export function AdminSettings() {
       <PageHeader
         eyebrow="Admin · Settings"
         title="App <em>settings.</em>"
-        sub="Branding, copy, and feature flags. Changes save automatically."
+        sub="Branding and reviewer copy. Changes save automatically."
       >
         {confirmReset ? (
           <>
@@ -1605,36 +1523,6 @@ export function AdminSettings() {
             </div>
           </div>
 
-          <div className="card">
-            <h3 className="card-title" style={{ marginBottom: 4 }}>Features</h3>
-            <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 6 }}>
-              Toggle gamification and engagement features on or off for everyone.
-            </div>
-            <ToggleRow
-              label="Confetti on batch complete"
-              hint="Celebrate when a reviewer finishes a batch."
-              value={settings.confettiOnComplete}
-              onChange={(v) => set("confettiOnComplete", v)}
-            />
-            <ToggleRow
-              label="Stats &amp; leaderboard"
-              hint="Show the leaderboard nav item and the stats link on the home screen."
-              value={settings.showLeaderboard}
-              onChange={(v) => set("showLeaderboard", v)}
-            />
-            <ToggleRow
-              label="Streaks"
-              hint="Show daily streak callouts and badges."
-              value={settings.showStreaks}
-              onChange={(v) => set("showStreaks", v)}
-            />
-            <ToggleRow
-              label="Double-points hour"
-              hint="Show the double-points pennant on the home screen."
-              value={settings.showDoublePoints}
-              onChange={(v) => set("showDoublePoints", v)}
-            />
-          </div>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 16, position: "sticky", top: 20, alignSelf: "start" }}>

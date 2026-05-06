@@ -5,7 +5,6 @@ import { Sidebar, fireConfetti, useToast } from "@/components/Shell";
 import { HomeScreen } from "@/components/screens/HomeScreen";
 import { ReviewScreen, SessionComplete } from "@/components/screens/ReviewScreen";
 import {
-  LeaderboardScreen,
   ProfileScreen,
   GuideScreen,
 } from "@/components/screens/LeaderboardProfileGuide";
@@ -14,7 +13,6 @@ import {
   AdminAssignment,
   AdminPoints,
   AdminExamples,
-  AdminUsers,
   AdminSettings,
 } from "@/components/screens/Admin";
 import { FlagReviewScreen } from "@/components/screens/FlagReview";
@@ -25,7 +23,6 @@ import { fetchPendingCount } from "@/lib/reviews";
 
 const VALID_SCREENS = [
   "review",
-  "leaderboard",
   "profile",
   "guide",
   "flag-review",
@@ -33,7 +30,6 @@ const VALID_SCREENS = [
   "admin-assignment",
   "admin-points",
   "admin-examples",
-  "admin-users",
   "admin-settings",
 ];
 
@@ -43,7 +39,6 @@ const ADMIN_SCREENS = new Set([
   "admin-assignment",
   "admin-points",
   "admin-examples",
-  "admin-users",
   "admin-settings",
 ]);
 
@@ -111,10 +106,8 @@ function AppInner() {
   const handleComplete = (decisions: Record<string, any>) => {
     setSessionResult(decisions);
     setMode("complete");
-    if (settings.confettiOnComplete) {
-      setTimeout(() => fireConfetti(window.innerWidth * 0.2, window.innerHeight * 0.4, 60), 200);
-      setTimeout(() => fireConfetti(window.innerWidth * 0.8, window.innerHeight * 0.4, 60), 400);
-    }
+    setTimeout(() => fireConfetti(window.innerWidth * 0.2, window.innerHeight * 0.4, 60), 200);
+    setTimeout(() => fireConfetti(window.innerWidth * 0.8, window.innerHeight * 0.4, 60), 400);
   };
 
   // Live count of `pending` photos for the sidebar Review badge and the
@@ -173,7 +166,6 @@ function AppInner() {
       />
       <main className="main">
         {activeScreen === "review"      && <HomeScreen onStart={handleStart} onNav={setScreen} pendingCount={pendingCount ?? undefined} />}
-        {activeScreen === "leaderboard" && <LeaderboardScreen />}
         {activeScreen === "profile"     && <ProfileScreen />}
         {activeScreen === "guide"       && <GuideScreen />}
         {activeScreen === "flag-review" && <FlagReviewScreen toast={toast} />}
@@ -181,7 +173,6 @@ function AppInner() {
         {activeScreen === "admin-assignment" && <AdminAssignment />}
         {activeScreen === "admin-points"     && <AdminPoints />}
         {activeScreen === "admin-examples"   && <AdminExamples />}
-        {activeScreen === "admin-users"      && <AdminUsers />}
         {activeScreen === "admin-settings"   && <AdminSettings />}
       </main>
       {toast.node}

@@ -18,11 +18,6 @@ export type AppSettings = {
   accent: "sun" | "lake" | "moss" | "rose";
   density: "comfortable" | "compact";
 
-  confettiOnComplete: boolean;
-  showLeaderboard: boolean;
-  showStreaks: boolean;
-  showDoublePoints: boolean;
-
   supportEmail: string;
 };
 
@@ -41,11 +36,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   theme: "light",
   accent: "sun",
   density: "comfortable",
-
-  confettiOnComplete: true,
-  showLeaderboard: true,
-  showStreaks: true,
-  showDoublePoints: true,
 
   supportEmail: "support@idtech.com",
 };
