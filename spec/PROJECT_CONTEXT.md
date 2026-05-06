@@ -38,6 +38,12 @@ Reviewers move through a queue of photos and either **approve** them (share-wort
 - The admin-overview "Active reviewers" denominator currently equals total profiles count; once invitations + idle/inactive transitions land we'll want to filter by `profiles.status`.
 - No SmugMug API integration (the placeholder seed data simulates one location/week with 10 photos under "iD Tech Camps → Adelphi University → May 25–29, 2026")
 - Outstanding `npm audit` issues (Next.js 14.2.35 has known high-severity advisories; major-version upgrade pending)
+- AdminAssignment screen is fully mock — batch settings, auto-reassign, reminders, FlagNotifications, save buttons all persist nothing. Hidden in step 7.7f, rebuilt in step 11.
+- The Invite button on Admin → Overview is a no-op. Wired as a share-link modal in step 7.7e.
+- Self-service profile editing (display name, team) is missing — currently only admins can edit profiles via the Overview modal. Added in step 7.7d.
+- Theme / accent / density all live globally on `app_settings`; theme should be per-user, density isn't actually wired to any DOM hook or CSS rule. Cleanup in step 7.7c.
+- Static SSR `<title>` (`app/layout.tsx → metadata.title`) is hardcoded "Treeline · Photo Review"; runtime `document.title` is correctly wired to brand fields. Favicon doesn't exist (middleware excludes the path but no file is served). Both addressed in step 7.7a.
+- `FLAGGED_PHOTOS`, `ADMIN_USERS`, `BADGES`, `RECENT_ACTIVITY` mocks in `components/data.tsx` are no longer consumed but haven't been deleted. `BrowserWindow.tsx` is also orphaned. `SESSION_PHOTOS` is still used by HomeScreen for decoration. Cleanup in step 7.7b.
 
 ---
 
@@ -147,9 +153,11 @@ Both set in Vercel (all environments) and in `.env.local` for local dev.
 | 5 | Database schema design | ✅ Done |
 | 6 | **MVP scope refactor** — remove feature toggles, defer leaderboard/streaks/multiplier-bonus/accuracy, merge Admin Overview + Users | 🟡 In progress |
 | 7 | Replace `localStorage` with Supabase persistence | ✅ Done |
-| 8 | SmugMug API integration | Pending |
+| 7.7 | **Pre-SmugMug cleanup pass** — wiring sweep + drop dead UI before new feature work piles on | Pending |
+| 8 | **SmugMug API integration** — admin-curated import pool with folder priority (not full auto-ingest) | Pending |
 | 9 | Next.js security upgrade (resolves audit warnings) | Pending |
 | 10 | Polish + team rollout | Pending |
+| 11 | **Notifications, assignment & invitations** — email + in-app, senior routing rules, idle/inactive transitions, pre-assigned invites | Pending |
 
 ### Step 7 sub-steps (resume here)
 
@@ -171,6 +179,47 @@ Both set in Vercel (all environments) and in `.env.local` for local dev.
 | 7.6c | App settings — migration 16 added `home_greeting` / `home_subtitle` / `completion_title` / `completion_message` / `empty_queue_message` / `support_email` / `theme` / `accent` / `density` to `app_settings` and dropped the dead `show_leaderboard`. `lib/app-settings.ts` is the SettingsProvider's source of truth; AdminSettings debounces text input writes (500ms idle + flush on blur) to avoid hammering the DB. | ✅ Done | 2026-05-06 |
 | 7.6d | Points & bonus — `lib/points-config.ts` reads/writes the singleton row; ReviewScreen passes an explicit `pointsAwarded = base × multiplier` into `submitReview` so the DB snapshot reflects the bonus the reviewer saw. Migration 17 added the `bonus_periods` table; `lib/bonus-periods.ts` + `BonusPeriodsProvider` (in `components/settings.tsx`) replace the localStorage schedule. AdminPoints loads + saves both. | ✅ Done | 2026-05-06 |
 
+**Step 7.7 sub-pieces** (pre-SmugMug cleanup, tackled one at a time):
+
+| # | Piece | Status | Notes |
+|---|---|---|---|
+| 7.7a | Favicon + SSR title from `app_settings` | Pending | Drop a static favicon (`app/icon.png` or similar) so the middleware's favicon exclusion isn't producing 404s. Bump `app/layout.tsx`'s hardcoded `metadata.title` to a server-side read of `app_settings.brand_name + brand_tagline`. The runtime `document.title` override already in `App.tsx` keeps post-hydrate edits working. |
+| 7.7b | Delete orphaned mocks + `BrowserWindow.tsx` | Pending | Remove `FLAGGED_PHOTOS`, `ADMIN_USERS`, `BADGES`, `RECENT_ACTIVITY` from `components/data.tsx`. Delete `components/BrowserWindow.tsx`. HomeScreen still reads `SESSION_PHOTOS` for the decorative thumbnail strip — replace with a small DB pull (4–6 most recent `photos`) or a simpler placeholder. Keep `PhotoPlaceholder` / `photoPaletteFor` — still consumed. |
+| 7.7c | Theme → per-user, drop density, relocate appearance UI | Pending | New migration: `alter table public.profiles add column theme text not null default 'light' check (theme in ('light','dark'))`. Drop `app_settings.theme` and `app_settings.density` (with the matching CHECK constraints). `accent` stays on `app_settings` as the brand color. UI: appearance section moves from Admin → Settings to the Profile screen. Single column on `profiles` is fine for V1; spin up `user_preferences` only when more per-user prefs accrue. |
+| 7.7d | Self-service profile editing | Pending | Profile screen gets a small "Edit" affordance for display name + team. RLS already permits a user to update their own row's display fields (migration 9). Either reuse `lib/profile.ts → updateReviewerProfile` or add a thin self-edit variant. |
+| 7.7e | Invite share-link modal + team `<datalist>` autocomplete | Pending | Replace the dead Invite button on Admin → Overview with a modal: production URL + copy-to-clipboard + one-line note that any `@idtech.com` Google account can sign in. Separately, the team input in `ReviewerEditModal` gets a `<datalist>` populated from `select distinct team from profiles where team is not null and team <> ''`. No schema change. Pre-assigned invites (a `pending_invites` table keyed on email) are deferred to step 11. |
+| 7.7f | Hide AdminAssignment from nav | Pending | Drop the nav entry in `Shell.tsx`'s `adminItems` and remove the screen from `App.tsx`'s routing + the `ADMIN_SCREENS` set. The component file can stay — step 11 rewrites most of it. The `senior_routing_rules` table stays untouched in the DB (consumed by step 11). |
+
+---
+
+### Step 8 — SmugMug API integration (preview)
+
+**V1 model: admin-curated import pool, not full auto-ingest.** Admins pick which SmugMug folders (typically a `camp_week`, possibly a whole `location`) to bring into the review queue rather than the import job pulling everything. Folders carry a priority order — photos from higher-priority folders fill the queue first, so when there's an active need ("we really need to clear MIT this week"), admins move that folder to the top.
+
+Likely shape:
+- A new `import_pool` table — rows of `(camp_week_id, display_order, added_by, added_at)`. Drag-to-reorder mirroring the `examples.display_order` pattern.
+- An admin screen (or a card on Overview) that lets admins browse the SmugMug folder tree, add/remove folders, and reorder.
+- The reviewer queue (`fetchPendingPhotos`) sorts by pool priority before falling back to oldest-first within a tier.
+- The import job (scheduled or admin-triggered) only pulls photos from folders in the pool. The placeholder seed (`smugmug_*_id like 'placeholder-%'`) gets cleared on first real run.
+- The `quarantine` mechanism wires its missing piece here: `photos.is_quarantined` already flips on flag insert via trigger, but the actual SmugMug API call to move the file to the hidden folder is what step 8 adds.
+
+**Open questions for when we get there:**
+- Removing a folder from the pool — existing reviews stay (immutable log), but what about photos already imported and not yet reviewed? Drop from the queue, or leave?
+- Pool granularity — `camp_week` only, or also `location` for a whole-location pull?
+- Refresh cadence — manual button vs. cron, and whether refresh re-walks already-imported folders for new uploads.
+- Whether priority is folder-level (whole folder before next folder) or interleaved (round-robin across active folders).
+
+---
+### Step 11 — Notifications, assignment & invitations
+
+Bundle of related work deferred from V1 because none of it has a working backbone yet. Restoring AdminAssignment to the nav happens here.
+
+- **Notifications infrastructure** — `notifications` table for in-app delivery (bell icon in sidebar + notifications screen); email transport via Resend or SendGrid through a Supabase Edge Function; `notification_preferences` per user (opt-out per channel and per kind).
+- **Senior routing rules UI** — wire the `senior_routing_rules` table (migration 8 — already in the schema) to a real admin screen. Tag triggers from the live `tags` table; recipient is any `senior` or `admin` profile. Channels filtered to whatever's actually wired (probably email + in-app on day one even though the schema permits slack/sms).
+- **Reminders / nudges** — revive Admin → Assignment with real persistence. Per-user idle threshold + channel choice. Probably a daily cron that finds reviewers where `now() - last_active_at > threshold`.
+- **Invitations** — `pending_invites` table keyed on email so admins can pre-assign role/team before someone signs in. The `handle_new_user` trigger consumes the invite on first OAuth login.
+- **`profile_status` transitions** — wire the `active | idle | inactive` enum currently unused on `profiles`. Cron or trigger flips status based on `last_active_at`. Admin Overview's "Active reviewers" denominator filters by status instead of total profile count.
+- **Auto-reassign** — the AdminAssignment "Auto-reassign after N minutes" idea may or may not survive contact with the import-pool model from step 8. Decide here.
 ---
 
 ## Working style / preferences
@@ -203,6 +252,11 @@ Here's what's been useful:
 - **No runtime feature toggles in V1.** Leaderboard and streaks are deferred to a post-V1 release; confetti is always on. Feature availability is controlled by versioning, not admin-facing switches. The four removed `AppSettings` keys (`confettiOnComplete`, `showLeaderboard`, `showStreaks`, `showDoublePoints`) are gone from the type, defaults, and every consumer; pre-existing values in `localStorage` are silently ignored by the spread merge. The multiplier-bonus pennant *is* back as of May 6, 2026, but it's data-driven (off when no bonus is enabled and active) — not a global feature flag.
 - **Points Multiplier Bonus is fully DB-backed (migration 17).** `bonus_periods` is its own multi-row table; `BonusPeriodsProvider` (in `components/settings.tsx`) hydrates from the DB on mount and exposes optimistic `create` / `update` / `remove` / `toggle` methods. Shell.tsx's `useActiveBonusPeriod()` + `BonusPennant` reads from that provider and re-evaluates on a 30s tick so windows start/end mid-session correctly. ReviewScreen now passes an explicit `pointsAwarded = base × multiplier` into `submitReview`, so `reviews.points_awarded` snapshots the bonused value rather than the base. The trigger keeps its "fall back to points_config" path so non-bonused decisions (senior accept / delete on FlagReview) still snapshot correctly.
 - **Admin Overview merged with Users.** One screen showing the reviewer roster with per-user stats (reviewed, points, last active, role, team), plus a small `Reviewed today` / `Active reviewers` stat row above the table. The old operational stat cards, "Queue depth by camp" panel, and "Flagged for review" snippet are gone. The standalone Users screen is gone too — its search + Invite buttons live on the merged Overview header. The queue-depth panel is deferred until SmugMug data is wired in step 8.
+- **Theme is per-user; accent stays global; density removed.** Theme moves from `app_settings.theme` to a new `profiles.theme` column (same `('light','dark')` CHECK). Accent (`--sun`) stays on `app_settings` as the brand color. Density was never wired (no `data-density` attribute, no compact CSS rules) — wiring it well isn't worth the work for an internal tool. Appearance UI moves from Admin → Settings to the Profile screen. Lands in step 7.7c.
+- **Invite is a share-link modal in V1.** Workspace OAuth already gates sign-in to `@idtech.com`; the `handle_new_user` trigger creates the profile on first login. The Invite button just shows the URL + copy + a one-liner. Pre-assignment via `pending_invites` is deferred to step 11.
+- **Team stays free-text with `<datalist>` autocomplete.** Reuses existing values from `select distinct team from profiles`. Normalize to a `teams` table only if/when teams need to drive routing.
+- **AdminAssignment is hidden from the nav until step 11.** The whole screen (batch settings, auto-reassign, reminders, FlagNotifications, Save/Discard) is mock UI persisting nothing. `senior_routing_rules` stays in the schema; the screen returns when notifications have a real backbone.
+- **SmugMug ingest is admin-curated in V1, not full auto-ingest.** Admins pick which folders enter the review queue and prioritize them. Full design in step 8.
 
 ---
 
