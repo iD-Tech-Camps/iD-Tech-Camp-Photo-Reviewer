@@ -42,3 +42,6 @@ next-env.d.ts
 # IDE
 .vscode/
 .idea/
+
+# supabase CLI cache (project-ref, pooler URL, version metadata; created by `supabase link`)
+supabase/.temp/
