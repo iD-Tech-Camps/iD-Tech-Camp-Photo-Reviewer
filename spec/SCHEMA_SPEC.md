@@ -1,6 +1,11 @@
-# iD Photo Reviewer — Database Schema Spec (Step 5)
+# iD Photo Reviewer — Database Schema Spec (Step 5 + step-6 fixes)
 
-> **Status: implemented.** This document was originally the brief for step 5 and is now the reference for what's actually in the database. The schema lives in `supabase/migrations/20260505000001_*.sql` through `supabase/migrations/20260505000012_*.sql`, applied to the work-account Supabase project (`idtech-photo-reviewer`). The few places where the implementation diverges from the original brief are called out inline with **`Implementation note`** blocks.
+> **Status: implemented.** This document was originally the brief for step 5 and is now the reference for what's actually in the database. The schema lives in `supabase/migrations/20260505000001_*.sql` through `supabase/migrations/20260505000014_*.sql`, applied to the work-account Supabase project (`idtech-photo-reviewer`). The few places where the implementation diverges from the original brief are called out inline with **`Implementation note`** blocks.
+>
+> **Two material changes since the original step-5 brief landed:**
+>
+> 1. **Trigger security context.** Migration 14 marks all four review trigger functions `security definer`. The originals ran as the invoker and were silently zero-rowed by RLS on real client inserts (they bypass it under the service role, which is what `supabase db query` defaults to — so the schema-level smoke test missed it). See "Triggers" below.
+> 2. **Dev seed data.** Migration 13 seeds the four real top-level SmugMug divisions plus a placeholder location/camp-week/photos chain under "iD Tech Camps → Adelphi University → May 25–29, 2026" so the app can exercise the schema before SmugMug ingest lands in step 7. Every placeholder row's `smugmug_*_id` starts with `placeholder-` for easy swap-in or deletion.
 
 ---
 
@@ -60,7 +65,7 @@ Notes:
 | col | type | notes |
 |---|---|---|
 | `id` | uuid pk | `default gen_random_uuid()` |
-| `name` | text not null | e.g. "Game Dev" |
+| `name` | text not null | The four real ones are "iD Tech Camps", "iD Teen Academies", "Online Private Lessons", "Virtual Tech Camps" — they're the top-level folders in SmugMug under the site homepage. |
 | `smugmug_folder_id` | text not null unique | the SmugMug node id |
 | `created_at` | timestamptz | `default now()` |
 
@@ -69,7 +74,7 @@ Notes:
 |---|---|---|
 | `id` | uuid pk | |
 | `division_id` | uuid not null | fk → `divisions(id)` on delete cascade |
-| `name` | text not null | e.g. "Stanford University, Palo Alto CA" |
+| `name` | text not null | The bare SmugMug folder name, e.g. "Adelphi University" — no city suffix, no division prefix |
 | `smugmug_folder_id` | text not null unique | |
 | `created_at` | timestamptz | |
 
@@ -86,7 +91,9 @@ Notes:
 
 Index `camp_weeks_dates_idx` on `(starts_on, ends_on)` for date-range queries.
 
-> **Implementation note.** The original brief had an `is_active` stored generated column defined as `current_date between starts_on and ends_on`. Postgres requires stored generated columns to use `IMMUTABLE` expressions and `current_date` is `STABLE` (it shifts with the session's transaction timestamp), so the column was rejected by the remote with `SQLSTATE 42P17`. To preserve the spec's intent without changing the column shape conceptually, the table exposes the boolean through a view:
+> **Implementation note (year folders).** SmugMug nests folders as `Site Homepage → Division → Location → Year (e.g. "2025", "2026") → Camp Week`. The schema collapses the year layer — `camp_weeks` is the direct child of `locations` because the year is recoverable from `starts_on`. The SmugMug import job in step 7 will walk year folders as a pass-through layer rather than persisting them as their own entity.
+
+> **Implementation note (`is_active`).** The original brief had an `is_active` stored generated column defined as `current_date between starts_on and ends_on`. Postgres requires stored generated columns to use `IMMUTABLE` expressions and `current_date` is `STABLE` (it shifts with the session's transaction timestamp), so the column was rejected by the remote with `SQLSTATE 42P17`. To preserve the spec's intent without changing the column shape conceptually, the table exposes the boolean through a view:
 >
 > ```sql
 > create view public.camp_weeks_with_status as
@@ -251,7 +258,9 @@ Seed from the `EXAMPLES` constant in `components/data.tsx`.
 
 ## Triggers (described; Cursor implements)
 
-1. **`profiles` auto-creation on `auth.users` insert.** Standard Supabase pattern — copies `id`, `email`, and `full_name` (from `raw_user_meta_data`) into `profiles` with default role `reviewer`.
+> **All four review trigger functions below are `security definer set search_path = public`.** Migration 14 added that. Without it, the inner UPDATEs on `photos` and `profiles` are evaluated under the caller's RLS context — and `photos` has no UPDATE policy for authenticated users (writes are reserved for the SmugMug import job via the service role), so the updates were silently zero-rowed in production. `security definer` lets the trigger run with the function owner's privileges, the same way `is_admin()`, `is_senior_or_admin()`, and `handle_new_user()` already worked. Anytime you add a new trigger that mutates an RLS-protected table, follow the same pattern.
+
+1. **`profiles` auto-creation on `auth.users` insert.** Standard Supabase pattern — copies `id`, `email`, and `full_name` (from `raw_user_meta_data`) into `profiles` with default role `reviewer`. Already `security definer` in migration 2.
 
 2. **Maintain `photos.current_status` on `reviews` insert.**
    - `approve` → `'approved'`
@@ -331,16 +340,26 @@ Each step landed as its own migration file under `supabase/migrations/` so each 
 | `20260505000010_badges_placeholder.sql` | Empty placeholder; reserves migration ordering |
 | `20260505000011_streaks_placeholder.sql` | Empty placeholder |
 | `20260505000012_activity_log_placeholder.sql` | Empty placeholder |
+| `20260505000013_seed_dev_data.sql` | Step 6.2: seeds the four real divisions, plus a placeholder location/week/photos chain (`smugmug_*_id` prefixed `placeholder-`). Idempotent. |
+| `20260505000014_fix_review_triggers_security.sql` | Step 6.x: re-creates the four review trigger functions with `security definer set search_path = public`, plus a one-time backfill that reconciles any photo whose `current_status` had drifted from its latest review's decision while the bug was live. |
 
-The real schema-level smoke test lives at `supabase/tests/smoke_test.sql` (deliberately outside `migrations/` so it isn't applied by `db push`). It's a transaction wrapped in `begin; ... rollback;` that seeds a minimal hierarchy, exercises all four review triggers, and verifies both check constraints. Run it after applying migrations with:
+Three tests live under `supabase/tests/` (deliberately outside `migrations/` so they aren't applied by `db push`). All three are transactions wrapped in `begin; ... rollback;`:
+
+| File | Role context | What it covers |
+|---|---|---|
+| `smoke_test.sql` | service role (default) | Schema-level: enums, hierarchy FKs, trigger basics, both check constraints |
+| `e2e_review_flow.sql` | `authenticated` + pinned JWT | Reviewer flow: approve + flag, all four triggers, both check constraints, RLS context as in production |
+| `e2e_flag_review_flow.sql` | `authenticated` + pinned JWT | Senior flow: flag transition, the FlagReview join shape, accept-after-flag, delete |
 
 ```bash
-npx supabase db query --file supabase/tests/smoke_test.sql --linked
+npx supabase db query --file supabase/tests/<file>.sql --linked
 ```
 
-The last row should be `smoke test passed`. Anything else means an assertion raised — read the error message to find which.
+The last row of each is a sentinel string (`smoke test passed`, `e2e review flow passed`, `flag review flow passed`). Anything else means a `raise exception` triggered — read the error to find which assertion fired.
 
-After each migration: `npm run build`, push to GitHub. The build doesn't exercise the schema yet (the app still runs on mock data), but confirms nothing in the codebase regressed. The real exercise of the schema comes in step 6 of the roadmap (replacing localStorage with Supabase persistence — swapped ahead of the SmugMug integration so the schema is exercised by app code before any real photo data lands).
+> **Don't write new client-flow tests as the service role.** `supabase db query` defaults to running as the postgres/service role, which **bypasses RLS entirely**. The original `smoke_test.sql` ran this way and missed the trigger-vs-RLS bug fixed by migration 14 because the service role had update privileges on `photos`. The two `e2e_*` tests now `set local role authenticated; set local request.jwt.claims to '{"sub": "<uid>", "role": "authenticated"}';` so RLS is enforced as in production. Keep that pattern for any test that simulates the app's own writes.
+
+After each migration: `npm run build`, push to GitHub. The build doesn't exercise the schema directly, but confirms nothing in the codebase regressed. The schema is now exercised end-to-end by step 6's app code (sub-steps 6.1–6.4 done as of the last working session — see `PROJECT_CONTEXT.md`'s roadmap for what's left).
 
 ---
 

@@ -14,25 +14,23 @@ Reviewers move through a queue of photos and either **approve** them (share-wort
 
 ## Current status (as of last working session)
 
-**The app is live, deployed, authenticated, and feature-complete on the UI side.** What works:
-- Production deployment on Vercel
-- Google OAuth login restricted to `@idtech.com` accounts (via Internal Google Workspace)
-- Supabase backend wired up (auth + full step-5 database schema applied to the work-account project)
-- Sidebar shows the authenticated user's email/initials
-- Sign-out works
-- Three-role system in the UI (`reviewer` / `senior` / `admin`) with role-gated nav and screens
-- Reviewer flow: Approve / Flag with tags, ratings, optional notes, points, confetti
-- Senior flow: Flag Review screen — accept / delete / download flagged photos
-- Admin screens: Overview, Assignment, Points & rules, Example library, Users, App settings
-- Settings provider for brand mark / tagline / leaderboard visibility / etc.
-- Database schema: 12 migrations under `supabase/migrations/` (enums, profiles + auto-create trigger, folder hierarchy, tags + seed, photos, reviews + 4 triggers, config tables + seeds, routing rules, RLS, 3 deferred placeholders). Full smoke test at `supabase/tests/smoke_test.sql` passes against the live remote.
+**The reviewer and senior flows are now fully DB-backed.** Step 6 of the roadmap is partially complete (sub-steps 1–4 of 6 done). What works end-to-end against Supabase:
+
+- Production deployment on Vercel (auto-deploys from `main`)
+- Google OAuth login restricted to `@idtech.com` accounts (Internal Workspace)
+- `useCurrentUser` reads role from `profiles` (the dev role-switcher is gone)
+- Reviewer queue (`ReviewScreen`) reads pending photos from `photos` and writes `reviews` + `review_tags` on each approve/flag
+- Senior queue (`FlagReview`) reads flagged photos with the joined hierarchy + flagging reviewer + tag list, and writes accept/delete reviews
+- Sidebar Review and Flag-review badges show **live** counts from the DB; HomeScreen subtitle's `{{count}}` is live too
+- All four review triggers fire correctly under RLS (see "RLS gotcha" below — this took a fix migration)
+- 14 migrations applied. Two server-side e2e tests cover the review and flag-review flows end-to-end **under the authenticated role with JWT claims pinned**, so RLS is enforced as in production.
 
 **What does NOT work yet:**
-- No real data — the app still uses the mock data from the original prototype (`components/data.tsx`)
-- No SmugMug API integration
-- Decisions, ratings, tags currently persist only to `localStorage`, not the database (the schema is ready for them; wiring lands in step 6)
-- The `profiles` table exists, but role assignment is still driven by the dev switcher in `useCurrentUser`; production wiring (read role from `profiles` joined to `auth.users`) lands in step 6
-- Outstanding `npm audit` issues (Next.js 14.2.35 has known high-severity advisories; upgrade pending)
+
+- **Sub-steps 6.5 and 6.6 of the persistence work are still pending** — leaderboard / profile / points displays still read from mock data, and tags / examples / app_settings / points_config are still loaded from `data.tsx` and the SettingsProvider rather than the DB
+- No SmugMug API integration (the placeholder seed data simulates one location/week with 10 photos under "iD Tech Camps → Adelphi University → May 25–29, 2026")
+- The reviewer's flag UI doesn't expose a `quarantine` toggle — every flag submits with `quarantine: false`. The schema and FlagReview detail panel both support it; just need to add the checkbox.
+- Outstanding `npm audit` issues (Next.js 14.2.35 has known high-severity advisories; major-version upgrade pending)
 
 ---
 
@@ -54,20 +52,21 @@ app/
   login/page.tsx          # Google sign-in screen
   auth/callback/route.ts  # OAuth callback handler
 components/
-  App.tsx                 # root client component, role-gated screen routing
-  Shell.tsx               # Sidebar (with role-aware nav sections), PageHeader, fireConfetti, useToast
-  Icon.tsx                # inline SVG icon set (includes log-out, flag)
-  data.tsx                # mock constants — exports NEGATIVE_TAGS (13) and PHOTO_TAGS (mixed; positives derived locally inside ReviewScreen.tsx via PHOTO_TAGS.filter(t => t.color !== "rose")). Also SESSION_PHOTOS, FLAGGED_PHOTOS, EXAMPLES, BADGES, etc., and PhotoPlaceholder.
-  settings.tsx            # SettingsProvider / useSettings (brand, leaderboard toggle, etc.)
+  App.tsx                 # root client component, role-gated screen routing; owns the live pendingCount fetch
+  Shell.tsx               # Sidebar (live Review + Flag-review badges, role-aware nav), PageHeader, fireConfetti, useToast
+  Icon.tsx                # inline SVG icon set
+  data.tsx                # mock constants — exports NEGATIVE_TAGS (13) and PHOTO_TAGS (mixed; positives derived locally inside ReviewScreen.tsx via PHOTO_TAGS.filter(t => t.color !== "rose")). Also EXAMPLES, BADGES, PhotoPlaceholder. SESSION_PHOTOS and FLAGGED_PHOTOS still exist but are no longer consumed by ReviewScreen / FlagReview / Sidebar (they read from Supabase). HomeScreen still uses SESSION_PHOTOS for the decorative thumbnail strip — pending step 6.5.
+  settings.tsx            # SettingsProvider / useSettings (brand, leaderboard toggle, etc.) — still hardcoded; step 6.6 wires this to app_settings
   BrowserWindow.tsx       # ported from prototype, currently orphaned
   screens/
-    HomeScreen.tsx
-    ReviewScreen.tsx      # approve/flag flow with modals, tags, ratings
-    LeaderboardProfileGuide.tsx
-    Admin.tsx             # AdminOverview, AdminAssignment, AdminPoints, AdminExamples, AdminUsers, AdminSettings
-    FlagReview.tsx        # senior-only queue: accept / delete / download
+    HomeScreen.tsx        # uses live pendingCount from App.tsx
+    ReviewScreen.tsx      # DB-backed approve/flag flow
+    LeaderboardProfileGuide.tsx  # still mock — step 6.5
+    Admin.tsx             # admin sub-screens — still mock — step 6.6
+    FlagReview.tsx        # DB-backed senior queue
 lib/
-  current-user.ts         # UserProvider, useCurrentUser, Role type, ROLE_LABEL
+  current-user.tsx        # UserProvider, useCurrentUser, Role type, ROLE_LABEL. Reads role + id from profiles.
+  reviews.ts              # fetchPendingPhotos, fetchPendingCount, fetchFlaggedPhotos, fetchFlaggedCount, submitReview
   supabase/
     client.ts             # browser client (createBrowserClient)
     server.ts             # server client (createServerClient with cookies)
@@ -75,9 +74,11 @@ lib/
 middleware.ts             # root middleware, delegates to lib/supabase/middleware.ts
 styles/legacy.css         # ~650 lines, source of truth for visual styling
 supabase/
-  migrations/             # 12 SQL migrations applied to the work-account project (see SCHEMA_SPEC.md for the table)
+  migrations/             # 14 SQL migrations applied to the work-account project (see SCHEMA_SPEC.md for the table)
   tests/
-    smoke_test.sql        # hand-run schema verifier; transaction-wrapped with `rollback;` so it leaves no trace
+    smoke_test.sql              # schema-level smoke; runs as service role
+    e2e_review_flow.sql         # reviewer flow end-to-end; runs under role=authenticated with pinned JWT
+    e2e_flag_review_flow.sql    # senior flow + the FlagReview join shape; runs under role=authenticated
   .temp/                  # gitignored — Supabase CLI cache (project-ref, pooler URL, version metadata)
 spec/
   PROJECT_CONTEXT.md      # this file
@@ -86,15 +87,15 @@ spec/
 
 ### Roles and access
 
-Three roles, defined in `lib/current-user.ts`:
+Three roles, matching the Postgres `role` enum exactly:
 
-| Role | Sees | Notes |
-|---|---|---|
-| `reviewer` | Review, Leaderboard, Profile, Guide | Default for any signed-in user |
-| `senior` | Everything a reviewer sees, plus **Flag review** | Reviews photos that regular reviewers flagged |
-| `admin` | Everything, plus the **Admin** section (Overview / Assignment / Points / Examples / Users / Settings) | Full control |
+| Role | UI label | Sees | Notes |
+|---|---|---|---|
+| `reviewer` | "Staff Reviewer" | Review, Leaderboard, Profile, Guide | Default for any signed-in user (set by `handle_new_user` trigger) |
+| `senior` | "Senior Reviewer" | Everything a reviewer sees, plus **Flag review** | Reviews photos that regular reviewers flagged |
+| `admin` | "Admin" | Everything, plus the **Admin** section | Full control |
 
-Access is enforced in `App.tsx` via `screenAllowedFor(screen, role)`. Sidebar sections are conditionally rendered in `Shell.tsx`. Role assignment is currently a dev-only client-side switcher; production assignment will need to live in the database.
+`Role` in `lib/current-user.tsx` was renamed from `staff` to `reviewer` to match the DB enum. The user-facing label "Staff Reviewer" is preserved in `ROLE_LABEL.reviewer`. Role assignment is read from `profiles.role` after sign-in; promoting users still happens by hand-editing the `profiles` table (an Admin Users screen will eventually be wired up to do this in step 6.6).
 
 ---
 
@@ -105,8 +106,8 @@ Access is enforced in `App.tsx` via `screenAllowedFor(screen, role)`. Sidebar se
 | Resource | Location | Notes |
 |---|---|---|
 | **Production URL** | `https://id-tech-camp-photo-reviewer.vercel.app` | Public URL, but middleware redirects unauthenticated users to `/login` |
-| **GitHub repo** | Owned by work GitHub account, name: `iD-Tech-Camp-Photo-Reviewer` | Was originally on personal account; transferred to work |
-| **Vercel project** | Personal Vercel account, connected to new GitHub repo location | Auto-deploys on push to `main` |
+| **GitHub repo** | `iD-Tech-Camps/iD-Tech-Camp-Photo-Reviewer` (work GitHub org) | Was originally on personal account; transferred to work org. The local `origin` remote was updated 2026-05-05 to the new canonical URL. |
+| **Vercel project** | Personal Vercel account, connected to the new GitHub repo location | Auto-deploys on push to `main` |
 | **Supabase project** | Work-account Supabase, project ID stored separately | Old personal-account Supabase project should be deleted/paused |
 | **Google Cloud project** | Personal Google account, project name "iD Photo Reviewer" | Internal Workspace app — only `@idtech.com` accounts can complete OAuth. Acceptable to leave on personal account; transferable later if needed. |
 
@@ -131,12 +132,23 @@ Both set in Vercel (all environments) and in `.env.local` for local dev.
 | 3 | Deploy to Vercel | ✅ Done |
 | 4 | Supabase + Google OAuth | ✅ Done |
 | 5 | Database schema design | ✅ Done |
-| 6 | **Replace `localStorage` with Supabase persistence** | ⏭️ Up next |
+| 6 | **Replace `localStorage` with Supabase persistence** | 🟡 In progress (4/6 sub-steps done) |
 | 7 | SmugMug API integration | Pending |
 | 8 | Next.js security upgrade (resolves audit warnings) | Pending |
 | 9 | Polish + team rollout | Pending |
 
-> **Why 6 and 7 swapped.** Wiring the app to the database before ingesting real photos is the cheapest way to validate the freshly-applied schema — every table, trigger, and RLS policy gets exercised through the production code path while changes are still cheap. Step 6 is also self-contained (uses `SESSION_PHOTOS` seeded into `photos` for dev), whereas step 7 brings in an external API, an import job, and quarantine folder mechanics. Doing the dependency-free step first reduces concurrent unknowns. After step 6 the app reads roles from `profiles` and writes real `reviews`; after step 7 it sees real photos.
+### Step 6 sub-steps (resume here)
+
+| # | Sub-step | Status | Landed in |
+|---|---|---|---|
+| 6.1 | Read role from `profiles` (drop dev role switcher) | ✅ Done | `dc1f644` |
+| 6.2 | Seed `photos` from `SESSION_PHOTOS` (with division/location/week chain) | ✅ Done | `4e5bca3`, migration 13 |
+| 6.3 | Wire `ReviewScreen` to insert real `reviews` + `review_tags` | ✅ Done | `431bcd2` |
+| 6.4 | Wire `FlagReview` senior actions + sidebar live count | ✅ Done | `a955aa2`, fix in `740780d` (migration 14) |
+| 6.5 | Move points / leaderboard / profile reads off mock data onto live `reviews` aggregates | ⏭️ **Up next** | — |
+| 6.6 | Read `tags` / `examples` / `points_config` / `app_settings` from DB | Pending | — |
+
+There's also one small UX gap to fold in either as part of 6.5 or as a tiny standalone fix: the reviewer's `FlagModal` doesn't expose a quarantine checkbox, so every flag submits with `quarantine: false`. The schema and FlagReview detail panel are ready for it.
 
 ---
 
@@ -146,8 +158,8 @@ For the human picking up this work in a fresh thread, here's what's been useful:
 
 - **One step at a time.** Big plans are nice but get overwhelming. Concrete next click > comprehensive theory.
 - **Explain the *why*, not just the *what*.** When suggesting an action, briefly say what it does and why it matters — this is the user's first time through this stack.
-- **Verify before locking in.** Push intermediate states to GitHub frequently so we have rollback points. `npm run build` (not just `npm run dev`) is the truth — Vercel runs the strict build, dev mode is lenient.
-- **Be honest about uncertainty.** OAuth flows, deployment configs, and DNS-adjacent things often fail on the first try. Warn the user, don't oversell.
+- **Verify before locking in.** Push intermediate states to GitHub frequently so we have rollback points. `npm run build` (not just `npm run dev`) is the truth — Vercel runs the strict build, dev mode is lenient. After every DB-touching change, run the matching test under the **authenticated** role (see "Testing" below).
+- **Be honest about uncertainty.** OAuth flows, deployment configs, RLS-vs-trigger interactions, and DNS-adjacent things often fail on the first try. Warn the user, don't oversell.
 
 ---
 
@@ -162,22 +174,63 @@ For the human picking up this work in a fresh thread, here's what's been useful:
 - **Two-decision review flow: approve or flag (no reject).** Reject was removed in favor of a flag → senior-review handoff. A flag is not a final decision; a senior reviewer accepts, deletes, or escalates. This is the workflow the schema needs to model.
 - **Three roles, not two.** `reviewer` / `senior` / `admin`. Senior exists specifically to handle flagged photos — keeps regular reviewers from being final arbiters on edge cases.
 - **`camp_weeks.is_active` is a view, not a stored generated column.** Postgres requires stored generated columns to use `IMMUTABLE` expressions; `current_date` is `STABLE`, so the original spec definition was rejected on push. The boolean is exposed through `public.camp_weeks_with_status`. App code reads the view when it wants the flag; writes still go to the base table. Don't try to add it back as a column without picking up the immutability constraint.
-- **Schema migrations live under `supabase/migrations/`; no `supabase init` was run.** No `config.toml`, no `seed.sql`, no functions templates. The repo is linked via `npx supabase link`; CLI cache lives in `supabase/.temp/` (gitignored). Use `npx supabase db push` to apply, `npx supabase db query --file supabase/tests/smoke_test.sql --linked` to verify.
+- **Schema migrations live under `supabase/migrations/`; no `supabase init` was run.** No `config.toml`, no `seed.sql`, no functions templates. The repo is linked via `npx supabase link`; CLI cache lives in `supabase/.temp/` (gitignored). Use `npx supabase db push` to apply, `npx supabase db query --file ... --linked` to verify.
+- **Year folders inside SmugMug locations are not modeled in the schema.** SmugMug nests `Location → Year (2025/2026) → Camp Week`; our schema goes `Location → Camp Week` directly. Year is recoverable from `camp_weeks.starts_on`. The SmugMug import job (step 7) walks year folders as a pass-through layer.
+- **Review trigger functions are `SECURITY DEFINER`.** Originally they were invoker-rights and got silently zero-rowed by RLS on real client inserts (see "RLS gotcha" below). Migration 14 fixes this and the e2e tests now pin `role=authenticated` so the regression can't sneak past us again.
+- **`Role` enum in code uses `reviewer` (not `staff`).** The DB enum is `('reviewer', 'senior', 'admin')`; the code matches it. The friendly label "Staff Reviewer" is preserved in `ROLE_LABEL.reviewer`.
 
 ---
 
 ## Known issues / gotchas to remember
 
+- **The RLS-vs-trigger gotcha (resolved).** Trigger functions on `reviews` originally ran as the invoker. Their inner `UPDATE public.photos SET current_status = ...` was silently zero-rowed because `photos` has only a SELECT policy for authenticated users (writes are reserved for the import job via service role). Reviews inserted, but the photo status never moved. **Migration 14 marks all four review trigger functions `security definer set search_path = public`.** This matches the pattern already used by `is_admin()`, `is_senior_or_admin()`, and `handle_new_user()`. Anytime you write a trigger that mutates an RLS-protected table, mark it `security definer` or it'll fail silently in production.
+- **The smoke-test gotcha that hid the bug above.** `supabase db query` defaults to running as the service role, which **bypasses RLS entirely**. The schema-level smoke test never noticed the trigger UPDATE was being filtered. The e2e tests now `set local role authenticated` and pin `request.jwt.claims to '{"sub": "<your uid>", "role": "authenticated"}'` so RLS is enforced as in production. Keep that pattern for new tests; don't write new client-flow tests as the service role.
 - **`npm audit` reports 4 high-severity issues in Next.js 14.x.** The fix is a major-version upgrade (14 → 16). Deferred until after core features are working. **Don't run `npm audit fix --force`** — it will break the project mid-development.
 - **Pre-existing build warning:** `no-page-custom-font` in `app/layout.tsx`. Cosmetic only. Google Fonts are loaded via `<link>` rather than `next/font` to preserve the existing CSS font stacks unchanged.
-- **`localStorage` SSR pattern is in place** (`app/components/App.tsx`) — initial state is hardcoded, hydrated from `localStorage` in `useEffect`. Don't regress this.
-- **OAuth flows usually fail on the first try.** When something breaks during auth setup, common causes are: (1) Supabase Site URL / Redirect URLs misconfigured, (2) Google Cloud authorized redirect URI missing or stale, (3) env vars not redeployed in Vercel after change (Vercel does NOT auto-redeploy on env var change), (4) browser holding stale session — test in incognito.
-- **Vercel does not follow GitHub redirects.** If the repo is moved/transferred again in the future, the Vercel project must be manually reconnected to the new repo location.
-- **Role switcher in `useCurrentUser` is a dev affordance, not production behavior.** The `profiles.role` column now exists in the database, but `useCurrentUser` still drives the UI from client state. Wiring the read happens in step 6. Don't ship to production with the dev switcher live.
-- **`data.tsx` tag exports do not match what the spec wording suggests.** There is no `POSITIVE_TAGS` export — only `NEGATIVE_TAGS` (13 entries) and `PHOTO_TAGS` (mixed). Positives are derived locally inside `ReviewScreen.tsx` via `PHOTO_TAGS.filter(t => t.color !== "rose")`. The 7 rose-colored entries in `PHOTO_TAGS` are deprecated duplicates of `NEGATIVE_TAGS` with shorter labels — ignore them. The `tags` migration seeds the 13 negatives plus the 4 positives only.
-- **Smoke test gotchas (for anyone editing `supabase/tests/smoke_test.sql`).**
-  - `set local session_replication_role = replica;` skips FK enforcement *and every user-defined trigger* in the same transaction. The four review triggers are exactly what the test is meant to verify, so don't reach for that setting. Drop the FK temporarily inside the transaction instead — DDL is transactional in Postgres, so the trailing `rollback;` restores it automatically.
-  - Inside one transaction, `now()` returns the transaction's start time, identical for every row inserted in that script. `order by created_at desc limit 1` is therefore non-deterministic when more than one review exists. Filter by `decision` (or another distinguishing column) instead. New assertions should follow the same pattern.
+- **Vercel does not follow GitHub redirects.** If the repo is moved/transferred again in the future, the Vercel project must be manually reconnected to the new repo location. (Same for the local `origin` remote URL — that was updated to the new canonical work-org URL on 2026-05-05.)
+- **`data.tsx` tag exports do not match what the spec wording suggests.** There is no `POSITIVE_TAGS` export — only `NEGATIVE_TAGS` (13 entries) and `PHOTO_TAGS` (mixed). Positives are derived locally inside `ReviewScreen.tsx` via `PHOTO_TAGS.filter(t => t.color !== "rose")`. The 7 rose-colored entries in `PHOTO_TAGS` are deprecated duplicates of `NEGATIVE_TAGS` with shorter labels — ignore them. The `tags` migration seeds the 13 negatives plus the 4 positives only. The DB tag ids match the UI tag ids exactly, so no translation is needed when writing `review_tags`.
+- **Placeholder seed data is keyed by an obvious prefix.** All the placeholder rows seeded by migration 13 (4 divisions, 1 location, 1 camp week, 10 photos) use `smugmug_*_id` values that start with `placeholder-`. The SmugMug import job (step 7) should `update ... where smugmug_*_id like 'placeholder-%'` to swap in real ids — or `delete` them outright before the first real import.
+- **Smoke test gotchas (for anyone editing `supabase/tests/smoke_test.sql`).** These also apply to the e2e tests:
+  - `set local session_replication_role = replica;` skips FK enforcement *and every user-defined trigger* in the same transaction. The four review triggers are exactly what the tests are meant to verify, so don't reach for that setting. Drop the FK temporarily inside the transaction instead — DDL is transactional in Postgres, so the trailing `rollback;` restores it automatically.
+  - Inside one transaction, `now()` returns the transaction's start time, identical for every row inserted in that script. `order by created_at desc limit 1` is therefore non-deterministic when more than one review exists. Filter by `decision` (or another distinguishing column) instead.
+
+---
+
+## Testing
+
+Three files live under `supabase/tests/`. None of them are migrations — they're hand-run.
+
+| File | Role context | What it covers |
+|---|---|---|
+| `smoke_test.sql` | service role (default) | Schema-level: enums, hierarchy FKs, trigger basics, both check constraints |
+| `e2e_review_flow.sql` | `authenticated` + pinned JWT | Reviewer flow: approve + flag, all four triggers, both check constraints, RLS context as in production |
+| `e2e_flag_review_flow.sql` | `authenticated` + pinned JWT | Senior flow: flag transition, the FlagReview join shape, accept-after-flag, delete |
+
+Run any of them with:
+
+```bash
+npx supabase db query --file supabase/tests/<file>.sql --linked
+```
+
+The last row of each is a sentinel string (`smoke test passed`, `e2e review flow passed`, `flag review flow passed`). Anything else is a failure — the `do $$ ... raise exception ... $$` blocks will surface the assertion that broke.
+
+To reset the dev queue between manual UI tests:
+
+```sql
+delete from public.review_tags
+where review_id in (
+  select r.id from public.reviews r
+  join public.photos p on p.id = r.photo_id
+  where p.smugmug_image_id like 'placeholder-%'
+);
+delete from public.reviews
+where photo_id in (
+  select id from public.photos where smugmug_image_id like 'placeholder-%'
+);
+update public.photos
+set current_status = 'pending', is_quarantined = false
+where smugmug_image_id like 'placeholder-%';
+```
 
 ---
 
@@ -185,6 +238,6 @@ For the human picking up this work in a fresh thread, here's what's been useful:
 
 Open a new conversation and paste this whole document, or attach it as a file. Then say something like:
 
-> Picking up where I left off on the iD Photo Reviewer. Context attached. Ready to start step 6 (replace localStorage with Supabase persistence).
+> Picking up where I left off on the iD Photo Reviewer. Context attached. Step 6 sub-steps 1–4 are done; ready to start sub-step 6.5 (move points / leaderboard / profile reads onto live `reviews` aggregates).
 
 That's enough to get a fresh Claude oriented and moving in the same direction without re-explaining the journey.
