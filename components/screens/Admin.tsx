@@ -1491,15 +1491,7 @@ export function AdminExamples({ toast }: { toast: ToastApi }) {
         sub={byKind === null
           ? "Loading examples…"
           : "What reviewers see in the guide. Drag to reorder within a tab."}
-      >
-        <button
-          className="btn btn-primary"
-          onClick={() => setModal({ kind: "upload", presetKind: tab })}
-          disabled={byKind === null}
-        >
-          <Icon name="plus" size={14} /> Add example
-        </button>
-      </PageHeader>
+      />
 
       <div className="page-body">
         {loadError && (
@@ -1515,21 +1507,33 @@ export function AdminExamples({ toast }: { toast: ToastApi }) {
           </div>
         )}
 
-        <div style={{ display: "flex", gap: 4, padding: 3, background: "var(--paper-3)",
-          borderRadius: 8, width: "fit-content", marginBottom: 20 }}>
-          {([
-            ["good", `Good · ${counts.good}`],
-            ["bad",  `Bad · ${counts.bad}`],
-          ] as [ExampleKind, string][]).map(([id, label]) => (
-            <button key={id}
-              onClick={() => setTab(id)}
-              className="btn"
-              style={{
-                padding: "6px 14px", fontSize: 12,
-                background: tab === id ? "var(--paper)" : "transparent",
-                boxShadow: tab === id ? "var(--shadow-sm)" : "none",
-              }}>{label}</button>
-          ))}
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          gap: 12, marginBottom: 20,
+        }}>
+          <div style={{ display: "flex", gap: 4, padding: 3, background: "var(--paper-3)",
+            borderRadius: 8, width: "fit-content" }}>
+            {([
+              ["good", `Good · ${counts.good}`],
+              ["bad",  `Bad · ${counts.bad}`],
+            ] as [ExampleKind, string][]).map(([id, label]) => (
+              <button key={id}
+                onClick={() => setTab(id)}
+                className="btn"
+                style={{
+                  padding: "6px 14px", fontSize: 12,
+                  background: tab === id ? "var(--paper)" : "transparent",
+                  boxShadow: tab === id ? "var(--shadow-sm)" : "none",
+                }}>{label}</button>
+            ))}
+          </div>
+          <button
+            className="btn btn-primary"
+            onClick={() => setModal({ kind: "upload", presetKind: tab })}
+            disabled={byKind === null}
+          >
+            <Icon name="plus" size={14} /> Add example
+          </button>
         </div>
 
         {byKind === null ? (
@@ -1544,7 +1548,6 @@ export function AdminExamples({ toast }: { toast: ToastApi }) {
             onEdit={(ex) => { setActiveMenuId(null); setModal({ kind: "edit", example: ex }); }}
             onReplace={(ex) => { setActiveMenuId(null); setModal({ kind: "replace", example: ex }); }}
             onDelete={(ex) => { setActiveMenuId(null); setModal({ kind: "delete", example: ex }); }}
-            onUpload={() => setModal({ kind: "upload", presetKind: tab })}
             onReorder={(next) => handleReorder(tab, next)}
           />
         )}
@@ -1591,7 +1594,6 @@ function ExamplesGrid({
   onEdit,
   onReplace,
   onDelete,
-  onUpload,
   onReorder,
 }: {
   kind: ExampleKind;
@@ -1602,7 +1604,6 @@ function ExamplesGrid({
   onEdit: (ex: Example) => void;
   onReplace: (ex: Example) => void;
   onDelete: (ex: Example) => void;
-  onUpload: () => void;
   onReorder: (next: Example[]) => void;
 }) {
   // Pointer sensor with a small activation distance so a click on the
@@ -1640,18 +1641,6 @@ function ExamplesGrid({
               onDelete={() => onDelete(ex)}
             />
           ))}
-          <button onClick={onUpload} className="card" style={{
-            border: "2px dashed var(--rule-2)",
-            background: "transparent",
-            display: "grid", placeItems: "center",
-            minHeight: 220, cursor: "pointer",
-            color: "var(--ink-3)",
-          }}>
-            <div style={{ textAlign: "center" }}>
-              <Icon name="plus" size={24} />
-              <div style={{ marginTop: 6, fontSize: 13 }}>Upload {kind} example</div>
-            </div>
-          </button>
         </div>
       </SortableContext>
     </DndContext>
