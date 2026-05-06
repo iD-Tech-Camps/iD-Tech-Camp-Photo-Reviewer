@@ -1,0 +1,22 @@
+-- Step 5.10 — Placeholder: badges + user_badges
+-- Deferred per SCHEMA_SPEC.md. The Profile screen's achievement list runs on
+-- mock data (BADGES in components/data.tsx) and that's fine until the
+-- Leaderboard/Profile screens are wired to real data.
+--
+-- When this lands it will look roughly like:
+--   create table public.badges (
+--     id           text primary key,         -- slug, e.g. 'first-10', 'streak-7'
+--     name         text not null,
+--     description  text not null,
+--     criteria     jsonb not null,           -- machine-readable rule, evaluated by app
+--     active       boolean not null default true,
+--     created_at   timestamptz not null default now()
+--   );
+--   create table public.user_badges (
+--     user_id     uuid not null references public.profiles(id) on delete cascade,
+--     badge_id    text not null references public.badges(id) on delete restrict,
+--     earned_at   timestamptz not null default now(),
+--     primary key (user_id, badge_id)
+--   );
+--
+-- Intentionally empty. File exists so the migration ordering is reserved.

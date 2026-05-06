@@ -1,0 +1,17 @@
+-- Step 5.11 — Placeholder: streaks
+-- Deferred per SCHEMA_SPEC.md. The "Day 9 streak" counter on the Profile
+-- screen runs on mock data today.
+--
+-- Likely shape:
+--   create table public.streaks (
+--     user_id          uuid primary key references public.profiles(id) on delete cascade,
+--     current_length   int not null default 0,
+--     longest_length   int not null default 0,
+--     last_review_on   date,
+--     updated_at       timestamptz not null default now()
+--   );
+--
+-- A scheduled job (or a trigger on reviews insert) would maintain the
+-- counters by checking whether last_review_on was yesterday vs. today.
+--
+-- Intentionally empty. File exists so the migration ordering is reserved.

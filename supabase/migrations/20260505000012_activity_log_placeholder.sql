@@ -1,0 +1,21 @@
+-- Step 5.12 — Placeholder: activity_log
+-- Deferred per SCHEMA_SPEC.md. The "Recent activity" feed on the Profile
+-- screen runs on mock data (RECENT_ACTIVITY in components/data.tsx). Most
+-- entries can be derived from the reviews table; a denormalized feed makes
+-- queries cheap and lets non-review events (badges earned, streak milestones)
+-- live in the same stream.
+--
+-- Likely shape:
+--   create table public.activity_log (
+--     id          uuid primary key default gen_random_uuid(),
+--     user_id     uuid not null references public.profiles(id) on delete cascade,
+--     kind        text not null,            -- 'review' | 'badge' | 'streak' | ...
+--     summary     text not null,
+--     points      int not null default 0,
+--     ref_id      uuid,                     -- optional fk-ish pointer (review id, badge id, ...)
+--     created_at  timestamptz not null default now()
+--   );
+--   create index activity_log_user_recent_idx
+--     on public.activity_log (user_id, created_at desc);
+--
+-- Intentionally empty. File exists so the migration ordering is reserved.
