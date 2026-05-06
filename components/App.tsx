@@ -20,6 +20,8 @@ import {
 import { FlagReviewScreen } from "@/components/screens/FlagReview";
 import { SettingsProvider, useSettings } from "@/components/settings";
 import { UserProvider, useCurrentUser, type Role } from "@/lib/current-user";
+import { createClient } from "@/lib/supabase/client";
+import { fetchPendingCount } from "@/lib/reviews";
 
 const VALID_SCREENS = [
   "review",
@@ -115,6 +117,23 @@ function AppInner() {
     }
   };
 
+  // Live count of `pending` photos for the sidebar Review badge and the
+  // HomeScreen subtitle template ({{count}}). Refetches when the session
+  // ends so the badge reflects the work just completed. Null while the
+  // first request is in flight; consumers fall back to a placeholder.
+  const [pendingCount, setPendingCount] = React.useState<number | null>(null);
+  React.useEffect(() => {
+    if (mode !== "nav") return;
+    let cancelled = false;
+    const supabase = createClient();
+    fetchPendingCount(supabase)
+      .then((n) => { if (!cancelled) setPendingCount(n); })
+      .catch((err) => {
+        console.warn("[app] pending count fetch failed:", err?.message ?? err);
+      });
+    return () => { cancelled = true; };
+  }, [mode]);
+
   if (mode === "session") {
     return (
       <>
@@ -150,9 +169,10 @@ function AppInner() {
       <Sidebar
         current={activeScreen}
         onNav={setScreen}
+        pendingCount={pendingCount ?? undefined}
       />
       <main className="main">
-        {activeScreen === "review"      && <HomeScreen onStart={handleStart} onNav={setScreen} />}
+        {activeScreen === "review"      && <HomeScreen onStart={handleStart} onNav={setScreen} pendingCount={pendingCount ?? undefined} />}
         {activeScreen === "leaderboard" && <LeaderboardScreen />}
         {activeScreen === "profile"     && <ProfileScreen />}
         {activeScreen === "guide"       && <GuideScreen />}

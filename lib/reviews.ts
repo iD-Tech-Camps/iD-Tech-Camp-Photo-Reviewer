@@ -191,6 +191,19 @@ export async function fetchFlaggedCount(supabase: SupabaseClient): Promise<numbe
   return count ?? 0;
 }
 
+// Same idea for the reviewer queue — used by the sidebar Review badge and
+// the HomeScreen subtitle template ({{count}} photos waiting). Photos hit
+// `pending` status either at SmugMug import time (default) or when no
+// review has touched them yet.
+export async function fetchPendingCount(supabase: SupabaseClient): Promise<number> {
+  const { count, error } = await supabase
+    .from("photos")
+    .select("id", { count: "exact", head: true })
+    .eq("current_status", "pending");
+  if (error) throw error;
+  return count ?? 0;
+}
+
 export type SubmitReviewInput = {
   photoId: string;
   reviewerId: string;

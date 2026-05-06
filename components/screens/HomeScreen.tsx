@@ -19,7 +19,7 @@ function greetingHtml(template: string, name: string): string {
 export function HomeScreen({
   onStart,
   onNav,
-  pendingCount = 10,
+  pendingCount,
 }: {
   onStart: () => void;
   onNav: (screen: string) => void;
@@ -31,7 +31,7 @@ export function HomeScreen({
   const greeting = greetingHtml(settings.homeGreeting, reviewerName);
   const subtitle = fillTemplate(settings.homeSubtitle, {
     name: reviewerName,
-    count: pendingCount,
+    count: pendingCount ?? "—",
   });
 
   return (

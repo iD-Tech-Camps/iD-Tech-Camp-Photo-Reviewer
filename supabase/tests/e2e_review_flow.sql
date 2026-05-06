@@ -4,12 +4,24 @@
 -- asserts every trigger and check constraint produced the expected side
 -- effects. Wrapped in `begin; ... rollback;` so the dev queue is unaffected.
 --
+-- IMPORTANT: This test runs under the `authenticated` role with the user's
+-- JWT claims pinned, so RLS is in force exactly as it is in production. The
+-- earlier version of this test ran as the service role (the default for
+-- `supabase db query`) and silently missed migration 6's trigger-vs-RLS bug:
+-- the trigger's inner UPDATE on `photos` was zero-rowed by RLS, but as
+-- service role the UPDATE went through and the test passed. Migration 14
+-- marks those triggers SECURITY DEFINER. Don't relax the role pin below.
+--
 -- Run with:
 --   npx supabase db query --file supabase/tests/e2e_review_flow.sql --linked
 --
 -- Last row should be `e2e review flow passed`. Any earlier raise is a fail.
 
 begin;
+
+set local role authenticated;
+set local request.jwt.claims to
+  '{"sub": "1e6c7363-f8ea-4e5d-92a5-6b2e64bb2589", "role": "authenticated"}';
 
 do $$
 declare

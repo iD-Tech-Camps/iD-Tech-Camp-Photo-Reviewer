@@ -7,10 +7,16 @@
 --      to 'approved', is_quarantined back to false)
 --   4. Senior delete (decision='delete' moves photo to 'deleted')
 --
+-- Runs under the authenticated role with JWT claims pinned (see the same
+-- preamble in e2e_review_flow.sql for context on why the role pin matters).
 -- Wrapped in begin/rollback so the dev queue is untouched. Last row should be
 -- 'flag review flow passed'.
 
 begin;
+
+set local role authenticated;
+set local request.jwt.claims to
+  '{"sub": "1e6c7363-f8ea-4e5d-92a5-6b2e64bb2589", "role": "authenticated"}';
 
 do $$
 declare

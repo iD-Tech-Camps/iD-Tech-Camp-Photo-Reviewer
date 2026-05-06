@@ -10,7 +10,7 @@ import { fetchFlaggedCount } from "@/lib/reviews";
 export function Sidebar({
   current,
   onNav,
-  pendingCount = 10,
+  pendingCount,
 }: {
   current: string;
   onNav: (id: string) => void;
