@@ -4,7 +4,7 @@ import React from "react";
 import { Icon } from "@/components/Icon";
 import { createClient } from "@/lib/supabase/client";
 import { useSettings } from "@/components/settings";
-import { useCurrentUser, ROLE_LABEL, type Role } from "@/lib/current-user";
+import { useCurrentUser } from "@/lib/current-user";
 import { FLAGGED_PHOTOS } from "@/components/data";
 
 export function Sidebar({
@@ -17,7 +17,7 @@ export function Sidebar({
   pendingCount?: number;
 }) {
   const { settings } = useSettings();
-  const { email, fullName, firstName, initials, loading, role, setRole } = useCurrentUser();
+  const { email, fullName, firstName, initials, loading, role } = useCurrentUser();
   const [signingOut, setSigningOut] = React.useState(false);
 
   const handleSignOut = async () => {
@@ -113,7 +113,6 @@ export function Sidebar({
       )}
 
       <div className="sidebar-footer" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
-        <RoleSwitcher role={role} onChange={setRole} />
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div className="avatar">{avatarInitials}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -156,48 +155,6 @@ export function Sidebar({
         </div>
       </div>
     </aside>
-  );
-}
-
-function RoleSwitcher({ role, onChange }: { role: Role; onChange: (r: Role) => void }) {
-  return (
-    <label
-      style={{
-        display: "flex", flexDirection: "column", gap: 4,
-        padding: "8px 10px",
-        borderRadius: 8,
-        background: "var(--paper-2)",
-        border: "1px solid var(--rule)",
-      }}
-    >
-      <span
-        style={{
-          fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase",
-          color: "var(--ink-3)", fontFamily: "var(--font-mono)",
-        }}
-      >
-        View as
-      </span>
-      <select
-        value={role}
-        onChange={(e) => onChange(e.target.value as Role)}
-        style={{
-          background: "transparent",
-          border: "none",
-          fontFamily: "inherit",
-          fontSize: 13,
-          fontWeight: 500,
-          color: "var(--ink)",
-          padding: 0,
-          cursor: "pointer",
-          outline: "none",
-        }}
-      >
-        <option value="staff">{ROLE_LABEL.staff}</option>
-        <option value="senior">{ROLE_LABEL.senior}</option>
-        <option value="admin">{ROLE_LABEL.admin}</option>
-      </select>
-    </label>
   );
 }
 

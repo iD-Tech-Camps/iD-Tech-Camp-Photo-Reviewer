@@ -3,35 +3,37 @@
 import React from "react";
 import { createClient } from "@/lib/supabase/client";
 
-export type Role = "staff" | "senior" | "admin";
+// Mirrors the `role` enum in the database (`reviewer | senior | admin`).
+// Display labels live in ROLE_LABEL below — the schema's `reviewer` is shown
+// to users as "Staff Reviewer" because that's how iD Tech refers to the role
+// internally.
+export type Role = "reviewer" | "senior" | "admin";
 
 export const ROLE_LABEL: Record<Role, string> = {
-  staff:  "Staff Reviewer",
-  senior: "Senior Reviewer",
-  admin:  "Admin",
+  reviewer: "Staff Reviewer",
+  senior:   "Senior Reviewer",
+  admin:    "Admin",
 };
 
 export type CurrentUser = {
+  id: string | null;
   email: string | null;
   fullName: string | null;
   firstName: string | null;
   initials: string;
   loading: boolean;
   role: Role;
-  setRole: (role: Role) => void;
 };
 
 const FALLBACK: CurrentUser = {
+  id: null,
   email: null,
   fullName: null,
   firstName: null,
   initials: "··",
   loading: true,
-  role: "staff",
-  setRole: () => {},
+  role: "reviewer",
 };
-
-const ROLE_STORAGE_KEY = "current-user-role-v1";
 
 const UserContext = React.createContext<CurrentUser>(FALLBACK);
 
@@ -62,44 +64,59 @@ function firstNameFrom(fullName: string | null, email: string | null): string | 
   return null;
 }
 
-function readStoredRole(): Role {
-  if (typeof window === "undefined") return "staff";
-  const raw = window.localStorage.getItem(ROLE_STORAGE_KEY);
-  if (raw === "staff" || raw === "senior" || raw === "admin") return raw;
-  return "staff";
+function isRole(value: unknown): value is Role {
+  return value === "reviewer" || value === "senior" || value === "admin";
 }
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<CurrentUser>(FALLBACK);
-  const [role, setRoleState] = React.useState<Role>("staff");
-
-  React.useEffect(() => {
-    setRoleState(readStoredRole());
-  }, []);
-
-  const setRole = React.useCallback((next: Role) => {
-    setRoleState(next);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(ROLE_STORAGE_KEY, next);
-    }
-  }, []);
 
   React.useEffect(() => {
     const supabase = createClient();
     let cancelled = false;
 
-    const apply = (data: { email?: string | null; user_metadata?: Record<string, any> | null } | null) => {
+    const apply = async (
+      authUser: { id?: string | null; email?: string | null; user_metadata?: Record<string, any> | null } | null,
+    ) => {
       if (cancelled) return;
-      if (!data) {
-        setUser({ ...FALLBACK, loading: false, role, setRole });
+
+      if (!authUser || !authUser.id) {
+        setUser({ ...FALLBACK, loading: false });
         return;
       }
-      const meta = data.user_metadata || {};
+
+      const meta = authUser.user_metadata || {};
       const fullName: string | null =
         meta.full_name || meta.name ||
         ([meta.given_name, meta.family_name].filter(Boolean).join(" ") || null);
-      const email = data.email ?? null;
+      const email = authUser.email ?? null;
+
+      // Role lives in `profiles`, keyed by auth.users.id. The
+      // `handle_new_user` trigger creates the row on signup; if it's missing
+      // the user signed up before that migration landed and needs a manual
+      // backfill — fall back to 'reviewer' so the UI still renders.
+      let role: Role = "reviewer";
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", authUser.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (error) {
+        console.warn("[current-user] profiles lookup failed:", error.message);
+      } else if (!profile) {
+        console.warn(
+          `[current-user] no profiles row for auth user ${authUser.id}; defaulting to 'reviewer'. ` +
+          "Run the backfill insert in Supabase to fix.",
+        );
+      } else if (isRole(profile.role)) {
+        role = profile.role;
+      }
+
       setUser({
+        id: authUser.id,
         email,
         fullName,
         firstName: firstNameFrom(fullName, email),
@@ -110,21 +127,20 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           : "··",
         loading: false,
         role,
-        setRole,
       });
     };
 
     supabase.auth.getUser().then(({ data }) => apply(data.user as any));
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      apply(session?.user as any);
+      apply((session?.user as any) ?? null);
     });
 
     return () => {
       cancelled = true;
       sub.subscription.unsubscribe();
     };
-  }, [role, setRole]);
+  }, []);
 
   return <UserContext.Provider value={user}>{children}</UserContext.Provider>;
 }

@@ -43,7 +43,6 @@ Reviewers move through a queue of photos and either **approve** them (share-wort
 - **Database + Auth:** Supabase (Postgres + Google OAuth via `@supabase/ssr`)
 - **OAuth provider:** Google Cloud (Internal Workspace app)
 - **Local dev:** Node 18+, `npm run dev` on `localhost:3000`
-- **Editor:** Cursor (used for all coding, including git operations via Source Control panel — no command-line git)
 
 ### Key project structure
 
@@ -147,8 +146,6 @@ For the human picking up this work in a fresh thread, here's what's been useful:
 
 - **One step at a time.** Big plans are nice but get overwhelming. Concrete next click > comprehensive theory.
 - **Explain the *why*, not just the *what*.** When suggesting an action, briefly say what it does and why it matters — this is the user's first time through this stack.
-- **Cursor (Agent mode) does the coding.** Don't write large code blocks for the user to paste — give them prompts to give to Cursor instead. Always ask Cursor to show its plan before writing code, and to run `npm run build` locally before the user commits.
-- **No command line.** All git operations happen via Cursor's Source Control panel. The user is on Windows, so be aware of PowerShell quirks if terminal commands ever come up.
 - **Verify before locking in.** Push intermediate states to GitHub frequently so we have rollback points. `npm run build` (not just `npm run dev`) is the truth — Vercel runs the strict build, dev mode is lenient.
 - **Be honest about uncertainty.** OAuth flows, deployment configs, and DNS-adjacent things often fail on the first try. Warn the user, don't oversell.
 
