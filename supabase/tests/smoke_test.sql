@@ -13,11 +13,13 @@
 
 begin;
 
--- Skip FK and trigger enforcement for this transaction so we don't have to
--- create real auth.users rows just to satisfy profiles.id -> auth.users(id).
--- The rollback at the end of the script restores normal behavior; this
--- setting is also transaction-local thanks to `set local`.
-set local session_replication_role = replica;
+-- Drop the profiles -> auth.users FK for the duration of this transaction
+-- so we don't need to seed real auth.users rows. DDL is transactional in
+-- Postgres, so the `rollback;` at the end restores the constraint.
+-- (We deliberately do NOT use `session_replication_role = replica` here --
+-- that disables every user-defined trigger too, including the four review
+-- triggers we're trying to verify. See migration 02 for the constraint name.)
+alter table public.profiles drop constraint profiles_id_fkey;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 1. Seed a minimal hierarchy and one photo.
@@ -60,6 +62,14 @@ values
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 2. Approve flow — current_status should flip to 'approved', is_quarantined
 --    should remain false, points_awarded should be 10 (from points_config).
+--
+-- Note on the `and decision = '...'` filter in the points_awarded lookup:
+-- inside a single transaction `now()` returns the transaction's start time,
+-- so every reviews row inserted in this script shares the same created_at
+-- value. `order by created_at desc limit 1` is therefore non-deterministic
+-- once more than one review row exists. Filtering by decision picks exactly
+-- the row each assertion is reasoning about, regardless of insert order.
+-- Future additions to this test should follow the same pattern.
 -- ─────────────────────────────────────────────────────────────────────────────
 insert into public.reviews (photo_id, reviewer_id, decision, rating)
 values (
@@ -85,6 +95,7 @@ begin
 
   select points_awarded into rv from public.reviews
    where photo_id = '44444444-4444-4444-4444-444444444444'
+     and decision = 'approve'
    order by created_at desc limit 1;
   if rv.points_awarded <> 10 then
     raise exception 'expected approve points=10, got %', rv.points_awarded;
@@ -120,6 +131,7 @@ begin
 
   select points_awarded into rv from public.reviews
    where photo_id = '44444444-4444-4444-4444-444444444444'
+     and decision = 'flag'
    order by created_at desc limit 1;
   if rv.points_awarded <> 15 then
     raise exception 'expected flag points=15, got %', rv.points_awarded;
