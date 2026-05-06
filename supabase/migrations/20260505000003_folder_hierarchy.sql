@@ -27,10 +27,17 @@ create table public.camp_weeks (
   smugmug_folder_id  text not null unique,
   starts_on          date not null,
   ends_on            date not null,
-  -- Stored generated column so the queue can sort by it without recomputing.
-  is_active          boolean generated always as (current_date between starts_on and ends_on) stored,
   created_at         timestamptz not null default now()
 );
 
-create index camp_weeks_active_recent_idx
-  on public.camp_weeks (is_active, starts_on desc);
+create index camp_weeks_dates_idx on public.camp_weeks (starts_on, ends_on);
+
+-- "Is this week currently active?" is conceptually a column on camp_weeks,
+-- but Postgres requires stored generated columns to use IMMUTABLE expressions
+-- and `current_date` is only STABLE (it shifts with the session's
+-- transaction timestamp). To preserve the spec's intent, expose is_active as
+-- a derived field through this view; app code can read camp_weeks_with_status
+-- whenever it wants the boolean, while writes still go straight to camp_weeks.
+create view public.camp_weeks_with_status as
+  select *, (current_date between starts_on and ends_on) as is_active
+    from public.camp_weeks;
