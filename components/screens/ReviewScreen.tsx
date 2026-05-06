@@ -4,12 +4,18 @@ import React from "react";
 import { Icon } from "@/components/Icon";
 import { fireConfetti, ToastApi } from "@/components/Shell";
 import {
-  SESSION_PHOTOS,
   PHOTO_TAGS,
   NEGATIVE_TAGS,
   PhotoPlaceholder,
 } from "@/components/data";
 import { useSettings } from "@/components/settings";
+import { useCurrentUser } from "@/lib/current-user";
+import { createClient } from "@/lib/supabase/client";
+import {
+  fetchPendingPhotos,
+  submitReview,
+  type ReviewQueuePhoto,
+} from "@/lib/reviews";
 
 type Decision = {
   decision: "approve" | "flag";
@@ -19,7 +25,17 @@ type Decision = {
   pts?: number;
 };
 
-type Photo = (typeof SESSION_PHOTOS)[number];
+type Photo = ReviewQueuePhoto;
+
+// Captured timestamps come back as ISO strings; the prototype displayed a
+// short clock-style "10:42 AM". Keep that look so the review header reads
+// the same as it always did.
+function formatCapturedTime(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
 
 export function ReviewScreen({
   onComplete,
@@ -34,18 +50,71 @@ export function ReviewScreen({
   setShowExamplesDrawer: (v: boolean) => void;
   toast: ToastApi;
 }) {
+  const { id: reviewerId } = useCurrentUser();
+  const [photos, setPhotos] = React.useState<Photo[] | null>(null);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [index, setIndex] = React.useState(0);
   const [decisions, setDecisions] = React.useState<Record<string, Decision>>({});
   const [modal, setModal] = React.useState<null | "approve" | "flag">(null);
   const [pulse, setPulse] = React.useState<null | "approve" | "flag">(null);
+  const [submitting, setSubmitting] = React.useState(false);
 
-  const photo = SESSION_PHOTOS[index];
-  const total = SESSION_PHOTOS.length;
+  // Pull the queue once on mount. Photos already reviewed in earlier sessions
+  // are filtered server-side by `current_status = 'pending'`, so no client-side
+  // dedupe is needed.
+  React.useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+    fetchPendingPhotos(supabase, 10)
+      .then((rows) => {
+        if (!cancelled) setPhotos(rows);
+      })
+      .catch((err) => {
+        console.error("[review-screen] fetch failed:", err);
+        if (!cancelled) {
+          setLoadError(err?.message ?? "Failed to load photos");
+          setPhotos([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const total = photos?.length ?? 0;
+  const photo: Photo | undefined = photos ? photos[index] : undefined;
 
   const labelFor = (kind: Decision["decision"]) =>
     kind === "approve" ? "Approved" : "Flagged for admin";
 
-  const commitDecision = (d: Decision) => {
+  const commitDecision = async (d: Decision) => {
+    if (!photo || submitting) return;
+    if (!reviewerId) {
+      console.error("[review-screen] no reviewer id; cannot submit");
+      toast.show?.("Couldn't identify your account. Try refreshing.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await submitReview(createClient(), {
+        photoId:    photo.id,
+        reviewerId,
+        decision:   d.decision,
+        rating:     d.rating,
+        note:       d.note,
+        tags:       d.tags,
+      });
+    } catch (err: any) {
+      console.error("[review-screen] submit failed:", err);
+      toast.show?.(err?.message ? `Couldn't save: ${err.message}` : "Couldn't save your review.");
+      setSubmitting(false);
+      return;
+    }
+
+    // Points displayed in the toast match the seeded points_config defaults.
+    // The actual snapshot lives on `reviews.points_awarded` (set by trigger);
+    // we'll read those back when sub-step 5 wires the leaderboard to the DB.
     const pts = d.decision === "approve" ? 10 : 15;
     const full: Decision = { ...d, pts };
     setDecisions(prev => ({ ...prev, [photo.id]: full }));
@@ -54,6 +123,7 @@ export function ReviewScreen({
     setModal(null);
     setTimeout(() => {
       setPulse(null);
+      setSubmitting(false);
       if (index + 1 >= total) {
         fireConfetti(window.innerWidth / 2, window.innerHeight / 2, 120);
         setTimeout(() => onComplete({ ...decisions, [photo.id]: full }), 500);
@@ -69,6 +139,10 @@ export function ReviewScreen({
         if (e.key === "Escape") setModal(null);
         return;
       }
+      if (!photo || submitting) {
+        if (e.key === "Escape") onExit();
+        return;
+      }
       if (e.key === "a" || e.key === "A") setModal("approve");
       else if (e.key === "f" || e.key === "F") setModal("flag");
       else if (e.key === "Escape") onExit();
@@ -76,7 +150,14 @@ export function ReviewScreen({
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modal, index, decisions]);
+  }, [modal, index, decisions, photo, submitting]);
+
+  if (photos === null) {
+    return <ReviewLoading onExit={onExit} />;
+  }
+  if (photos.length === 0 || !photo) {
+    return <ReviewEmpty onExit={onExit} error={loadError} />;
+  }
 
   const progressPct = ((index + (decisions[photo.id] ? 1 : 0)) / total) * 100;
 
@@ -102,7 +183,7 @@ export function ReviewScreen({
             </span>
             <span style={{ fontSize: 12, color: "var(--ink-3)" }}>·</span>
             <span style={{ fontSize: 12, color: "var(--ink-3)", fontFamily: "var(--font-mono)", letterSpacing: "0.06em" }}>
-              {photo.camp}
+              {photo.campLabel}
             </span>
           </div>
           <div className="progress-track" style={{ height: 4 }}>
@@ -144,7 +225,11 @@ export function ReviewScreen({
                     : pulse === "flag"    ? "3px solid var(--sun)"
                     : "none",
             }}>
-              <PhotoPlaceholder photo={photo} />
+              <PhotoPlaceholder photo={{
+                id: photo.smugmugImageId,
+                camp: photo.campLabel,
+                activity: photo.caption ?? undefined,
+              }} />
             </div>
           </div>
 
@@ -168,7 +253,7 @@ export function ReviewScreen({
           </div>
 
           <div style={{ fontSize: 12, color: "var(--ink-3)", fontFamily: "var(--font-mono)", letterSpacing: "0.06em" }}>
-            {photo.activity} · {photo.captured}
+            {[photo.caption, formatCapturedTime(photo.capturedAt)].filter(Boolean).join(" · ")}
           </div>
         </div>
 
@@ -232,6 +317,54 @@ export function ReviewScreen({
           onConfirm={(tags, note) => commitDecision({ decision: "flag", tags, note })}
         />
       )}
+    </div>
+  );
+}
+
+function ReviewLoading({ onExit }: { onExit: () => void }) {
+  return (
+    <div style={{
+      minHeight: "100vh",
+      display: "grid",
+      placeItems: "center",
+      background: "var(--paper)",
+      padding: 40,
+    }}>
+      <div style={{ textAlign: "center", maxWidth: 360 }}>
+        <div className="card-eyebrow" style={{ marginBottom: 8 }}>Loading queue</div>
+        <h2 style={{ fontFamily: "var(--font-display)", fontSize: 26, fontWeight: 500, margin: "0 0 14px" }}>
+          Pulling photos…
+        </h2>
+        <button className="btn btn-ghost" onClick={onExit}>
+          <Icon name="x" size={13} /> Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ReviewEmpty({ onExit, error }: { onExit: () => void; error: string | null }) {
+  return (
+    <div style={{
+      minHeight: "100vh",
+      display: "grid",
+      placeItems: "center",
+      background: "var(--paper)",
+      padding: 40,
+    }}>
+      <div style={{ textAlign: "center", maxWidth: 420 }}>
+        <div className="pennant" style={{ marginBottom: 16, background: "var(--moss)" }}>
+          {error ? "Couldn't load queue" : "Queue is empty"}
+        </div>
+        <p style={{ fontSize: 15, color: "var(--ink-2)", margin: "0 0 20px" }}>
+          {error
+            ? error
+            : "No photos are waiting to be reviewed right now. Check back after the next SmugMug import."}
+        </p>
+        <button className="btn btn-primary" onClick={onExit}>
+          Back to home
+        </button>
+      </div>
     </div>
   );
 }
