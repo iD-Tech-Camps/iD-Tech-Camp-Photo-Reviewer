@@ -340,7 +340,7 @@ npx supabase db query --file supabase/tests/smoke_test.sql --linked
 
 The last row should be `smoke test passed`. Anything else means an assertion raised — read the error message to find which.
 
-After each migration: `npm run build`, push to GitHub. The build doesn't exercise the schema yet (the app still runs on mock data), but confirms nothing in the codebase regressed. The real exercise of the schema comes in step 7 of the roadmap (replacing localStorage with Supabase persistence).
+After each migration: `npm run build`, push to GitHub. The build doesn't exercise the schema yet (the app still runs on mock data), but confirms nothing in the codebase regressed. The real exercise of the schema comes in step 6 of the roadmap (replacing localStorage with Supabase persistence — swapped ahead of the SmugMug integration so the schema is exercised by app code before any real photo data lands).
 
 ---
 

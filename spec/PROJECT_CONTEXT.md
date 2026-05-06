@@ -30,8 +30,8 @@ Reviewers move through a queue of photos and either **approve** them (share-wort
 **What does NOT work yet:**
 - No real data — the app still uses the mock data from the original prototype (`components/data.tsx`)
 - No SmugMug API integration
-- Decisions, ratings, tags currently persist only to `localStorage`, not the database (the schema is ready for them; wiring lands in step 7)
-- The `profiles` table exists, but role assignment is still driven by the dev switcher in `useCurrentUser`; production wiring (read role from `profiles` joined to `auth.users`) lands in step 7
+- Decisions, ratings, tags currently persist only to `localStorage`, not the database (the schema is ready for them; wiring lands in step 6)
+- The `profiles` table exists, but role assignment is still driven by the dev switcher in `useCurrentUser`; production wiring (read role from `profiles` joined to `auth.users`) lands in step 6
 - Outstanding `npm audit` issues (Next.js 14.2.35 has known high-severity advisories; upgrade pending)
 
 ---
@@ -132,10 +132,12 @@ Both set in Vercel (all environments) and in `.env.local` for local dev.
 | 3 | Deploy to Vercel | ✅ Done |
 | 4 | Supabase + Google OAuth | ✅ Done |
 | 5 | Database schema design | ✅ Done |
-| 6 | **SmugMug API integration** | ⏭️ Up next |
-| 7 | Replace `localStorage` with Supabase persistence | Pending |
+| 6 | **Replace `localStorage` with Supabase persistence** | ⏭️ Up next |
+| 7 | SmugMug API integration | Pending |
 | 8 | Next.js security upgrade (resolves audit warnings) | Pending |
 | 9 | Polish + team rollout | Pending |
+
+> **Why 6 and 7 swapped.** Wiring the app to the database before ingesting real photos is the cheapest way to validate the freshly-applied schema — every table, trigger, and RLS policy gets exercised through the production code path while changes are still cheap. Step 6 is also self-contained (uses `SESSION_PHOTOS` seeded into `photos` for dev), whereas step 7 brings in an external API, an import job, and quarantine folder mechanics. Doing the dependency-free step first reduces concurrent unknowns. After step 6 the app reads roles from `profiles` and writes real `reviews`; after step 7 it sees real photos.
 
 ---
 
@@ -174,7 +176,7 @@ For the human picking up this work in a fresh thread, here's what's been useful:
 - **`localStorage` SSR pattern is in place** (`app/components/App.tsx`) — initial state is hardcoded, hydrated from `localStorage` in `useEffect`. Don't regress this.
 - **OAuth flows usually fail on the first try.** When something breaks during auth setup, common causes are: (1) Supabase Site URL / Redirect URLs misconfigured, (2) Google Cloud authorized redirect URI missing or stale, (3) env vars not redeployed in Vercel after change (Vercel does NOT auto-redeploy on env var change), (4) browser holding stale session — test in incognito.
 - **Vercel does not follow GitHub redirects.** If the repo is moved/transferred again in the future, the Vercel project must be manually reconnected to the new repo location.
-- **Role switcher in `useCurrentUser` is a dev affordance, not production behavior.** The `profiles.role` column now exists in the database, but `useCurrentUser` still drives the UI from client state. Wiring the read happens in step 7. Don't ship to production with the dev switcher live.
+- **Role switcher in `useCurrentUser` is a dev affordance, not production behavior.** The `profiles.role` column now exists in the database, but `useCurrentUser` still drives the UI from client state. Wiring the read happens in step 6. Don't ship to production with the dev switcher live.
 - **`data.tsx` tag exports do not match what the spec wording suggests.** There is no `POSITIVE_TAGS` export — only `NEGATIVE_TAGS` (13 entries) and `PHOTO_TAGS` (mixed). Positives are derived locally inside `ReviewScreen.tsx` via `PHOTO_TAGS.filter(t => t.color !== "rose")`. The 7 rose-colored entries in `PHOTO_TAGS` are deprecated duplicates of `NEGATIVE_TAGS` with shorter labels — ignore them. The `tags` migration seeds the 13 negatives plus the 4 positives only.
 - **Smoke test gotchas (for anyone editing `supabase/tests/smoke_test.sql`).**
   - `set local session_replication_role = replica;` skips FK enforcement *and every user-defined trigger* in the same transaction. The four review triggers are exactly what the test is meant to verify, so don't reach for that setting. Drop the FK temporarily inside the transaction instead — DDL is transactional in Postgres, so the trailing `rollback;` restores it automatically.
@@ -186,6 +188,6 @@ For the human picking up this work in a fresh thread, here's what's been useful:
 
 Open a new conversation and paste this whole document, or attach it as a file. Then say something like:
 
-> Picking up where I left off on the iD Photo Reviewer. Context attached. Ready to start step 6 (SmugMug API integration).
+> Picking up where I left off on the iD Photo Reviewer. Context attached. Ready to start step 6 (replace localStorage with Supabase persistence).
 
 That's enough to get a fresh Claude oriented and moving in the same direction without re-explaining the journey.
