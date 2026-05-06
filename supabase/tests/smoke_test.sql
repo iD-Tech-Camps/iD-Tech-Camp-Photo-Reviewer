@@ -13,6 +13,12 @@
 
 begin;
 
+-- Skip FK and trigger enforcement for this transaction so we don't have to
+-- create real auth.users rows just to satisfy profiles.id -> auth.users(id).
+-- The rollback at the end of the script restores normal behavior; this
+-- setting is also transaction-local thanks to `set local`.
+set local session_replication_role = replica;
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 1. Seed a minimal hierarchy and one photo.
 -- ─────────────────────────────────────────────────────────────────────────────
