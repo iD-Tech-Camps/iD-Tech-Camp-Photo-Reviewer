@@ -14,9 +14,12 @@ Reviewers move through a queue of photos and either **approve** them (share-wort
 
 ## Where we are
 
-Step 7 (Supabase persistence) is complete. The reviewer + senior flows, tags, examples, points, multiplier-bonus schedule, app settings, branding favicon, and per-user theme are all DB-backed under RLS. 20 migrations applied to the work-account Supabase project.
+Step 7 (Supabase persistence) is complete. The reviewer + senior flows, tags, examples, points, multiplier-bonus schedule, app settings, branding favicon, and per-user theme are all DB-backed under RLS. 22 migrations applied to the work-account Supabase project.
 
-**Active phase: step 8 — SmugMug API integration.** Everything below feeds into that.
+**Active phase: step 8 — SmugMug API integration.** Substeps 8.1, 8.2, and 8.3 are done:
+- **8.1** — `lib/smugmug/` ships an OAuth 1.0a-signed fetch wrapper plus typed Node/Album/Image helpers; `/api/smugmug/ping` is the admin-gated smoke endpoint that confirms credentials and signing are healthy.
+- **8.2** — Migration 21 lands `smugmug_config` (singleton: mode, season_start_date, earliest_fetch_date, queue_order, last_sync_at, last_sync_status), `photos.priority` (int default 0, partial composite index for the pending queue), and `sync_log` (audit trail with sync_kind / sync_status enums, started_at-desc index, admin-read-only RLS). Singleton seeded `summer / Jan 1 of current year / newest_first`. No code reads any of this yet — wiring happens in 8.3 onward.
+- **8.3** — Migration 22 added `divisions.synced` (boolean, default false; the two seeded camp divisions flipped to true). `/api/smugmug/sync-folders` is a two-verb endpoint: GET is the read-only discovery layer (walks SmugMug, cross-references against `public.divisions`, drills into one division with `?division=<nodeId>`); POST is the apply layer (service-role writes, idempotent, top-level only with no query param OR deep with `?division=<nodeId>` — the deep variant refuses unless that division has `synced=true`). The walker uses bounded concurrency (5 locations + 5 year-folders in flight). Reconciliation matches by `smugmug_folder_id` first, falls back to normalized-name (en-dash → hyphen, whitespace collapse) for placeholder rows from migration 13. The existing-weeks query paginates in 1000-row batches to defeat PostgREST's default response cap. The week-name parser handles four format variants (canonical, en-dash, repeated month, hyphenated, year-less with parent-year fallback). The walker skips two kinds of aggregator folders: "Past Seasons" inside locations (recurses to find more year folders) and "Historical Locations" / "Previous Locations" inside divisions (skipped entirely — V1 doesn't sync retired-location subtrees). Verified end-to-end against the iD Tech account: 15 divisions reconciled (2 placeholders → real, 13 new), 83 locations under iD Tech Camps (1 placeholder → real), 3,789 camp weeks. Only 2 SmugMug folders un-parseable (admin-side scratch folders like "Set Up 2012", "Guest Cards" — correctly excluded). Three scope adjustments from the original 8.3 spec: (a) hardcoded division allowlist became the admin-controlled `synced` flag, since retired divisions sit alongside active ones in the SmugMug account; (b) folder sync isn't actually "cheap, unbounded" for an org with 12 years of camp history, so the apply step targets one division at a time rather than walking everything; (c) "Historical Locations" gets explicitly skipped — first deep apply naively created a junk location row + surfaced ~150 retired-location names as un-parseable "weeks", so the walker filters them out at the location-children layer.
 
 ### What works end-to-end
 - Production deployment on Vercel (auto-deploys from `main`); Google OAuth gated to `@idtech.com` via Workspace Internal app.
@@ -52,6 +55,9 @@ app/
   globals.css             # tailwind directives only
   login/page.tsx          # Google sign-in screen
   auth/callback/route.ts  # OAuth callback handler
+  api/smugmug/
+    ping/route.ts         # admin-only smoke endpoint; hits SmugMug !authuser and returns the nickname so we can verify creds + signing without touching the DB
+    sync-folders/route.ts # admin-only folder-tree sync endpoint (step 8.3). GET = discovery (annotates SmugMug tree against public.divisions; ?division=<nodeId> drills deep). POST = apply (service-role writes through lib/smugmug/sync/reconcile.ts; ?division=<nodeId> for deep with a synced=true gate). maxDuration=300 for Vercel Pro.
 components/
   App.tsx                 # root client component, role-gated screen routing; owns the live pendingCount fetch. Applies data-theme from useCurrentUser, --sun accent from useSettings.
   Shell.tsx               # Sidebar (live Review + Flag-review badges, role-aware nav), PageHeader, fireConfetti, useToast
@@ -73,14 +79,30 @@ lib/
   points-config.ts        # fetchPointsConfig, updatePointsConfig, basePointsFor, DEFAULT_POINTS_CONFIG. Backs ReviewScreen + AdminPoints.
   bonus-periods.ts        # fetchBonusPeriods, createBonusPeriod, updateBonusPeriod, deleteBonusPeriod, setBonusPeriodEnabled. Backs BonusPeriodsProvider, which Shell.tsx + AdminPoints both consume.
   examples.ts             # fetchExamples, createExample, updateExampleMetadata, replaceExampleImage, deleteExample, reorderExamples. Owns the Supabase Storage round-trips for the example-images bucket. Backs AdminExamples + GuideScreen.
+  smugmug/                # server-only SmugMug v2 API client (step 8.1)
+    index.ts              # public surface + getAuthUser convenience
+    oauth.ts              # OAuth 1.0a HMAC-SHA1 signer, RFC 3986 percent-encoding, env-var credential loader
+    fetch.ts              # signed fetch wrapper, retry-on-429 (Retry-After), exp-backoff on 5xx, async-iterator paginate helper, SmugMugApiError
+    types.ts              # Node, Album, Image, AuthUser, PageInfo response shapes
+    nodes.ts              # getNode, listNodeChildren (paginated)
+    albums.ts             # getAlbum, listAlbumImages (paginated)
+    images.ts             # getImage
+    users.ts              # getUserRootNode (entry point for tree traversal — root's children are the divisions)
+    sync/                 # iD Tech-specific tree interpretation (step 8.3 — translates SmugMug's generic Node tree into our Division/Location/Year/Week schema)
+      types.ts            # WalkedDivision / WalkedLocation / WalkedYear / WalkedWeek shapes returned by the walker
+      dates.ts            # parseCampWeekName — handles canonical "July 28 - August 1, 2025", en-dash variant, repeated-month variant, omitted-right-month variant, cross-year "December 30 - January 3, 2026", hyphenated "June-02-June-06-2014", and year-less "June 24 - 28" when given a yearHint from the parent year folder
+      walker.ts           # walkDivisions (top-level only) + walkDivisionDeep (locations → year folders → weeks); auto-detects year-folder layer; flattens "Past Seasons" aggregators inside locations; SKIPS "Historical Locations" / "Previous Locations" / "Past Locations" / "Retired Locations" inside divisions (retired-location subtrees aren't synced in V1); parallelism capped at 5 locations × 5 year-folders in flight
+      concurrency.ts      # mapWithConcurrency util used by the walker so a single deep walk doesn't fan out hundreds of unbounded API calls
+      reconcile.ts        # service-role DB upsert logic for 8.3b apply: top-level division reconcile + per-division deep reconcile; matches by smugmug_folder_id then by normalized name for placeholder swap-in; paginates the existing-weeks select in 1000-row batches to defeat PostgREST's default row cap
   supabase/
     client.ts             # browser client (createBrowserClient)
     server.ts             # server client (createServerClient with cookies)
+    service.ts            # service-role client (bypasses RLS — only for Route Handlers that have already enforced their own auth check; used by the SmugMug sync apply step 8.3b onward)
     middleware.ts         # session refresh + auth-gating logic
 middleware.ts             # root middleware, delegates to lib/supabase/middleware.ts
 styles/legacy.css         # ~650 lines, source of truth for visual styling
 supabase/
-  migrations/             # 20 SQL migrations applied to the work-account project (see SCHEMA_SPEC.md for the table)
+  migrations/             # 22 SQL migrations applied to the work-account project (see SCHEMA_SPEC.md for the table)
   tests/
     smoke_test.sql              # schema-level smoke; runs as service role
     e2e_review_flow.sql         # reviewer flow end-to-end; runs under role=authenticated with pinned JWT
@@ -121,8 +143,11 @@ Three roles, matching the Postgres `role` enum exactly:
 **Environment variables in use:**
 - `NEXT_PUBLIC_SUPABASE_URL` — public Supabase project URL
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Supabase publishable key (the new `sb_publishable_...` format, stored under the legacy variable name for SDK compatibility)
+- `SUPABASE_SERVICE_ROLE_KEY` — service-role secret; bypasses RLS. Used by the SmugMug sync handlers (8.3b onward) via `lib/supabase/service.ts`. NEVER expose to the browser. Added in step 8.3a.
+- `SMUGMUG_API_KEY` / `SMUGMUG_API_SECRET` — OAuth 1.0a consumer credentials for the SmugMug v2 API (added in step 8.1)
+- `SMUGMUG_ACCESS_TOKEN` / `SMUGMUG_ACCESS_TOKEN_SECRET` — OAuth 1.0a access token + secret authorizing the consumer against the iD Tech SmugMug account (added in step 8.1)
 
-Both set in Vercel (all environments) and in `.env.local` for local dev.
+Supabase publishable pair set in Vercel (all environments) and `.env.local` for local dev. The service-role key + SmugMug credentials are local-only for now; they get pushed to Vercel once each substep is verified working.
 
 **Supabase URL configuration (already set):**
 - Site URL: `https://id-tech-camp-photo-reviewer.vercel.app`
@@ -157,20 +182,52 @@ Both set in Vercel (all environments) and in `.env.local` for local dev.
 
 ### Step 8 — SmugMug API integration
 
-**V1 model: admin-curated import pool, not full auto-ingest.** Admins pick which SmugMug folders (typically a `camp_week`, possibly a whole `location`) to bring into the review queue rather than the import job pulling everything. Folders carry a priority order — photos from higher-priority folders fill the queue first, so when there's an active need ("we really need to clear MIT this week"), admins move that folder to the top. The `Admin → SmugMug import` nav entry is the screen this work fleshes out; today it's a static placeholder.
+Step 8 — SmugMug import + real photo rendering
+The goal is to retire the placeholder-* data and the PhotoPlaceholder gradient renderer in favor of a real, scheduled SmugMug ingestion pipeline driven by a small set of admin-configurable rules. The Admin → SmugMug screen becomes the operational dashboard for everything photo-flow related. No reviewer-facing curation; auto-import handles the steady state.
+The substeps below are in dependency order. Each one is independently testable and can land in its own commit/migration.
+8.1 — SmugMug API client (server-only)
+A new lib/smugmug/ module wrapping the four credential env vars already stubbed in .env.local.example. OAuth 1.0a request signing, typed wrappers around the Node, Folder, and Image endpoints, and a fetch helper that respects SmugMug's rate limits with retry-on-429. Server-only — the secrets cannot ship to the browser, so the module is imported exclusively from Route Handlers under app/api/smugmug/*. No DB writes here; this layer just talks to SmugMug.
+Worth a quick auth-method check with whoever owns the SmugMug account before writing code, since the env-var slots match OAuth 1.0a but SmugMug also supports newer schemes. If the issued credentials are the newer variety, the module shape doesn't change but the signing path does.
+8.2 — Schema additions
+One migration that lands all of the new columns and tables before any code reads them:
+A new singleton smugmug_config table (id = 1, same pattern as points_config and app_settings) with columns: mode (enum: summer | off_season), season_start_date (date, used in summer mode), earliest_fetch_date (date, used in off-season mode), queue_order (enum: newest_first | oldest_first), last_sync_at (timestamptz), last_sync_status (text). Seeded with sensible defaults: summer mode, current year's start date, newest_first.
+A priority integer column on photos, default 0, indexed. Queue ordering becomes ORDER BY priority DESC, captured_at <queue_order>. Manual-add sets priority to 1.
+The photo_status enum stays as-is (pending, approved, flagged, deleted). No new value. Photos that leave the queue without a review — mode-switch bulk-clear, or disappeared from SmugMug — get DELETE'd outright. Photos with review history are immutable as they always were.
+A new sync_log table: id, started_at, finished_at, kind (scheduled | manual | mode_switch | priority_add), status (success | partial | failed), photos_added, photos_updated, photos_removed, error_summary (nullable text), triggered_by (nullable uuid → profiles, null for scheduled runs). Indexed on started_at desc for the sync-log table view.
+RLS: smugmug_config follows the established pattern (everyone reads, admins write). sync_log is admin-read-only; writes happen via service role from the cron handler, which bypasses RLS by design.
+8.3 — Folder-tree sync
+A Route Handler at app/api/smugmug/sync-folders/route.ts that walks the SmugMug tree under iD Tech Camps and iD Teen Academies and reconciles divisions / locations / camp_weeks. The seed migration was written so update ... where smugmug_folder_id like 'placeholder-%' swaps in real IDs without breaking FKs — that's the path. The four real divisions stay (with the two non-camp ones existing but ignored by photo sync); the placeholder Adelphi location and its single placeholder week get either reconciled to real values or deleted depending on what SmugMug actually returns.
+Idempotent, safe to re-run, runs under the service role. Folder-structure sync is unbounded (cheap) — the date scoping happens at the photo-enumeration layer in 8.4.
+8.4 — Photo enumeration + scheduled sync
+The actual import job, also a Route Handler. Walks each in-scope camp week and enumerates its images into public.photos with current_status = 'pending', populating image_url, thumbnail_url, captured_at, caption, width, height, and smugmug_image_id. In-scope is determined by mode:
+In Summer Mode, scope is camp_weeks where starts_on >= the date the admin has entered for the start of camp that year
+In Off-Season Mode, scope is camp_weeks where starts_on >= smugmug_config.earliest_fetch_date. No upper bound; the admin is doing archival cleanup.
+Reconciliation rules:
 
-Likely shape:
-- A new `import_pool` table — rows of `(camp_week_id, display_order, added_by, added_at)`. Drag-to-reorder mirroring the `examples.display_order` pattern.
-- The `SmugMugImport` admin screen lets admins browse the SmugMug folder tree, add/remove folders, and reorder.
-- The reviewer queue (`fetchPendingPhotos`) sorts by pool priority before falling back to oldest-first within a tier.
-- The import job (scheduled or admin-triggered) only pulls photos from folders in the pool. The placeholder seed (`smugmug_*_id like 'placeholder-%'`) gets cleared on first real run.
-- The `quarantine` mechanism wires its missing piece here: `photos.is_quarantined` already flips on flag insert via trigger, but the actual SmugMug API call to move the file to the hidden folder is what step 8 adds.
+Photos already in the table are matched by smugmug_image_id and updated in place, not re-inserted.
+Photos missing from SmugMug that have no review yet are DELETE'd. The sync_log.photos_removed counter captures the aggregate.
+Photos missing from SmugMug that have at least one review row are left untouched in whatever terminal state their last review put them in. Review history is forever.
+Re-parented photos (same smugmug_image_id, different parent folder on SmugMug) get their camp_week_id updated.
 
-**Open questions for when we get there:**
-- Removing a folder from the pool — existing reviews stay (immutable log), but what about photos already imported and not yet reviewed? Drop from the queue, or leave?
-- Pool granularity — `camp_week` only, or also `location` for a whole-location pull?
-- Refresh cadence — manual button vs. cron, and whether refresh re-walks already-imported folders for new uploads.
-- Whether priority is folder-level (whole folder before next folder) or interleaved (round-robin across active folders).
+The job writes one row to sync_log per run, with the kind set appropriately.
+Scheduled invocation: Vercel Cron at 4am Eastern daily. Manual invocation: a POST /api/smugmug/sync-now endpoint called from the admin UI's "Sync now" button, with an admin-role check at the handler level (the service-role write happens after the auth check, not before).
+8.5 — Admin SmugMug screen rewrite
+Replace the static placeholder SmugMugImport component with the real screen. Four sections:
+A settings card rendering current mode, season-start (summer) or earliest-fetch (off-season), queue order, and last sync timestamp/status. Edit button opens a modal with all four settings. Mode-switch within that modal triggers a confirmation dialog with three explicit choices when current pending count > 0: "Switch and keep pending photos," "Switch and clear the queue" (DELETE pending photos that have no reviews), or "Cancel." The dialog states the consequence in plain language ("847 photos are currently pending. What should happen to them?").
+An actions row with two buttons: "Sync now" (calls 8.4's manual endpoint), and "Add folder to queue" (opens a SmugMug folder picker — the same tree-walker built in 8.3, but rendered as a modal browser, no drag-to-reorder, just pick a folder and confirm "Add 234 photos from [folder] to top of queue?"). Manual adds write priority = 1 and log a priority_add entry to sync_log.
+A queue list, paginated, showing thumbnail, camp week, captured-at, priority badge if non-zero, status. Read-only (no per-row admin actions). Filter by priority-only or recent-only. Sort defaults match the reviewer queue's effective order.
+A sync log table showing the last 20 rows from sync_log — "Yesterday 4:02am · Scheduled · Success · +147 photos" — with each row expandable to show error_summary if non-empty.
+8.6 — Image rendering rollout
+Drop PhotoPlaceholder from components/data.tsx and every consumer: the HomeScreen hero strip, ReviewScreen hero, FlagReview cards, SessionComplete summary. AdminExamples already has its own image pipeline and is unaffected. Each photo row has image_url and thumbnail_url populated by 8.4, so rendering becomes a real <img> with proper alt, loading="lazy" on grid views, and a graceful fallback for the rare case where SmugMug is unreachable mid-session.
+The Flag Review "Download" button switches from rendering the placeholder gradient to a fetch of the real SmugMug image URL — the existing comment in the FlagReview screen anticipates this swap.
+8.7 — Quarantine folder move
+The reviews_update_quarantine trigger (migration 6) already maintains photos.is_quarantined. The actual SmugMug folder move — out of the public folder when quarantined, back when a senior accepts — is application-side, triggered by observing the column flip. A Route Handler at app/api/smugmug/quarantine is called from the client right after a flag-with-quarantine submission and again after a senior accept/delete on Flag Review. Idempotent in case of partial failure (the SmugMug move is the side effect; the DB is already correct). On failure, the DB and SmugMug get out of sync — surface a one-off "sync drift" warning in the next sync_log entry rather than blocking the user.
+8.8 — Tests + seed cleanup
+A new e2e SQL test, e2e_smugmug_sync_flow.sql, covering: (1) a clean-slate sync inserts the expected rows, (2) a re-run is a no-op, (3) photos missing from SmugMug get deleted if unreviewed and preserved if reviewed, (4) re-parenting works, (5) priority ordering is respected by the reviewer queue, (6) mode-switch clear-the-queue deletes only unreviewed pending rows.
+The existing 20260505000013_seed_dev_data.sql placeholder photos either get deleted outright or guarded behind a "dev-only" check so production doesn't ship placeholder-IMG_4823 rows. The other e2e tests (e2e_review_flow, e2e_flag_review_flow) currently hard-code those smugmug_image_id values; update them to use a parameterized fixture or to insert their own fixture rows in the test transaction.
+Deferred to V2
+A smugmug_observations table that the nightly sync appends to — one row per photo ever seen, with smugmug_image_id, first_seen_at, last_seen_at, and the camp_week_id at the time. This unlocks "what did we miss in summer 2024" reporting that survives SmugMug's own reorganization of historical photos. For V1, the same question is answerable with degraded fidelity by comparing SmugMug's current state against reviews, which is fine for the recent-season cases where the question actually matters.
+
 
 ---
 

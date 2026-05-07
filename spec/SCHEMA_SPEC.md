@@ -1,6 +1,6 @@
 # iD Photo Reviewer — Database Schema Spec (Step 5 + step-6 fixes)
 
-> **Status: implemented.** This document was originally the brief for step 5 and is now the reference for what's actually in the database. The schema lives in `supabase/migrations/20260505000001_*.sql` through `supabase/migrations/20260507000020_*.sql`, applied to the work-account Supabase project (`idtech-photo-reviewer`). The few places where the implementation diverges from the original brief are called out inline with **`Implementation note`** blocks.
+> **Status: implemented.** This document was originally the brief for step 5 and is now the reference for what's actually in the database. The schema lives in `supabase/migrations/20260505000001_*.sql` through `supabase/migrations/20260507000022_*.sql`, applied to the work-account Supabase project (`idtech-photo-reviewer`). The few places where the implementation diverges from the original brief are called out inline with **`Implementation note`** blocks.
 >
 > **Two material changes since the original step-5 brief landed:**
 >
@@ -39,6 +39,8 @@ points_config         (single-row config table)
 app_settings          (single-row config table)
 bonus_periods         (multi-row schedule for Points Multiplier Bonus)
 examples              (admin-managed example library)
+smugmug_config        (single-row SmugMug import settings — step 8.2)
+sync_log              (audit trail of SmugMug sync runs — step 8.2)
 ```
 
 ---
@@ -58,6 +60,8 @@ Notes:
 - `photo_status` is the photo's *workflow* state. Visibility (`is_quarantined`) is a separate dimension — a `flagged` photo may or may not be quarantined.
 - `decision` covers all three actions a person can take on a photo. There is no separate "accept" decision; a senior bringing a flagged photo back is just performing `approve` (with rating + tags, same as any reviewer).
 
+Migration 17 (sub-step 7.6d) added a `bonus_period_mode` enum (`recurring` \| `one-time`) used by `bonus_periods`. Migration 21 (step 8.2) added four SmugMug-import enums (`smugmug_mode`, `queue_order`, `sync_kind`, `sync_status`) used by `smugmug_config` and `sync_log` — see those table sections for membership.
+
 ---
 
 ## Folder hierarchy (mirrors SmugMug, kept in sync via import job)
@@ -66,8 +70,9 @@ Notes:
 | col | type | notes |
 |---|---|---|
 | `id` | uuid pk | `default gen_random_uuid()` |
-| `name` | text not null | The four real ones are "iD Tech Camps", "iD Teen Academies", "Online Private Lessons", "Virtual Tech Camps" — they're the top-level folders in SmugMug under the site homepage. |
+| `name` | text not null | The four real ones are "iD Tech Camps", "iD Teen Academies", "Online Private Lessons", "Virtual Tech Camps" — they're the top-level folders in SmugMug under the site homepage. The discovery endpoint may surface additional retired divisions sitting alongside these. |
 | `smugmug_folder_id` | text not null unique | the SmugMug node id |
+| `synced` | bool not null | `default false` (added in migration 22, step 8.3a). Admins flip this on the divisions whose subtrees should be deeply walked by photo sync (8.4). The two seeded camp divisions ("iD Tech Camps", "iD Teen Academies") are bootstrapped to `true` in the same migration; the two non-camp divisions stay false. The folder-tree sync (8.3b) walks every division at the top level regardless of this flag — it's only the deep walk + photo enumeration that respect it. |
 | `created_at` | timestamptz | `default now()` |
 
 ### `locations`
@@ -124,11 +129,13 @@ Index `camp_weeks_dates_idx` on `(starts_on, ends_on)` for date-range queries.
 | `current_status` | photo_status not null | `default 'pending'` — maintained by trigger |
 | `is_quarantined` | bool not null | `default false` — maintained by trigger |
 | `smugmug_folder_id` | text | which SmugMug folder it's currently in (public week folder OR hidden quarantine folder) |
+| `priority` | int not null | `default 0` (added in migration 21, step 8.2). Manual "Add folder to queue" (step 8.5) writes `priority = 1` so those photos jump to the top of the reviewer queue. The 8.4 import job leaves it at 0 for scheduled adds. |
 | `created_at` | timestamptz | `default now()` |
 | `updated_at` | timestamptz | `default now()` |
 
 Index on `(current_status, camp_week_id)` for the reviewer queue.
 Index on `(is_quarantined)` for the senior's "quarantined queue" view.
+Partial composite index `photos_pending_priority_idx` on `(priority desc, captured_at) where current_status = 'pending'` (migration 21) — supports the queue ordering `where current_status = 'pending' order by priority desc, captured_at <queue_order>` that 8.4 wires up. Restricted to pending so it stays small as terminal-status rows accumulate.
 
 ---
 
@@ -296,6 +303,42 @@ Mode-specific check constraints (`bonus_periods_recurring_complete`, `bonus_peri
 
 > **Implementation note (step 7.6b, May 2026).** The original migration-7 seed of 9 conceptual placeholder rows (labels only, no image files) was deleted by migration 18. The new model is "every example is a real uploaded image" — admins create them through the UI, which uploads to Supabase Storage and inserts a row pointing at the resulting object. `lib/examples.ts` is the single client-side reader/writer; both `AdminExamples` (admin UI) and `GuideScreen` (reviewer-facing) consume `fetchExamples()`. The reorder helper (`reorderExamples`) calls the `public.reorder_examples(example_kind, uuid[])` RPC so the new `display_order` for an entire kind is written in a single statement — the client doesn't have to fan out N parallel UPDATEs and risk a half-applied ordering on partial failure.
 
+### `smugmug_config` (single-row, migration 21, step 8.2)
+Single-row table backing the Admin → SmugMug screen's settings card. Same `id smallint pk default 1 check (id = 1)` pattern as `points_config` and `app_settings`.
+
+| col | type | notes |
+|---|---|---|
+| `id` | smallint pk | always 1 |
+| `mode` | smugmug_mode not null | `summer` \| `off_season`. Summer is the active-season fast-window mode (sliding window: weeks where `ends_on >= today - 14 days AND starts_on <= today + 7 days`); off-season is admin-driven archival cleanup (no upper bound, lower bound = `earliest_fetch_date`). |
+| `season_start_date` | date | consulted in summer mode. Seeded to Jan 1 of the current year as a sensible default; the admin moves it to the actual first-day-of-camp when configuring for the season. |
+| `earliest_fetch_date` | date | consulted in off-season mode. Nullable — only one of the two date columns is meaningful at a time. |
+| `queue_order` | queue_order not null | `newest_first` \| `oldest_first`. Selects the `captured_at` direction for the reviewer queue's `order by priority desc, captured_at <dir>` clause. `default 'newest_first'`. |
+| `last_sync_at` | timestamptz | mirrored from the most recent `sync_log.finished_at` for fast settings-card render. Maintained by the 8.4 sync handler. |
+| `last_sync_status` | text | plain text (not the `sync_status` enum) so the summary line can carry richer context than the strict three-value membership — e.g. `"success · +147 photos"` or `"partial · 3 errors, see log"`. |
+| `updated_at` | timestamptz | `default now()` |
+
+RLS follows the established read-by-everyone / write-by-admins pattern (policies `smugmug_config_select_authenticated`, `smugmug_config_write_admin`). Seeded as `(1, 'summer', date_trunc('year', current_date)::date, 'newest_first')`.
+
+### `sync_log` (multi-row, migration 21, step 8.2)
+Append-only audit trail of SmugMug sync runs. Backs the sync-log table at the bottom of the Admin → SmugMug screen.
+
+| col | type | notes |
+|---|---|---|
+| `id` | uuid pk | `default gen_random_uuid()` |
+| `started_at` | timestamptz not null | `default now()` |
+| `finished_at` | timestamptz | nullable so an in-flight run can be `INSERT … RETURNING id` and updated when it completes |
+| `kind` | sync_kind not null | `scheduled` \| `manual` \| `mode_switch` \| `priority_add`. `scheduled` is the daily Vercel Cron run; `manual` is the admin's "Sync now" button; `mode_switch` is the bulk-clear that runs when the admin switches mode and chose "clear the queue"; `priority_add` is the manual "Add folder to queue" path. |
+| `status` | sync_status not null | `success` \| `partial` \| `failed`. `partial` covers per-photo errors that didn't sink the whole run. |
+| `photos_added` | int not null | `default 0` |
+| `photos_updated` | int not null | `default 0` |
+| `photos_removed` | int not null | `default 0` — counts photos `DELETE`'d because they disappeared from SmugMug and had no review history. |
+| `error_summary` | text | nullable; short human-readable text for the expandable row in the admin sync-log table. Full stack traces stay in Vercel logs. |
+| `triggered_by` | uuid | fk → `profiles(id)` `on delete set null`. NULL for `scheduled` runs; set to the admin's id for the other three kinds. |
+
+Index `sync_log_started_at_idx` on `(started_at desc)` for the table view.
+
+RLS is **admin-read-only**: policy `sync_log_select_admin` permits `select` only when `public.is_admin()`. There is no authenticated write policy because all writes flow through the cron + manual sync handlers (8.4) running under the service role, which bypasses RLS by design — the auth check happens at the handler level *before* the service-role client is constructed, not at the database layer.
+
 ### Storage
 
 Two public-read / admin-write buckets, both following the same pattern (bucket-level `public = true` so reads can use plain public URLs, plus per-bucket RLS on `storage.objects` enforcing admin-only writes via `public.is_admin()`).
@@ -354,9 +397,13 @@ Enable RLS on every table. Default deny.
 - `select`: any authenticated user
 - `insert`/`update`/`delete`: service role only (these are written by the SmugMug import job, not by the app)
 
-**`tags`, `examples`, `senior_routing_rules`, `points_config`, `app_settings`, `bonus_periods`**
+**`tags`, `examples`, `senior_routing_rules`, `points_config`, `app_settings`, `bonus_periods`, `smugmug_config`**
 - `select`: any authenticated user
-- `insert`/`update`/`delete`: admin role only (policy `bonus_periods_write_admin` mirrors the others — `using (public.is_admin()) with check (public.is_admin())`)
+- `insert`/`update`/`delete`: admin role only (policy `bonus_periods_write_admin` mirrors the others — `using (public.is_admin()) with check (public.is_admin())`; `smugmug_config_write_admin` follows the same shape)
+
+**`sync_log`**
+- `select`: admin only (policy `sync_log_select_admin`)
+- `insert`/`update`/`delete`: service role only (the SmugMug sync handlers in step 8.4 — `scheduled`, `manual`, `mode_switch`, `priority_add` — all run under the service role and bypass RLS; the admin auth check happens at the Route Handler level before the service-role client is constructed)
 
 **`reviews`**
 - `select`: any authenticated user (the leaderboard, profile, and admin overview all need broad read)
@@ -381,7 +428,7 @@ Empty placeholder migrations exist for the post-V1 gamification tables so the mi
 
 Step 11 (notifications backbone) will add a `notifications` table + a `notification_preferences` table at that point. Its purpose is narrow: reminders, nudges, role-change pings, and senior-routing fan-out from `senior_routing_rules` on flag insert — **not** assignment alerts. The existing `senior_routing_rules` table (migration 8) is the read side of that work; it stays untouched until step 11 wires a UI for managing rules. The in-app **notifications interface** (bell / dropdown / panel) is post-V1 work; see Phase 2 step 2 in `PROJECT_CONTEXT.md`.
 
-Step 8 (SmugMug import) will add an `import_pool` table for the admin-curated folder priority list. Design lives in `PROJECT_CONTEXT.md`. This is folder-priority for the global queue; it is not per-reviewer or per-team — every reviewer + senior sees the same queue ordered by the same priority.
+Step 8 (SmugMug import) landed its schema in migration 21 — see `smugmug_config` and `sync_log` above, plus the new `priority` column on `photos`. The folder-priority concept the original V1 brief sketched as an `import_pool` table compressed down to a single `photos.priority` int — admin-curated "Add folder to queue" actions (8.5) just stamp `priority = 1` on the inserted rows, and the reviewer queue's `order by priority desc, captured_at` falls out for free without a separate join. This is folder-priority for the global queue; it is not per-reviewer or per-team — every reviewer + senior sees the same queue ordered the same way.
 
 **Not planned.** No `assignments`, `assigned_to`, `team_assignments`, or similar table is on the roadmap. The product does not assign specific photos, camp weeks, locations, or queues to specific reviewers/seniors/teams. If that ever changes, the design starts here.
 
