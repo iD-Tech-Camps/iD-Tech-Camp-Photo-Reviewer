@@ -192,7 +192,7 @@ Seed this table from the tag lists historically in `components/data.tsx`.
 | `email` | text not null | |
 | `full_name` | text | from Google profile |
 | `role` | role not null | `default 'reviewer'` |
-| `team` | text | Operations / Programs / Marketing / Support / etc. |
+| `team` | text | Free-form label (Operations / Programs / Marketing / Support / etc.) — admin-set on the Overview row editor. **Descriptive only; not an access boundary.** It does *not* gate which photos a reviewer sees, which camp weeks they can review, or which queue rows they're served. Reviewers and Senior Reviewers always see the same global pending queue regardless of `team`. |
 | `status` | profile_status not null | `default 'active'` |
 | `theme` | text not null | `default 'light'` (check constraint `profiles_theme_chk` — `light` \| `dark`). Per-user appearance preference; added in migration 20 (step 7.7c). The `profiles_update_self` RLS policy from migration 9 already permits self-edits — its with-check restricts only `role` and `team`, so theme writes pass without policy changes. |
 | `created_at` | timestamptz | `default now()` |
@@ -202,7 +202,9 @@ Auto-create a `profiles` row on every `auth.users` insert via a trigger (standar
 
 ---
 
-## Routing rules
+## Notification routing (on flag insert)
+
+> **This is notification routing, not assignment.** `senior_routing_rules` controls which seniors get *pinged* when a flag with certain tags lands. It does **not** gate which photos a senior can see — every senior + admin reads the same Flag Review queue. There is no assignment table in this schema (no `assignments`, no `assigned_to`, no `team_assignments`) and none is planned.
 
 ### `senior_routing_rules`
 | col | type | notes |
@@ -215,7 +217,7 @@ Auto-create a `profiles` row on every `auth.users` insert via a trigger (standar
 | `active` | bool not null | `default true` |
 | `created_at` | timestamptz | |
 
-This table is read by the app on flag insert to decide who to notify. The actual sending of email/Slack/etc. is application-layer concern, not in scope for the schema.
+This table is read by the app on flag insert to decide who to notify. The actual sending of email/Slack/etc. is an application-layer concern, not in scope for the schema. Step 11 (notifications backbone) wires the admin UI for managing these rules; the table itself has been in the schema since migration 8.
 
 ---
 
@@ -377,9 +379,11 @@ Empty placeholder migrations exist for the post-V1 gamification tables so the mi
 - **`streaks`** — for an eventual streak counter (migration 11).
 - **`activity_log`** — denormalized feed for an eventual "Recent activity" panel; could also be derived from `reviews` + a few computed events (migration 12).
 
-Step 11 (notifications) will add a `notifications` table + a `notification_preferences` table at that point. The existing `senior_routing_rules` table (migration 8) is the read side of that work — it stays untouched until step 11 wires a UI to it.
+Step 11 (notifications backbone) will add a `notifications` table + a `notification_preferences` table at that point. Its purpose is narrow: reminders, nudges, role-change pings, and senior-routing fan-out from `senior_routing_rules` on flag insert — **not** assignment alerts. The existing `senior_routing_rules` table (migration 8) is the read side of that work; it stays untouched until step 11 wires a UI for managing rules. The in-app **notifications interface** (bell / dropdown / panel) is post-V1 work; see Phase 2 step 2 in `PROJECT_CONTEXT.md`.
 
-Step 8 (SmugMug import) will add an `import_pool` table for the admin-curated folder priority list. Design lives in `PROJECT_CONTEXT.md`.
+Step 8 (SmugMug import) will add an `import_pool` table for the admin-curated folder priority list. Design lives in `PROJECT_CONTEXT.md`. This is folder-priority for the global queue; it is not per-reviewer or per-team — every reviewer + senior sees the same queue ordered by the same priority.
+
+**Not planned.** No `assignments`, `assigned_to`, `team_assignments`, or similar table is on the roadmap. The product does not assign specific photos, camp weeks, locations, or queues to specific reviewers/seniors/teams. If that ever changes, the design starts here.
 
 ---
 

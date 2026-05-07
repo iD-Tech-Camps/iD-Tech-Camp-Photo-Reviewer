@@ -30,7 +30,7 @@ Step 7 (Supabase persistence) is complete. The reviewer + senior flows, tags, ex
 ### What does NOT work yet
 - **No SmugMug API integration.** The placeholder seed simulates one location/week with 10 photos under "iD Tech Camps → Adelphi University → May 25–29, 2026". → **step 8** (the active phase).
 - The `Admin → SmugMug import` screen is a static placeholder shell (added in 7.7f); step 8 makes it real.
-- Admin Overview "Active reviewers" denominator equals total profile count (no `profiles.status` filter). → **step 11** (idle/inactive transitions).
+- Admin Overview "Active reviewers" denominator equals total profile count (no `profiles.status` filter). → **step 11** — wired alongside the `profile_status` idle/inactive transitions in the notifications-backbone step.
 - `npm audit` reports 4 high-severity issues in Next.js 14.x; major-version upgrade pending. → **step 9**.
 
 ---
@@ -144,7 +144,14 @@ Both set in Vercel (all environments) and in `.env.local` for local dev.
 | 8 | **SmugMug API integration** — admin-curated import pool with folder priority (not full auto-ingest) | 🟡 Active |
 | 9 | Next.js security upgrade (resolves audit warnings) | Pending |
 | 10 | Polish + team rollout | Pending |
-| 11 | **Notifications** — in-app + email transport, senior routing rules, idle/inactive transitions | Pending |
+| 11 | **Notifications backbone** — reminders, nudges, role-change pings, senior-routing fan-out on flag insert, `profile_status` idle/inactive transitions | Pending |
+
+### Post-V1 / Phase 2
+
+| # | Step | Status |
+|---|---|---|
+| 1 | (TBD — slot reserved for the next post-V1 priority) | Placeholder |
+| 2 | **Notifications interface rebuild** — in-app bell / dropdown / notifications panel. The step-11 backbone covers delivery + data; this step is just the surface UI. *TODO: schema + UI design when picked up.* | Placeholder |
 
 ---
 
@@ -167,15 +174,24 @@ Likely shape:
 
 ---
 
-### Step 11 — Notifications
+### Step 11 — Notifications backbone
 
-Deferred from V1 because none of it has a working backbone yet.
+The notification *system* lands in V1. Its purpose is intentionally narrow — it is **not** an assignment alert system. It exists for:
 
-- **Notifications infrastructure** — `notifications` table for in-app delivery (bell icon in sidebar + notifications screen); email transport via Resend or SendGrid through a Supabase Edge Function; `notification_preferences` per user (opt-out per channel and per kind).
-- **Senior routing rules UI** — wire the `senior_routing_rules` table (already in the schema, migration 8) to a real admin screen. Tag triggers come from the live `tags` table; recipient is any `senior` or `admin` profile. Channels are filtered to whatever's actually wired (probably email + in-app on day one even though the schema permits slack/sms).
+- **Reminders** — e.g. "you have N pending photos waiting", end-of-day nudges.
+- **Nudges** — bonus period starting/ending, streak about to break (once streaks land), points-config changes worth flagging.
+- **Role changes** — promoted to Senior, demoted back to Reviewer, etc.
+- **Senior-routing fan-out** — driven by the existing `senior_routing_rules` table (migration 8). When a flag review row inserts and its tags intersect a rule's `tag_triggers`, the rule's `recipient_id` (a senior or admin) is notified on each of the rule's `channels`. This is a senior-side notification on flag, **not** a reviewer assignment — every reviewer and senior continues to see the same global pending queue regardless of routing rules.
+
+Roughly the work in step 11:
+
+- **Notifications infrastructure** — `notifications` table for in-app delivery; email transport via Resend or SendGrid through a Supabase Edge Function; `notification_preferences` per user (opt-out per channel and per kind).
+- **Senior routing rules admin UI** — wire `senior_routing_rules` to a real admin screen. Tag triggers come from the live `tags` table; recipient is any `senior` or `admin` profile. Channels are filtered to whatever's actually wired (probably email on day one even though the schema permits slack/sms/inapp).
 - **`profile_status` transitions** — wire the `active | idle | inactive` enum currently unused on `profiles`. Cron or trigger flips status based on `last_active_at`. Admin Overview's "Active reviewers" denominator filters by status instead of total profile count.
 
-No invitations, no auto-reassign / batch-assignment work — both removed from the roadmap. Any signed-in `@idtech.com` Google account becomes a reviewer automatically via the `handle_new_user` trigger.
+The in-app notifications **interface** (bell icon, dropdown, notifications panel) is **not** in step 11. It's deferred to post-V1 / Phase 2 step 2 — see the post-V1 table above. Step 11 lays the data + delivery layer; the interface gets rebuilt later.
+
+Any signed-in `@idtech.com` Google account becomes a reviewer automatically via the `handle_new_user` trigger. There is no invite system and no assignment system.
 
 ---
 
@@ -207,9 +223,9 @@ No invitations, no auto-reassign / batch-assignment work — both removed from t
 - **Points Multiplier Bonus is fully DB-backed.** `bonus_periods` is its own multi-row table — `mode` discriminates recurring (days[] + HH:MM clock window) vs. one-time (timestamptz pair); `multiplier` is `numeric(4,2)` with a 1.10–10.00 check. The reviewer client passes an explicit `pointsAwarded = base × multiplier` into `submitReview` so `reviews.points_awarded` snapshots the bonused value the reviewer saw. The trigger's `points_config` lookup is the fallback for non-bonused write paths (senior accept / delete on FlagReview). Pennant re-evaluates on a 30s tick so windows start/end mid-session.
 - **Theme is per-user; accent stays global; density removed.** `profiles.theme` (`('light','dark')` CHECK) backs the per-user picker on the Profile screen. `app_settings.accent` is the brand color, set by admins on Admin → Settings. Density was never wired (no `data-density` attribute, no compact CSS rules) — wiring it well isn't worth the work for an internal tool.
 - **Admin Overview merged with Users.** One screen showing the reviewer roster with per-user stats (reviewed, points, last active, role, team), plus a small `Reviewed today` / `Active reviewers` stat row above the table. The standalone Users screen is gone — its search lives on the merged Overview header. The queue-depth panel is deferred until SmugMug data is wired in step 8.
-- **Team is free-text on `profiles.team`.** Normalize to a `teams` table only if/when teams need to drive routing. There's no autocomplete affordance — admins type the value directly.
+- **Team is a free-form label on `profiles.team`, not an access boundary.** It's a string admins set on the Overview row editor for grouping in the roster. It does **not** gate which photos a reviewer sees, which camp weeks they have access to, or which queue rows they're served. If teams ever need to drive anything (notification routing, reporting splits), normalize to a `teams` table at that point — but the current column is descriptive only.
 - **No invitations.** Workspace OAuth already gates sign-in to `@idtech.com`; the `handle_new_user` trigger creates the profile on first login. There is no invite link, no `pending_invites` table, no pre-assigned role/team.
-- **No assignment / batch / auto-reassign system.** The original AdminAssignment screen was a mock that persisted nothing. Step 7.7f refactored it into a `SmugMugImport` placeholder shell (admin-only) that step 8 will flesh out. Reviewer queue ordering is global — no per-user batch slicing, no idle reassignment.
+- **No assignment system, full stop.** The product does not assign specific photos, camp weeks, locations, or queues to specific reviewers, seniors, or teams. Reviewers and Senior Reviewers see the **same** pending queue ordered the same way; the only role-based difference is that Seniors (and Admins) additionally see Flag Review and can write `delete` decisions. There is no `assignments` table, no `assigned_to` column, no team-to-location mapping, no round-robin or per-user batch slicing, and no auto-reassignment on idle. The original AdminAssignment screen was a mock that persisted nothing; step 7.7f refactored it into a `SmugMugImport` placeholder shell (admin-only) that step 8 will flesh out. The `senior_routing_rules` table (migration 8) is **notification routing on flag insert**, not assignment — it does not gate which photos seniors can see.
 - **SmugMug ingest is admin-curated in V1, not full auto-ingest.** Admins pick which folders enter the review queue and prioritize them. Full design in step 8.
 
 ---
