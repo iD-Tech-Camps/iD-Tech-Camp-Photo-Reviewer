@@ -63,7 +63,7 @@ The app has three roles, matching the Postgres `role` enum exactly:
 | ---------- | ----------------- | ---- |
 | `reviewer` | "Staff Reviewer"  | Review queue, stats, profile, guide. Default for any signed-in user (set by `handle_new_user` trigger on `auth.users` insert). |
 | `senior`   | "Senior Reviewer" | Everything above, plus the **Flag review** queue. |
-| `admin`    | "Admin"           | Everything above, plus the Admin section (overview, assignment, points, examples, users, app settings). |
+| `admin`    | "Admin"           | Everything above, plus the Admin section (overview, points & rules, example library, SmugMug import, app settings). |
 
 Promote / demote reviewers from `Admin → Overview` — the per-row dots button opens an editor for `role` and `team`. The form refuses to demote the currently-signed-in admin out of the admin role (lockout protection); for stuck cases, edit `profiles.role` directly in Supabase.
 
@@ -87,7 +87,11 @@ Three actions per photo:
 
 - **Accept** — writes an `approve` review under the senior's id; the trigger flips `current_status` back to `approved` and clears any quarantine.
 - **Delete** — writes a `delete` review (requires `senior` or `admin`); the trigger sets `current_status = 'deleted'`.
-- **Download** — generates a PNG of the placeholder render so it can be shared with a camp director offline (no DB write). Will switch to the real SmugMug image URL once step 7 lands.
+- **Download** — generates a PNG of the placeholder render so it can be shared with a camp director offline (no DB write). Will switch to the real SmugMug image URL once step 8 lands.
+
+### SmugMug import (Admin)
+
+`Admin → SmugMug import` is currently a static placeholder. Step 8 turns it into the screen where admins browse the SmugMug folder tree, add specific camp weeks (and possibly whole locations) into the review queue, and reorder them by priority — so reviewers always start with whatever camp most needs cleared.
 
 ## Database
 
@@ -131,7 +135,7 @@ middleware.ts         Root middleware → lib/supabase/middleware.ts (session re
 styles/legacy.css     Source of truth for visual styling (Tailwind installed but unused)
 supabase/
   migrations/         20 SQL migrations, applied to the work-account project
-  tests/              smoke + two e2e tests (run under role=authenticated)
+  tests/              smoke (service role) + three e2e tests (run under role=authenticated)
 spec/
   PROJECT_CONTEXT.md  Working-session handoff doc — read this first
   SCHEMA_SPEC.md      Database design + post-implementation notes

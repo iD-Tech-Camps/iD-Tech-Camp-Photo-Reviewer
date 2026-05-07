@@ -51,302 +51,51 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-export function AdminAssignment() {
-  const [batchSize, setBatchSize] = React.useState(10);
-  const [reminderDays, setReminderDays] = React.useState(2);
-  const [remindersOn, setRemindersOn] = React.useState(true);
-  const [suppressWeekends, setSuppressWeekends] = React.useState(false);
-
+// Placeholder shell for the SmugMug Import screen. Replaces the old
+// AdminAssignment mock UI (batch settings / auto-reassign / reminders /
+// flag-notification rules) which never persisted anything — the
+// notifications + idle/inactive transitions parts of that mock are
+// being routed to step 11 instead.
+//
+// Step 8 fleshes this out: admins will browse the SmugMug folder tree
+// here, add/remove camp_weeks (and possibly whole locations) into a
+// prioritized import pool, and trigger the import job that pulls real
+// photos into `public.photos`. Until then this is a static "what lives
+// here" placeholder so the nav entry isn't a dead route.
+export function SmugMugImport() {
   return (
     <>
       <PageHeader
-        eyebrow="Admin · Assignment"
-        title="How photos <em>flow.</em>"
-        sub="Control how the queue is sliced up across reviewers."
-      >
-        <button className="btn btn-ghost">Discard</button>
-        <button className="btn btn-primary">Save changes</button>
-      </PageHeader>
+        eyebrow="Admin · SmugMug import"
+        title="SmugMug <em>import.</em>"
+        sub="Pick which SmugMug folders feed the review queue."
+      />
 
-      <div className="page-body" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-          <div className="card">
-            <h3 className="card-title" style={{ marginBottom: 14 }}>Batch settings</h3>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              <div>
-                <label className="label">Photos per batch</label>
-                <input type="range" min="5" max="25" value={batchSize}
-                  onChange={(e) => setBatchSize(+e.target.value)}
-                  style={{ width: "100%" }} />
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
-                  <span>5</span>
-                  <span style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 500, color: "var(--ink)" }}>{batchSize}</span>
-                  <span>25</span>
-                </div>
-              </div>
-              <div>
-                <label className="label">Auto-reassign after</label>
-                <select className="select" defaultValue="30">
-                  <option value="30">30 minutes of inactivity</option>
-                  <option value="60">1 hour of inactivity</option>
-                  <option value="120">2 hours of inactivity</option>
-                  <option value="240">4 hours of inactivity</option>
-                  <option value="480">8 hours of inactivity</option>
-                  <option value="1440">1 day of inactivity</option>
-                  <option value="2880">2 days of inactivity</option>
-                  <option value="4320">3 days of inactivity</option>
-                  <option value="10080">1 week of inactivity</option>
-                </select>
-              </div>
-            </div>
+      <div className="page-body">
+        <div className="card" style={{ maxWidth: 720 }}>
+          <div className="card-eyebrow" style={{ color: "var(--lake)" }}>Coming in step 8</div>
+          <h3 className="card-title" style={{ marginTop: 6, marginBottom: 10 }}>
+            Admin-curated import pool
+          </h3>
+          <div style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.55 }}>
+            This is where admins will browse the SmugMug folder tree, add specific camp weeks
+            (and possibly whole locations) into the review queue, and reorder them by priority.
+            The reviewer queue will pull from the highest-priority folder first, so you can
+            steer attention toward whatever camp you most need cleared.
           </div>
-
-          <div className="card">
-            <div style={{
-              display: "flex", justifyContent: "space-between", alignItems: "flex-start",
-              gap: 12, marginBottom: 14,
-            }}>
-              <div>
-                <h3 className="card-title" style={{ marginBottom: 6 }}>Reminders</h3>
-                <div style={{ fontSize: 13, color: "var(--ink-3)" }}>
-                  Nudge inactive reviewers via email + in-app.
-                </div>
-              </div>
-              <Toggle value={remindersOn} onChange={setRemindersOn} />
-            </div>
-
-            <div style={{
-              opacity: remindersOn ? 1 : 0.45,
-              pointerEvents: remindersOn ? "auto" : "none",
-              transition: "opacity 0.15s",
-            }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                <div>
-                  <label className="label">Remind after inactivity</label>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <input type="range" min="1" max="14" value={reminderDays}
-                      onChange={(e) => setReminderDays(+e.target.value)}
-                      style={{ flex: 1 }} />
-                    <span style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 500, minWidth: 64 }}>
-                      {reminderDays}d
-                    </span>
-                  </div>
-                </div>
-                <div>
-                  <label className="label">Channels</label>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <button className="tag-chip active">Email</button>
-                    <button className="tag-chip active">In-app</button>
-                    <button className="tag-chip">Slack</button>
-                    <button className="tag-chip">SMS</button>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ marginTop: 4 }}>
-                <ToggleRow
-                  label="Suppress on weekends"
-                  hint="Skip reminders on Saturday and Sunday."
-                  value={suppressWeekends}
-                  onChange={setSuppressWeekends}
-                />
-              </div>
-            </div>
+          <div style={{
+            marginTop: 14, padding: 12,
+            background: "var(--paper-2)", borderRadius: 8,
+            border: "1px solid var(--rule)",
+            fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5,
+          }}>
+            Until this lands, the queue runs against a single seeded camp week
+            (Adelphi University · May 25–29, 2026). The import job that backs this
+            screen will replace those placeholder rows with real SmugMug photos.
           </div>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div className="card" style={{ background: "var(--lake-soft)", borderColor: "transparent" }}>
-            <div className="card-eyebrow">Preview</div>
-            <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.5 }}>
-              Each active reviewer will receive batches of <strong>{batchSize} photos</strong>.{" "}
-              {remindersOn
-                ? <>Reviewers idle for <strong>{reminderDays} days</strong> get a nudge{suppressWeekends ? " (weekends skipped)" : ""}.</>
-                : <>Reminders are <strong>off</strong>.</>
-              }{" "}
-              At current queue depth of <strong>2,481</strong>, you&apos;ll clear it in <strong>~5.3 hours</strong> with 31 active reviewers.
-            </div>
-          </div>
-
-          <FlagNotifications />
         </div>
       </div>
     </>
-  );
-}
-
-type FlagRule = {
-  id: number;
-  name: string;
-  reasons: string[];
-  recipient: string;
-  channels: string[];
-};
-
-function FlagNotifications() {
-  const ALL_REASONS = [
-    { id: "inappropriate", label: "Inappropriate" },
-    { id: "gesture",       label: "Gesture" },
-    { id: "consent",       label: "Consent" },
-    { id: "minor-ident",   label: "Identifying info" },
-    { id: "second-opinion",label: "Second opinion" },
-    { id: "safety",        label: "Safety" },
-  ];
-  const ADMINS = ["Dr. Harper Rowe", "Ana Flores (Lead)", "Ops on-call", "Safety team"];
-
-  const [rules, setRules] = React.useState<FlagRule[]>([
-    { id: 1, name: "Safety escalation",
-      reasons: ["inappropriate","safety","minor-ident"],
-      recipient: "Safety team",
-      channels: ["email","slack","sms"] },
-    { id: 2, name: "Daily digest",
-      reasons: ["gesture","consent","second-opinion"],
-      recipient: "Dr. Harper Rowe",
-      channels: ["email"] },
-  ]);
-  const [open, setOpen] = React.useState<number | null>(null);
-
-  const addRule = () => {
-    const id = Date.now();
-    setRules([...rules, {
-      id, name: "New rule", reasons: [],
-      recipient: ADMINS[0], channels: ["email"],
-    }]);
-    setOpen(id);
-  };
-  const updateRule = (id: number, patch: Partial<FlagRule>) =>
-    setRules(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r));
-  const removeRule = (id: number) => setRules(rs => rs.filter(r => r.id !== id));
-  const toggleIn = <T,>(arr: T[], v: T) => arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v];
-
-  const CHANNEL_META: Record<string, { label: string; icon: string }> = {
-    email: { label: "Email", icon: "mail" },
-    slack: { label: "Slack", icon: "bell" },
-    sms:   { label: "SMS",   icon: "phone" },
-    inapp: { label: "In-app",icon: "bell" },
-  };
-
-  return (
-    <div className="card">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-        <h3 className="card-title">Flag notifications</h3>
-        <span className="pill pill-sun">{rules.length} active</span>
-      </div>
-      <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 12 }}>
-        Who gets pinged when reviewers flag a photo.
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {rules.map(r => (
-          <div key={r.id} style={{
-            border: "1px solid var(--rule)",
-            borderRadius: 8,
-            overflow: "hidden",
-            background: "var(--paper)",
-          }}>
-            <div style={{
-              padding: "10px 12px",
-              display: "flex", alignItems: "center", gap: 10,
-              cursor: "pointer",
-            }}
-              onClick={() => setOpen(open === r.id ? null : r.id)}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2 }}>{r.name}</div>
-                <div style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)",
-                  whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {r.reasons.length || "no"} reason{r.reasons.length === 1 ? "" : "s"} → {r.recipient} · {r.channels.join(", ")}
-                </div>
-              </div>
-              <Icon name={open === r.id ? "chevron-d" : "chevron-r"} size={12} />
-            </div>
-
-            {open === r.id && (
-              <div style={{
-                padding: 12, borderTop: "1px solid var(--rule)",
-                background: "var(--paper-2)",
-                display: "flex", flexDirection: "column", gap: 12,
-              }}>
-                <div>
-                  <label className="label" style={{ marginBottom: 4 }}>Rule name</label>
-                  <input className="input"
-                    value={r.name}
-                    onChange={(e) => updateRule(r.id, { name: e.target.value })}
-                  />
-                </div>
-
-                <div>
-                  <label className="label" style={{ marginBottom: 6 }}>Trigger on</label>
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {ALL_REASONS.map(reason => (
-                      <button key={reason.id}
-                        className={"tag-chip" + (r.reasons.includes(reason.id) ? " active" : "")}
-                        onClick={() => updateRule(r.id, { reasons: toggleIn(r.reasons, reason.id) })}
-                      >
-                        {reason.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="label" style={{ marginBottom: 4 }}>Notify</label>
-                  <select className="select"
-                    value={r.recipient}
-                    onChange={(e) => updateRule(r.id, { recipient: e.target.value })}
-                  >
-                    {ADMINS.map(a => <option key={a} value={a}>{a}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="label" style={{ marginBottom: 6 }}>Channels</label>
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {Object.entries(CHANNEL_META).map(([id, meta]) => (
-                      <button key={id}
-                        className={"tag-chip" + (r.channels.includes(id) ? " active" : "")}
-                        onClick={() => updateRule(r.id, { channels: toggleIn(r.channels, id) })}
-                      >
-                        {meta.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-                  <button
-                    onClick={() => removeRule(r.id)}
-                    style={{ color: "var(--rose)", fontSize: 12, fontWeight: 500 }}
-                  >
-                    Delete rule
-                  </button>
-                  <button className="btn btn-ghost" style={{ padding: "4px 10px", fontSize: 12 }}
-                    onClick={() => setOpen(null)}>
-                    Done
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-
-        <button
-          onClick={addRule}
-          style={{
-            padding: "10px 12px",
-            border: "1px dashed var(--rule-2)",
-            borderRadius: 8,
-            background: "transparent",
-            color: "var(--ink-2)",
-            fontSize: 13,
-            cursor: "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-          }}
-        >
-          <Icon name="plus" size={12} /> Add notification rule
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -2439,7 +2188,6 @@ export function AdminOverview({ toast }: { toast: ToastApi }) {
             style={{ paddingLeft: 30, width: 220 }}
           />
         </div>
-        <button className="btn btn-primary"><Icon name="plus" size={14} /> Invite</button>
       </PageHeader>
 
       <div className="page-body">
@@ -2788,35 +2536,6 @@ function FieldRow({
           {hint}
         </div>
       )}
-    </div>
-  );
-}
-
-function ToggleRow({
-  label,
-  hint,
-  value,
-  onChange,
-}: {
-  label: string;
-  hint?: string;
-  value: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <div style={{
-      display: "flex", alignItems: "center", justifyContent: "space-between",
-      padding: "12px 0", borderBottom: "1px solid var(--rule)", gap: 16,
-    }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14, fontWeight: 500 }}>{label}</div>
-        {hint && (
-          <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
-            {hint}
-          </div>
-        )}
-      </div>
-      <Toggle value={value} onChange={onChange} />
     </div>
   );
 }

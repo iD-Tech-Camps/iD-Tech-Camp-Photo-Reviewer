@@ -10,10 +10,10 @@ import {
 } from "@/components/screens/LeaderboardProfileGuide";
 import {
   AdminOverview,
-  AdminAssignment,
   AdminPoints,
   AdminExamples,
   AdminSettings,
+  SmugMugImport,
 } from "@/components/screens/Admin";
 import { FlagReviewScreen } from "@/components/screens/FlagReview";
 import { BonusPeriodsProvider, SettingsProvider, useSettings } from "@/components/settings";
@@ -27,18 +27,18 @@ const VALID_SCREENS = [
   "guide",
   "flag-review",
   "admin-overview",
-  "admin-assignment",
   "admin-points",
   "admin-examples",
+  "admin-smugmug",
   "admin-settings",
 ];
 
 const SENIOR_SCREENS = new Set(["flag-review"]);
 const ADMIN_SCREENS = new Set([
   "admin-overview",
-  "admin-assignment",
   "admin-points",
   "admin-examples",
+  "admin-smugmug",
   "admin-settings",
 ]);
 
@@ -182,9 +182,9 @@ function AppInner() {
         {activeScreen === "guide"       && <GuideScreen />}
         {activeScreen === "flag-review" && <FlagReviewScreen toast={toast} />}
         {activeScreen === "admin-overview"   && <AdminOverview toast={toast} />}
-        {activeScreen === "admin-assignment" && <AdminAssignment />}
         {activeScreen === "admin-points"     && <AdminPoints />}
         {activeScreen === "admin-examples"   && <AdminExamples toast={toast} />}
+        {activeScreen === "admin-smugmug"    && <SmugMugImport />}
         {activeScreen === "admin-settings"   && <AdminSettings />}
       </main>
       {toast.node}

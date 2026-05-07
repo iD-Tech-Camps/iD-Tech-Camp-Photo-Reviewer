@@ -73,11 +73,11 @@ export function Sidebar({
   ];
 
   const adminItems = [
-    { id: "admin-overview",   label: "Overview",       icon: "users" },
-    { id: "admin-assignment", label: "Assignment",     icon: "sliders" },
-    { id: "admin-points",     label: "Points & rules", icon: "medal" },
-    { id: "admin-examples",   label: "Example library",icon: "image" },
-    { id: "admin-settings",   label: "App settings",   icon: "gear" },
+    { id: "admin-overview",   label: "Overview",        icon: "users" },
+    { id: "admin-points",     label: "Points & rules",  icon: "medal" },
+    { id: "admin-examples",   label: "Example library", icon: "image" },
+    { id: "admin-smugmug",    label: "SmugMug import",  icon: "download" },
+    { id: "admin-settings",   label: "App settings",    icon: "gear" },
   ];
 
   return (

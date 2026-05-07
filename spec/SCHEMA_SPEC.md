@@ -371,13 +371,15 @@ Enable RLS on every table. Default deny.
 
 ## Deferred — explicitly not in this schema (yet)
 
-These come up in the existing UI but aren't blocking the core flow. Add when the Leaderboard/Profile screens move off mock data:
+Empty placeholder migrations exist for the post-V1 gamification tables so the migration order is reserved:
 
-- **`badges` and `user_badges`** — for the Profile screen's achievement list
-- **`streaks`** — for the "Day 9 streak" counter
-- **`activity_log`** — denormalized feed for the Profile's "Recent activity"; can also be derived from `reviews` + a few computed events
+- **`badges` and `user_badges`** — for an eventual Profile-screen achievement list (migration 10).
+- **`streaks`** — for an eventual streak counter (migration 11).
+- **`activity_log`** — denormalized feed for an eventual "Recent activity" panel; could also be derived from `reviews` + a few computed events (migration 12).
 
-Document a placeholder migration for each so the order is established, but leave them empty.
+Step 11 (notifications) will add a `notifications` table + a `notification_preferences` table at that point. The existing `senior_routing_rules` table (migration 8) is the read side of that work — it stays untouched until step 11 wires a UI to it.
+
+Step 8 (SmugMug import) will add an `import_pool` table for the admin-curated folder priority list. Design lives in `PROJECT_CONTEXT.md`.
 
 ---
 
