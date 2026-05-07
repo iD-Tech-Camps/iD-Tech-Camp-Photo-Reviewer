@@ -18,9 +18,9 @@ export type DbAppSettings = {
   completionMessage: string;
   emptyQueueMessage: string;
   supportEmail: string;
-  theme: "light" | "dark";
+  // Brand color — the only "appearance" knob still global. Theme moved to
+  // profiles in step 7.7c (per-user); density was dropped (never wired).
   accent: "sun" | "lake" | "moss" | "rose";
-  density: "comfortable" | "compact";
   // Storage path of the admin-uploaded favicon (in the `branding-assets`
   // bucket). NULL = no favicon configured; the layout emits no icon link.
   faviconStoragePath: string | null;
@@ -36,9 +36,7 @@ type RawAppSettingsRow = {
   completion_message: string;
   empty_queue_message: string;
   support_email: string;
-  theme: "light" | "dark";
   accent: "sun" | "lake" | "moss" | "rose";
-  density: "comfortable" | "compact";
   favicon_storage_path: string | null;
 };
 
@@ -46,7 +44,7 @@ const COLUMNS =
   "brand_name, brand_tagline, brand_mark, " +
   "home_greeting, home_subtitle, " +
   "completion_title, completion_message, empty_queue_message, " +
-  "support_email, theme, accent, density, favicon_storage_path";
+  "support_email, accent, favicon_storage_path";
 
 // Bucket holding admin-uploaded brand artifacts (favicon today, possibly
 // header logo + login splash later). See migration 19.
@@ -76,9 +74,7 @@ function mapRow(r: RawAppSettingsRow): DbAppSettings {
     completionMessage:  r.completion_message,
     emptyQueueMessage:  r.empty_queue_message,
     supportEmail:       r.support_email,
-    theme:              r.theme,
     accent:             r.accent,
-    density:            r.density,
     faviconStoragePath: r.favicon_storage_path,
   };
 }
@@ -115,9 +111,7 @@ function toRowPatch(patch: Partial<DbAppSettings>): Record<string, unknown> {
   if (patch.completionMessage  !== undefined) out.completion_message   = patch.completionMessage;
   if (patch.emptyQueueMessage  !== undefined) out.empty_queue_message  = patch.emptyQueueMessage;
   if (patch.supportEmail       !== undefined) out.support_email        = patch.supportEmail;
-  if (patch.theme              !== undefined) out.theme                = patch.theme;
   if (patch.accent             !== undefined) out.accent               = patch.accent;
-  if (patch.density            !== undefined) out.density              = patch.density;
   if (patch.faviconStoragePath !== undefined) out.favicon_storage_path = patch.faviconStoragePath;
   return out;
 }

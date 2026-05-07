@@ -67,6 +67,8 @@ The app has three roles, matching the Postgres `role` enum exactly:
 
 Promote / demote reviewers from `Admin → Overview` — the per-row dots button opens an editor for `role` and `team`. The form refuses to demote the currently-signed-in admin out of the admin role (lockout protection); for stuck cases, edit `profiles.role` directly in Supabase.
 
+Each reviewer picks their own light/dark theme on the **Profile** screen — it's stored on `profiles.theme` and applied as `data-theme` on `<html>` so the legacy CSS dark-mode overrides kick in. The brand accent color (highlights, primary buttons) is admin-curated and lives on `app_settings.accent`; admins set it from the **Brand color** card on `Admin → Settings`.
+
 ### Example library (Admin)
 
 `Admin → Example library` is upload-driven: every example is a real image admins upload directly. Files land in the `example-images` Supabase Storage bucket; metadata sits in `public.examples`. Drag a card to reorder within the active Good/Bad tab — the new order is persisted via the `public.reorder_examples` RPC in a single transaction, so a partial network failure can't half-apply the ordering. Reviewers see the same images in `Guide & examples` in the order admins curated. The 10 MB per-file cap is enforced client-side; storage RLS additionally blocks non-admin uploads at the DB layer.
@@ -116,7 +118,7 @@ app/                  Next.js App Router entry (layout, page, login, auth/callba
 components/           Shared UI (Icon, Shell, settings, App, data — gradient placeholder renderer)
 components/screens/   Top-level screens (Home, Review, FlagReview, Leaderboard, Profile, Guide, Admin)
 lib/
-  current-user.tsx    UserProvider, useCurrentUser, Role type, ROLE_LABEL — reads role from profiles
+  current-user.tsx    UserProvider, useCurrentUser, useUpdateTheme, Role + Theme types, ROLE_LABEL — reads role + theme from profiles
   reviews.ts          fetchPendingPhotos, fetchPendingCount, fetchFlaggedPhotos, fetchFlaggedCount, submitReview
   profile.ts          fetchMyStats, fetchReviewerRoster, updateReviewerProfile — reads from `reviewer_stats` view (migration 15); admin role/team writes go to the `profiles` base table
   tags.ts             fetchTags + admin write helpers — backs ReviewScreen, FlagReview, and Admin TagLibrary
@@ -128,7 +130,7 @@ lib/
 middleware.ts         Root middleware → lib/supabase/middleware.ts (session refresh + auth gating)
 styles/legacy.css     Source of truth for visual styling (Tailwind installed but unused)
 supabase/
-  migrations/         18 SQL migrations, applied to the work-account project
+  migrations/         20 SQL migrations, applied to the work-account project
   tests/              smoke + two e2e tests (run under role=authenticated)
 spec/
   PROJECT_CONTEXT.md  Working-session handoff doc — read this first

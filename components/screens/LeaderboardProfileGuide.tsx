@@ -3,7 +3,7 @@
 import React from "react";
 import { Icon } from "@/components/Icon";
 import { PageHeader } from "@/components/Shell";
-import { useCurrentUser, ROLE_LABEL } from "@/lib/current-user";
+import { useCurrentUser, useUpdateTheme, ROLE_LABEL, type Theme } from "@/lib/current-user";
 import { createClient } from "@/lib/supabase/client";
 import { fetchMyStats, type ReviewerStats } from "@/lib/profile";
 import { fetchExamples, type Example, type ExampleKind } from "@/lib/examples";
@@ -83,9 +83,57 @@ export function ProfileScreen() {
 
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           <ActivityCard stats={stats} />
+          <AppearanceCard />
         </div>
       </div>
     </>
+  );
+}
+
+function AppearanceCard() {
+  const { theme } = useCurrentUser();
+  const setTheme = useUpdateTheme();
+  const [error, setError] = React.useState<string | null>(null);
+
+  const onPick = (next: Theme) => {
+    if (next === theme) return;
+    setError(null);
+    setTheme(next).catch((err: any) => {
+      setError(err?.message ?? "Couldn't save theme.");
+    });
+  };
+
+  return (
+    <div className="card">
+      <div className="card-eyebrow">Appearance</div>
+      <div style={{
+        fontSize: 12, color: "var(--ink-3)", marginTop: 4, marginBottom: 14,
+      }}>
+        Your theme preference, saved to your profile.
+      </div>
+      <div style={{
+        display: "flex", gap: 4, padding: 3, background: "var(--paper-3)",
+        borderRadius: 8, width: "fit-content",
+      }}>
+        {(["light","dark"] as const).map(t => (
+          <button key={t}
+            onClick={() => onPick(t)}
+            className="btn"
+            style={{
+              padding: "6px 14px", fontSize: 12, textTransform: "capitalize",
+              background: theme === t ? "var(--paper)" : "transparent",
+              boxShadow: theme === t ? "var(--shadow-sm)" : "none",
+            }}>{t}</button>
+        ))}
+      </div>
+      {error && (
+        <div style={{
+          marginTop: 10, fontSize: 12, color: "var(--rose)",
+        }}>
+          {error}
+        </div>
+      )}
+    </div>
   );
 }
 

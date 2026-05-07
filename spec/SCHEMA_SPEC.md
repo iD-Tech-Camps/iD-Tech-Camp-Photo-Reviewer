@@ -1,6 +1,6 @@
 # iD Photo Reviewer — Database Schema Spec (Step 5 + step-6 fixes)
 
-> **Status: implemented.** This document was originally the brief for step 5 and is now the reference for what's actually in the database. The schema lives in `supabase/migrations/20260505000001_*.sql` through `supabase/migrations/20260506000018_*.sql`, applied to the work-account Supabase project (`idtech-photo-reviewer`). The few places where the implementation diverges from the original brief are called out inline with **`Implementation note`** blocks.
+> **Status: implemented.** This document was originally the brief for step 5 and is now the reference for what's actually in the database. The schema lives in `supabase/migrations/20260505000001_*.sql` through `supabase/migrations/20260507000020_*.sql`, applied to the work-account Supabase project (`idtech-photo-reviewer`). The few places where the implementation diverges from the original brief are called out inline with **`Implementation note`** blocks.
 >
 > **Two material changes since the original step-5 brief landed:**
 >
@@ -194,6 +194,7 @@ Seed this table from the tag lists historically in `components/data.tsx`.
 | `role` | role not null | `default 'reviewer'` |
 | `team` | text | Operations / Programs / Marketing / Support / etc. |
 | `status` | profile_status not null | `default 'active'` |
+| `theme` | text not null | `default 'light'` (check constraint `profiles_theme_chk` — `light` \| `dark`). Per-user appearance preference; added in migration 20 (step 7.7c). The `profiles_update_self` RLS policy from migration 9 already permits self-edits — its with-check restricts only `role` and `team`, so theme writes pass without policy changes. |
 | `created_at` | timestamptz | `default now()` |
 | `last_active_at` | timestamptz | `default now()` — bumped on every review insert |
 
@@ -246,13 +247,11 @@ Same single-row pattern. Migration 16 (sub-step 7.6c) extended this to cover eve
 | `completion_message` | text not null | shown under the title |
 | `empty_queue_message` | text not null | shown on Home when no photos are pending |
 | `support_email` | text not null | help link target |
-| `theme` | text not null | `light` \| `dark` (check constraint `app_settings_theme_chk`) |
-| `accent` | text not null | `sun` \| `lake` \| `moss` \| `rose` (check constraint `app_settings_accent_chk`) |
-| `density` | text not null | `comfortable` \| `compact` (check constraint `app_settings_density_chk`) |
+| `accent` | text not null | `sun` \| `lake` \| `moss` \| `rose` (check constraint `app_settings_accent_chk`). The brand color — only "appearance" knob still global. |
 | `favicon_storage_path` | text | path within the `branding-assets` bucket (added in migration 19). Nullable; NULL means no favicon configured and `app/layout.tsx → generateMetadata` emits no `<link rel="icon">`. |
 | `updated_at` | timestamptz | |
 
-The dead `show_leaderboard` column from the original migration 7 was dropped in migration 16 — the corresponding feature toggle was removed from `AppSettings` during the V1 scope refactor and nothing reads it.
+The dead `show_leaderboard` column from the original migration 7 was dropped in migration 16 — the corresponding feature toggle was removed from `AppSettings` during the V1 scope refactor and nothing reads it. The `theme` and `density` columns were dropped in migration 20 (step 7.7c): theme moved to `profiles.theme` (per-user); density was never wired to a DOM hook or CSS rule and isn't worth implementing for an internal tool.
 
 `lib/app-settings.ts` is the only client-side reader/writer; `SettingsProvider` (`components/settings.tsx`) hydrates from it on mount and writes back through it via `updateAppSettings`. AdminSettings debounces text-input writes (500ms idle + flush on blur) so a single edit doesn't fan out to dozens of round-trips. Favicon mutations bypass that path: `setFavicon(file | null)` on the provider routes through `lib/app-settings.ts → uploadFavicon` / `removeFavicon`, which orchestrate the Storage upload and the `favicon_storage_path` column update together (and clean up the old object on replace).
 
@@ -407,6 +406,7 @@ Each step landed as its own migration file under `supabase/migrations/` so each 
 | `20260506000017_bonus_periods.sql` | Step 7.6d: adds the `bonus_periods` table + the `bonus_period_mode` enum + RLS (read-all / write-admin). Includes mode-specific check constraints so recurring rows have a populated weekday set + clock window and one-time rows have a valid timestamptz pair. Backs `lib/bonus-periods.ts` and the new `BonusPeriodsProvider`. |
 | `20260506000018_examples_storage.sql` | Step 7.6b: adds `examples.storage_path`, deletes the placeholder seeds from migration 7, creates the public `example-images` Storage bucket, adds storage.objects RLS policies (auth read; admin write), and adds the `public.reorder_examples(example_kind, uuid[])` RPC for atomic display-order updates. Backs `lib/examples.ts` and the rebuilt `AdminExamples` + `GuideScreen` UIs. |
 | `20260506000019_branding_favicon.sql` | Step 7.7a: adds `app_settings.favicon_storage_path` (nullable) and creates the public `branding-assets` Storage bucket with the same dual-layer RLS pattern migration 18 used for `example-images` (auth read; admin write at both bucket and storage.objects layers). Backs the `uploadFavicon` / `removeFavicon` helpers in `lib/app-settings.ts`, `SettingsProvider.setFavicon`, the Favicon card in Admin → Settings, and the `<link rel="icon">` in `app/layout.tsx → generateMetadata`. |
+| `20260507000020_per_user_theme.sql` | Step 7.7c: adds `profiles.theme` (`text not null default 'light'` + check `profiles_theme_chk` ∈ `('light','dark')`) and drops `app_settings.theme` / `app_settings.density` plus their named CHECK constraints. Theme is now per-user; density was never wired and is gone for good. The existing `profiles_update_self` RLS policy already permits self-edits — its with-check restricts only `role` and `team`, so theme writes pass without policy changes. Backs `lib/current-user.tsx` (now selects `role, theme` and exposes `useUpdateTheme`), `App.tsx` (applies `data-theme` from `useCurrentUser()`), the Brand-color card in Admin → Settings (accent only — Appearance card removed), and the new Appearance card on ProfileScreen. |
 
 Four tests live under `supabase/tests/` (deliberately outside `migrations/` so they aren't applied by `db push`). All four are transactions wrapped in `begin; ... rollback;`:
 

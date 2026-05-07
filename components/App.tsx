@@ -62,7 +62,7 @@ export default function App() {
 
 function AppInner() {
   const { settings } = useSettings();
-  const { role } = useCurrentUser();
+  const { role, theme } = useCurrentUser();
   const [screen, setScreen] = React.useState<string>("review");
   const [mode, setMode] = React.useState<"nav" | "session" | "complete">("nav");
   const [sessionResult, setSessionResult] = React.useState<Record<string, any> | null>(null);
@@ -85,8 +85,18 @@ function AppInner() {
     }
   }, [screen, role]);
 
+  // Theme is per-user (profiles.theme, step 7.7c) — read off useCurrentUser.
+  // Accent is global (app_settings.accent) — admin-curated brand color.
+  // Both flow through `data-theme` / `--sun` on <html> so the legacy CSS
+  // overrides in styles/legacy.css pick them up. Theme briefly stays
+  // `light` until the profile fetch resolves; that's a few hundred ms of
+  // light-mode flash for dark-mode users on cold loads, acceptable for
+  // an internal app.
   React.useEffect(() => {
-    document.documentElement.setAttribute("data-theme", settings.theme);
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  React.useEffect(() => {
     const accentMap: Record<string, string> = {
       sun: "oklch(0.72 0.17 55)",
       lake: "oklch(0.58 0.11 230)",
@@ -94,7 +104,7 @@ function AppInner() {
       rose: "oklch(0.62 0.16 25)",
     };
     document.documentElement.style.setProperty("--sun", accentMap[settings.accent] || accentMap.sun);
-  }, [settings.theme, settings.accent]);
+  }, [settings.accent]);
 
   React.useEffect(() => {
     if (typeof document === "undefined") return;

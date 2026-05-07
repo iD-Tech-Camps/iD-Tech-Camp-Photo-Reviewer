@@ -35,9 +35,9 @@ export type AppSettings = {
   completionMessage: string;
   emptyQueueMessage: string;
 
-  theme: "light" | "dark";
+  // Brand color. Theme is per-user (see profiles.theme + useCurrentUser);
+  // density was dropped in step 7.7c (never wired to the DOM/CSS).
   accent: "sun" | "lake" | "moss" | "rose";
-  density: "comfortable" | "compact";
 
   supportEmail: string;
 
@@ -58,9 +58,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   completionMessage: "Nice work. The next batch will be ready shortly.",
   emptyQueueMessage: "No photos waiting right now. Check back soon.",
 
-  theme: "light",
   accent: "sun",
-  density: "comfortable",
 
   supportEmail: "support@idtech.com",
 
@@ -201,9 +199,7 @@ const DB_BACKED_KEYS = [
   "completionMessage",
   "emptyQueueMessage",
   "supportEmail",
-  "theme",
   "accent",
-  "density",
 ] as const satisfies readonly (keyof DbAppSettings)[];
 
 function pickDbPatch(patch: Partial<AppSettings>): Partial<DbAppSettings> {

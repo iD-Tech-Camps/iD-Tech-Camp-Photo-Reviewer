@@ -3131,62 +3131,34 @@ export function AdminSettings() {
           </div>
 
           <div className="card">
-            <h3 className="card-title" style={{ marginBottom: 14 }}>Appearance</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <FieldRow label="Theme">
-                <div style={{ display: "flex", gap: 4, padding: 3, background: "var(--paper-3)",
-                  borderRadius: 8, width: "fit-content" }}>
-                  {(["light","dark"] as const).map(t => (
-                    <button key={t}
-                      onClick={() => set("theme", t)}
-                      className="btn"
-                      style={{
-                        padding: "6px 14px", fontSize: 12, textTransform: "capitalize",
-                        background: settings.theme === t ? "var(--paper)" : "transparent",
-                        boxShadow: settings.theme === t ? "var(--shadow-sm)" : "none",
-                      }}>{t}</button>
-                  ))}
-                </div>
-              </FieldRow>
-
-              <FieldRow label="Accent color">
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {ACCENT_OPTIONS.map(opt => (
-                    <button key={opt.id}
-                      onClick={() => set("accent", opt.id)}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 8,
-                        padding: "8px 14px",
-                        borderRadius: 8,
-                        border: settings.accent === opt.id ? "1.5px solid var(--ink)" : "1px solid var(--rule)",
-                        background: settings.accent === opt.id ? "var(--paper-3)" : "var(--paper)",
-                        cursor: "pointer", fontSize: 13,
-                      }}>
-                      <span style={{
-                        width: 16, height: 16, borderRadius: "50%",
-                        background: opt.color, flexShrink: 0,
-                      }} />
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </FieldRow>
-
-              <FieldRow label="Density">
-                <div style={{ display: "flex", gap: 4, padding: 3, background: "var(--paper-3)",
-                  borderRadius: 8, width: "fit-content" }}>
-                  {(["comfortable","compact"] as const).map(d => (
-                    <button key={d}
-                      onClick={() => set("density", d)}
-                      className="btn"
-                      style={{
-                        padding: "6px 14px", fontSize: 12, textTransform: "capitalize",
-                        background: settings.density === d ? "var(--paper)" : "transparent",
-                        boxShadow: settings.density === d ? "var(--shadow-sm)" : "none",
-                      }}>{d}</button>
-                  ))}
-                </div>
-              </FieldRow>
+            <h3 className="card-title" style={{ marginBottom: 4 }}>Brand color</h3>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
+              Drives the accent (highlights, primary buttons, badges) across the app.
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {ACCENT_OPTIONS.map(opt => (
+                <button key={opt.id}
+                  onClick={() => set("accent", opt.id)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "8px 14px",
+                    borderRadius: 8,
+                    border: settings.accent === opt.id ? "1.5px solid var(--ink)" : "1px solid var(--rule)",
+                    background: settings.accent === opt.id ? "var(--paper-3)" : "var(--paper)",
+                    cursor: "pointer", fontSize: 13,
+                  }}>
+                  <span style={{
+                    width: 16, height: 16, borderRadius: "50%",
+                    background: opt.color, flexShrink: 0,
+                  }} />
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <div style={{
+              marginTop: 12, fontSize: 11, color: "var(--ink-3)", lineHeight: 1.5,
+            }}>
+              Each reviewer chooses their own light/dark theme on the Profile screen.
             </div>
           </div>
 
