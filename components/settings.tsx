@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/client";
 import {
   fetchAppSettings,
   updateAppSettings,
+  uploadFavicon as dbUploadFavicon,
+  removeFavicon as dbRemoveFavicon,
   type DbAppSettings,
 } from "@/lib/app-settings";
 import {
@@ -38,6 +40,10 @@ export type AppSettings = {
   density: "comfortable" | "compact";
 
   supportEmail: string;
+
+  // Storage path of the admin-uploaded favicon. NULL = no favicon
+  // configured. Mutated through setFavicon (not the regular update path).
+  faviconStoragePath: string | null;
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -57,6 +63,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   density: "comfortable",
 
   supportEmail: "support@idtech.com",
+
+  faviconStoragePath: null,
 };
 
 // Returns the highest-multiplier BonusPeriod that is currently active,
@@ -161,6 +169,12 @@ type Ctx = {
   hydrated: boolean;
   update: (patch: Partial<AppSettings>) => Promise<void>;
   reset: () => Promise<void>;
+  // Upload (or remove) the admin-uploaded favicon. Pass `null` to remove.
+  // Routed through a dedicated method because favicon mutations touch
+  // both `app_settings.favicon_storage_path` and the storage bucket, and
+  // need to be excluded from `reset()` so a "reset copy" click doesn't
+  // wipe a separately-managed brand asset.
+  setFavicon: (file: File | null) => Promise<void>;
   // Surfaced so admins see when a write to the DB fails (e.g. they lost
   // their admin role mid-session and the RLS policy now rejects writes).
   saveError: string | null;
@@ -168,10 +182,15 @@ type Ctx = {
 
 const SettingsContext = React.createContext<Ctx | null>(null);
 
-// Subset of AppSettings keys that map 1:1 to the `app_settings` row.
-// Keeping the list explicit means a future "in-memory only" settings key
-// (e.g. a per-tab debug flag) can be added without accidentally writing
-// to the DB.
+// Subset of AppSettings keys that map 1:1 to the `app_settings` row and
+// flow through the standard `update()` path. Keeping the list explicit
+// means a future "in-memory only" settings key (e.g. a per-tab debug
+// flag) can be added without accidentally writing to the DB.
+//
+// `faviconStoragePath` is intentionally NOT in this list — it's mutated
+// through `setFavicon()` so the favicon's lifecycle (storage upload +
+// old-file cleanup) stays separate from text-field saves and so the
+// reset-to-defaults button doesn't wipe the uploaded asset.
 const DB_BACKED_KEYS = [
   "brandName",
   "brandTagline",
@@ -250,7 +269,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const reset = React.useCallback(async () => {
     setSaveError(null);
     const previous = settings;
-    setSettings(DEFAULT_SETTINGS);
+    // Preserve the uploaded favicon across "reset copy"; only the
+    // text/appearance fields revert. Removing the favicon is a separate
+    // explicit action under its own button.
+    setSettings({ ...DEFAULT_SETTINGS, faviconStoragePath: settings.faviconStoragePath });
     try {
       const updated = await updateAppSettings(supabase, pickDbPatch(DEFAULT_SETTINGS));
       setSettings((prev) => ({ ...prev, ...updated }));
@@ -261,8 +283,32 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     }
   }, [settings, supabase]);
 
+  const setFavicon = React.useCallback(
+    async (file: File | null) => {
+      setSaveError(null);
+      const previous = settings;
+      // Optimistic flip on the path so the UI feels immediate. The
+      // canonical row from the DB lands afterwards and overwrites this.
+      setSettings((prev) => ({
+        ...prev,
+        faviconStoragePath: file ? prev.faviconStoragePath : null,
+      }));
+      try {
+        const updated = file
+          ? await dbUploadFavicon(supabase, file)
+          : await dbRemoveFavicon(supabase);
+        setSettings((prev) => ({ ...prev, ...updated }));
+      } catch (err: any) {
+        console.error("[settings] favicon update failed:", err);
+        setSaveError(err?.message ?? "Couldn't update favicon.");
+        setSettings(previous);
+      }
+    },
+    [settings, supabase],
+  );
+
   return (
-    <SettingsContext.Provider value={{ settings, hydrated, update, reset, saveError }}>
+    <SettingsContext.Provider value={{ settings, hydrated, update, reset, setFavicon, saveError }}>
       {children}
     </SettingsContext.Provider>
   );
@@ -276,6 +322,7 @@ export function useSettings(): Ctx {
       hydrated: false,
       update: async () => {},
       reset: async () => {},
+      setFavicon: async () => {},
       saveError: null,
     };
   }

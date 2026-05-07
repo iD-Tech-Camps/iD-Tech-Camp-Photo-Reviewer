@@ -249,11 +249,12 @@ Same single-row pattern. Migration 16 (sub-step 7.6c) extended this to cover eve
 | `theme` | text not null | `light` \| `dark` (check constraint `app_settings_theme_chk`) |
 | `accent` | text not null | `sun` \| `lake` \| `moss` \| `rose` (check constraint `app_settings_accent_chk`) |
 | `density` | text not null | `comfortable` \| `compact` (check constraint `app_settings_density_chk`) |
+| `favicon_storage_path` | text | path within the `branding-assets` bucket (added in migration 19). Nullable; NULL means no favicon configured and `app/layout.tsx → generateMetadata` emits no `<link rel="icon">`. |
 | `updated_at` | timestamptz | |
 
 The dead `show_leaderboard` column from the original migration 7 was dropped in migration 16 — the corresponding feature toggle was removed from `AppSettings` during the V1 scope refactor and nothing reads it.
 
-`lib/app-settings.ts` is the only client-side reader/writer; `SettingsProvider` (`components/settings.tsx`) hydrates from it on mount and writes back through it via `updateAppSettings`. AdminSettings debounces text-input writes (500ms idle + flush on blur) so a single edit doesn't fan out to dozens of round-trips.
+`lib/app-settings.ts` is the only client-side reader/writer; `SettingsProvider` (`components/settings.tsx`) hydrates from it on mount and writes back through it via `updateAppSettings`. AdminSettings debounces text-input writes (500ms idle + flush on blur) so a single edit doesn't fan out to dozens of round-trips. Favicon mutations bypass that path: `setFavicon(file | null)` on the provider routes through `lib/app-settings.ts → uploadFavicon` / `removeFavicon`, which orchestrate the Storage upload and the `favicon_storage_path` column update together (and clean up the old object on replace).
 
 ### `bonus_periods`
 Multi-row table for the Points Multiplier Bonus schedule (migration 17, sub-step 7.6d). Replaces the previous localStorage-backed `bonusPeriods: BonusPeriod[]` slice on `AppSettings`.
@@ -296,9 +297,15 @@ Mode-specific check constraints (`bonus_periods_recurring_complete`, `bonus_peri
 
 ### Storage
 
-The `example-images` bucket holds the actual image files for the example library. Created by migration 18.
+Two public-read / admin-write buckets, both following the same pattern (bucket-level `public = true` so reads can use plain public URLs, plus per-bucket RLS on `storage.objects` enforcing admin-only writes via `public.is_admin()`).
 
-- **Public read.** Bucket is created with `public = true` so the Guide screen can render images via the plain public URL (`storage.from('example-images').getPublicUrl(path).data.publicUrl`) without signing each one. The app already gates the Guide screen behind sign-in via middleware, so unauthenticated users never see the URLs in the first place.
+**`example-images`** holds the actual image files for the example library. Created by migration 18.
+
+**`branding-assets`** holds admin-uploaded brand artifacts. Currently used for the favicon (one file per app, path stored in `app_settings.favicon_storage_path`); any future single-artifact brand uploads (header logo, login splash) would land here too. Created by migration 19.
+
+For both buckets:
+
+- **Public read.** Created with `public = true` so consumers (Guide screen for examples, browser favicon load for branding) can render via plain public URLs (`storage.from('<bucket>').getPublicUrl(path).data.publicUrl`) without signing. The app already gates everything behind sign-in via middleware, so unauthenticated users never see the URLs in the first place — except the favicon, which is intentionally accessible pre-auth so the browser tab icon loads on /login (it just isn't enumerable, which is fine).
 - **Storage RLS** (separate from table RLS — both have to be set):
   - SELECT: any authenticated user (mirrors the bucket-level public read; the policy is what authenticated *clients* hit before the public-read kicks in).
   - INSERT / UPDATE / DELETE: admin only via `public.is_admin()`.
@@ -399,6 +406,7 @@ Each step landed as its own migration file under `supabase/migrations/` so each 
 | `20260506000016_app_settings_extension.sql` | Step 7.6c: extends `app_settings` with the reviewer-copy strings, `support_email`, and the appearance triple (theme/accent/density) — backfills DEFAULT_SETTINGS values into the singleton row, then locks the new columns NOT NULL with check constraints. Drops the dead `show_leaderboard` column. Backs `lib/app-settings.ts` and the new `SettingsProvider` write path. |
 | `20260506000017_bonus_periods.sql` | Step 7.6d: adds the `bonus_periods` table + the `bonus_period_mode` enum + RLS (read-all / write-admin). Includes mode-specific check constraints so recurring rows have a populated weekday set + clock window and one-time rows have a valid timestamptz pair. Backs `lib/bonus-periods.ts` and the new `BonusPeriodsProvider`. |
 | `20260506000018_examples_storage.sql` | Step 7.6b: adds `examples.storage_path`, deletes the placeholder seeds from migration 7, creates the public `example-images` Storage bucket, adds storage.objects RLS policies (auth read; admin write), and adds the `public.reorder_examples(example_kind, uuid[])` RPC for atomic display-order updates. Backs `lib/examples.ts` and the rebuilt `AdminExamples` + `GuideScreen` UIs. |
+| `20260506000019_branding_favicon.sql` | Step 7.7a: adds `app_settings.favicon_storage_path` (nullable) and creates the public `branding-assets` Storage bucket with the same dual-layer RLS pattern migration 18 used for `example-images` (auth read; admin write at both bucket and storage.objects layers). Backs the `uploadFavicon` / `removeFavicon` helpers in `lib/app-settings.ts`, `SettingsProvider.setFavicon`, the Favicon card in Admin → Settings, and the `<link rel="icon">` in `app/layout.tsx → generateMetadata`. |
 
 Four tests live under `supabase/tests/` (deliberately outside `migrations/` so they aren't applied by `db push`). All four are transactions wrapped in `begin; ... rollback;`:
 

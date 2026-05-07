@@ -3,9 +3,15 @@
 import React from "react";
 import { Icon } from "@/components/Icon";
 import { BonusPennant, PageHeader, useActiveBonusPeriod } from "@/components/Shell";
-import { SESSION_PHOTOS, PhotoPlaceholder } from "@/components/data";
+import { PhotoPlaceholder } from "@/components/data";
 import { useSettings, fillTemplate } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
+
+// Decorative thumbnail strip on the home screen — purely visual stand-ins
+// until real SmugMug thumbnails land in step 8. The ids are picked so each
+// one hashes to a different palette in PhotoPlaceholder; the labels are
+// hidden anyway (hideLabel).
+const HERO_THUMB_IDS = ["p0","p1","p2","p3","p4","p5","p6","p7","p8","p9"];
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -59,8 +65,8 @@ export function HomeScreen({
             display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8,
             marginBottom: 28,
           }}>
-            {SESSION_PHOTOS.slice(0, 10).map(p => (
-              <div key={p.id} style={{
+            {HERO_THUMB_IDS.map(id => (
+              <div key={id} style={{
                 aspectRatio: "3/2",
                 borderRadius: 6,
                 overflow: "hidden",
@@ -68,7 +74,7 @@ export function HomeScreen({
                 background: "var(--paper-3)",
                 boxShadow: "var(--shadow-sm)",
               }}>
-                <PhotoPlaceholder photo={p} compact hideLabel />
+                <PhotoPlaceholder photo={{ id }} compact hideLabel />
               </div>
             ))}
           </div>

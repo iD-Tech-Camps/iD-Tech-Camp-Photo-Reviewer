@@ -6,6 +6,7 @@ import { PageHeader, type ToastApi } from "@/components/Shell";
 import { useSettings, AppSettings, BonusPeriod, BonusPeriodMode } from "@/components/settings";
 import { useCurrentUser, ROLE_LABEL } from "@/lib/current-user";
 import { createClient } from "@/lib/supabase/client";
+import { brandingAssetUrl } from "@/lib/app-settings";
 import { fetchReviewerRoster, updateReviewerProfile, type ReviewerStats } from "@/lib/profile";
 import type { Role } from "@/lib/current-user";
 import {
@@ -2886,14 +2887,51 @@ function DebouncedTextInput({
   );
 }
 
+// Client-side favicon upload constraints. PNG only (covers 99% of admin
+// needs and keeps the icons metadata type stable); 1 MB cap because a
+// favicon shouldn't be heavier than a small CSS file. The bucket RLS
+// allows whatever the admin uploads — these are UX-side guardrails.
+const FAVICON_MAX_BYTES = 1 * 1024 * 1024;
+const FAVICON_ACCEPT = "image/png";
+
 export function AdminSettings() {
-  const { settings, hydrated, update, reset, saveError } = useSettings();
+  const { settings, hydrated, update, reset, setFavicon, saveError } = useSettings();
   const { firstName } = useCurrentUser();
   const previewName = firstName || "Riley";
   const [confirmReset, setConfirmReset] = React.useState(false);
+  const [faviconBusy, setFaviconBusy] = React.useState(false);
+  const [faviconError, setFaviconError] = React.useState<string | null>(null);
+  const faviconFileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const set = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) =>
     update({ [key]: value } as Partial<AppSettings>);
+
+  const supabaseRef = React.useRef<ReturnType<typeof createClient> | null>(null);
+  if (!supabaseRef.current) supabaseRef.current = createClient();
+  const faviconUrl = settings.faviconStoragePath
+    ? brandingAssetUrl(supabaseRef.current, settings.faviconStoragePath)
+    : null;
+
+  const onPickFaviconFile = (file: File | null) => {
+    setFaviconError(null);
+    if (!file) return;
+    if (file.type !== FAVICON_ACCEPT) {
+      setFaviconError("Favicon must be a PNG.");
+      return;
+    }
+    if (file.size > FAVICON_MAX_BYTES) {
+      setFaviconError("Favicon must be 1 MB or smaller.");
+      return;
+    }
+    setFaviconBusy(true);
+    setFavicon(file).finally(() => setFaviconBusy(false));
+  };
+
+  const onRemoveFavicon = () => {
+    setFaviconError(null);
+    setFaviconBusy(true);
+    setFavicon(null).finally(() => setFaviconBusy(false));
+  };
 
   return (
     <>
@@ -2964,6 +3002,77 @@ export function AdminSettings() {
                   transform={(raw) => raw.slice(0, 2)}
                   maxLength={2} />
               </FieldRow>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3 className="card-title" style={{ marginBottom: 4 }}>Favicon</h3>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
+              Shown in the browser tab. PNG, max 1 MB. Leave empty to show no icon.
+            </div>
+            <input
+              ref={faviconFileInputRef}
+              type="file"
+              accept={FAVICON_ACCEPT}
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.target.files?.[0] ?? null;
+                onPickFaviconFile(file);
+                e.target.value = "";
+              }}
+            />
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div
+                style={{
+                  width: 56, height: 56, borderRadius: 8,
+                  background: "var(--paper-3)",
+                  border: "1px solid var(--rule)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0,
+                  overflow: "hidden",
+                }}
+              >
+                {faviconUrl ? (
+                  <img
+                    src={faviconUrl}
+                    alt="Current favicon"
+                    style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                  />
+                ) : (
+                  <span style={{ fontSize: 11, color: "var(--ink-3)" }}>None</span>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  className="btn"
+                  disabled={faviconBusy}
+                  onClick={() => faviconFileInputRef.current?.click()}
+                >
+                  {faviconUrl ? "Replace" : "Upload"}
+                </button>
+                {faviconUrl && (
+                  <button
+                    className="btn btn-ghost"
+                    disabled={faviconBusy}
+                    onClick={onRemoveFavicon}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+            {faviconError && (
+              <div style={{
+                marginTop: 10, fontSize: 12, color: "var(--rose)",
+              }}>
+                {faviconError}
+              </div>
+            )}
+            <div style={{
+              marginTop: 10, fontSize: 11, color: "var(--ink-3)", lineHeight: 1.5,
+            }}>
+              Browsers cache favicons aggressively — after a change, reviewers
+              may need to hard-refresh before they see the new icon.
             </div>
           </div>
 

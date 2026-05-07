@@ -113,7 +113,7 @@ The last row of each is a sentinel string. `smoke test passed`, `e2e review flow
 
 ```
 app/                  Next.js App Router entry (layout, page, login, auth/callback)
-components/           Shared UI (Icon, Shell, settings, App, data — mock constants)
+components/           Shared UI (Icon, Shell, settings, App, data — gradient placeholder renderer)
 components/screens/   Top-level screens (Home, Review, FlagReview, Leaderboard, Profile, Guide, Admin)
 lib/
   current-user.tsx    UserProvider, useCurrentUser, Role type, ROLE_LABEL — reads role from profiles

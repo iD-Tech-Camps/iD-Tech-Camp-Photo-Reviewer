@@ -100,7 +100,7 @@ function AppInner() {
     if (typeof document === "undefined") return;
     const name = settings.brandName.trim();
     const tag = settings.brandTagline.trim();
-    document.title = name && tag ? `${name} · ${tag}` : name || tag || "Photo Review";
+    document.title = name && tag ? `${name} · ${tag}` : name || tag || "iD Tech Photo Reviewer";
   }, [settings.brandName, settings.brandTagline]);
 
   const handleStart = () => setMode("session");
