@@ -5,11 +5,11 @@
  *
  * The call is fire-and-forget. The user's review is already saved and
  * the queue has already advanced by the time we run; the SmugMug-side
- * folder move is a deferred side effect. We surface failures only as a
- * console warning here — the route handler additionally records a
- * `quarantine_move` row in `sync_log` so admins can spot drift on
- * Admin → SmugMug → Sync log without seeing a noisy red toast in the
- * reviewer flow.
+ * `Image.Hidden` toggle is a deferred side effect. We surface failures
+ * only as a console warning here — the route handler additionally
+ * records a `quarantine_move` row in `sync_log` so admins can spot
+ * drift on Admin → SmugMug → Sync log without seeing a noisy red toast
+ * in the reviewer flow.
  *
  * Used by:
  *  - ReviewScreen.commitDecision  → after every flag-with-quarantine

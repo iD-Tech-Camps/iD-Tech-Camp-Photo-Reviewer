@@ -40,7 +40,7 @@ Both are also set in Vercel (all environments). Domain-restriction is enforced a
 Reviewers see one photo at a time and have two actions:
 
 - **Approve** (`A`) — share-worthy. Pick a star rating (1–5) and optional positive tags.
-- **Flag** (`F`) — anything that isn't a clear approve. Tag every issue you see (quality, safety, consent, etc.) and add an optional reason note. A senior reviewer makes the final call. The flag dialog also exposes a **Quarantine** checkbox; tick it for clear safety / dress-code / consent issues. The `reviews_update_quarantine` trigger flips `photos.is_quarantined`, and a fire-and-forget call to `/api/smugmug/quarantine` physically moves the SmugMug image into a single global Unlisted "Photo Reviewer — Quarantined" album at the SmugMug user root so it's no longer visible in the public camp folder. Senior accept on Flag review moves it back to its camp_week album; senior delete leaves it in quarantine for an admin to clean up on SmugMug. Failures don't block the reviewer — they land as a `quarantine_move` row on `sync_log`, surfaced under Admin → SmugMug → Sync log.
+- **Flag** (`F`) — anything that isn't a clear approve. Tag every issue you see (quality, safety, consent, etc.) and add an optional reason note. A senior reviewer makes the final call. The flag dialog also exposes a **Quarantine** checkbox; tick it for clear safety / dress-code / consent issues. The `reviews_update_quarantine` trigger flips `photos.is_quarantined`, and a fire-and-forget call to `/api/smugmug/quarantine` PATCHes the SmugMug image's `Hidden` flag to `true` so it stops appearing in public album views and search (the image stays in its camp_week album with all URLs intact). Senior accept on Flag review flips `Hidden` back to `false`; senior delete leaves it `Hidden=true` for an admin to clean up on SmugMug. Failures don't block the reviewer — they land as a `quarantine_move` row on `sync_log`, surfaced under Admin → SmugMug → Sync log.
 
 There is no separate reject action — if a photo isn't acceptable, flag it.
 
@@ -91,7 +91,7 @@ Three actions per photo:
 
 ### SmugMug import (Admin)
 
-`Admin → SmugMug import` is the operational dashboard for the photo pipeline: settings (mode, season-start / earliest-fetch dates, queue order), a "Sync now" button + folder-tree picker for prioritizing weeks at the top of the reviewer queue, the live pending queue with all/priority/recent filters, and a sync-log table that shows the last 20 runs (scheduled cron, manual, mode-switch, priority-add, and `quarantine_move` per-photo folder reconciles) with expandable error details on the failed rows.
+`Admin → SmugMug import` is the operational dashboard for the photo pipeline: settings (mode, season-start / earliest-fetch dates, queue order), a "Sync now" button + folder-tree picker for prioritizing weeks at the top of the reviewer queue, the live pending queue with all/priority/recent filters, and a sync-log table that shows the last 20 runs (scheduled cron, manual, mode-switch, priority-add, and `quarantine_move` per-photo `Image.Hidden` toggles) with expandable error details on the failed rows.
 
 ## Database
 
@@ -105,15 +105,16 @@ npx supabase db push --linked             # apply
 Four test files under `supabase/tests/` (hand-run, not migrations):
 
 ```bash
-npx supabase db query --file supabase/tests/smoke_test.sql           --linked  # schema-level
-npx supabase db query --file supabase/tests/e2e_review_flow.sql      --linked  # reviewer flow under role=authenticated
-npx supabase db query --file supabase/tests/e2e_flag_review_flow.sql --linked  # senior flow under role=authenticated
-npx supabase db query --file supabase/tests/e2e_reviewer_stats.sql   --linked  # reviewer_stats view under role=authenticated
+npx supabase db query --file supabase/tests/smoke_test.sql              --linked  # schema-level
+npx supabase db query --file supabase/tests/e2e_review_flow.sql         --linked  # reviewer flow under role=authenticated
+npx supabase db query --file supabase/tests/e2e_flag_review_flow.sql    --linked  # senior flow under role=authenticated
+npx supabase db query --file supabase/tests/e2e_reviewer_stats.sql      --linked  # reviewer_stats view under role=authenticated
+npx supabase db query --file supabase/tests/e2e_smugmug_sync_flow.sql   --linked  # SmugMug sync engine's DB contract (6 scenarios)
 ```
 
-The last row of each is a sentinel string. `smoke test passed`, `e2e review flow passed`, `flag review flow passed`, or `reviewer stats view passed` means OK; anything else is an assertion failure inside the `do $$ ... $$` block.
+The last row of each is a sentinel string. `smoke test passed`, `e2e review flow passed`, `flag review flow passed`, `reviewer stats view passed`, or `e2e smugmug sync flow passed` means OK; anything else is an assertion failure inside the `do $$ ... $$` block.
 
-> **If you write a new test that exercises app-style writes, pin the role to `authenticated` and set `request.jwt.claims`** — `supabase db query` runs as the service role by default, which bypasses RLS entirely. See `e2e_review_flow.sql` for the pattern.
+> **If you write a new test that exercises app-style writes, pin the role to `authenticated` and set `request.jwt.claims`** — `supabase db query` runs as the service role by default, which bypasses RLS entirely. See `e2e_review_flow.sql` for the pattern (it also illustrates how to seed fixtures as service role *before* flipping to authenticated for the actual reviewed-row inserts).
 
 ## Project structure
 
@@ -134,7 +135,7 @@ lib/
 middleware.ts         Root middleware → lib/supabase/middleware.ts (session refresh + auth gating)
 styles/legacy.css     Source of truth for visual styling (Tailwind installed but unused)
 supabase/
-  migrations/         23 SQL migrations, applied to the work-account project
+  migrations/         24 SQL migrations, applied to the work-account project
   tests/              smoke (service role) + three e2e tests (run under role=authenticated)
 spec/
   PROJECT_CONTEXT.md  Working-session handoff doc — read this first

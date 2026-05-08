@@ -7,13 +7,46 @@
 --      to 'approved', is_quarantined back to false)
 --   4. Senior delete (decision='delete' moves photo to 'deleted')
 --
--- Runs under the authenticated role with JWT claims pinned (see the same
--- preamble in e2e_review_flow.sql for context on why the role pin matters).
--- Wrapped in begin/rollback so the dev queue is untouched. Last row should be
--- 'flag review flow passed'.
+-- The review inserts run under the authenticated role with JWT claims
+-- pinned (see e2e_review_flow.sql for the role-pin rationale).
+-- Wrapped in begin/rollback so the dev queue is untouched. Last row
+-- should be 'flag review flow passed'.
+--
+-- Step 8.8 (May 2026): the test used to depend on the placeholder
+-- photos seeded by migration 13. Migration 25 dropped those, so the
+-- test now seeds its own division/location/week/photo fixtures up
+-- front (under the service role) before flipping to authenticated.
+-- The fixture division name is intentionally distinct from any real
+-- one so the join assertion below catches accidental cross-talk.
 
 begin;
 
+-- ── Fixture rows (service role) ─────────────────────────────────────
+insert into public.divisions (id, name, smugmug_folder_id) values
+  ('bbbbbbbb-2222-2222-2222-222222222221', 'E2E Flag Test Division', 'e2e-flag-div');
+insert into public.locations (id, division_id, name, smugmug_folder_id) values
+  ('bbbbbbbb-2222-2222-2222-222222222222',
+   'bbbbbbbb-2222-2222-2222-222222222221',
+   'E2E Flag Test Location',
+   'e2e-flag-loc');
+insert into public.camp_weeks (id, location_id, name, smugmug_folder_id, starts_on, ends_on) values
+  ('bbbbbbbb-2222-2222-2222-222222222223',
+   'bbbbbbbb-2222-2222-2222-222222222222',
+   'E2E Flag Test Week',
+   'e2e-flag-week',
+   current_date - 1,
+   current_date + 5);
+insert into public.photos (id, camp_week_id, smugmug_image_id, captured_at) values
+  ('bbbbbbbb-2222-2222-2222-222222222224',
+   'bbbbbbbb-2222-2222-2222-222222222223',
+   'e2e-flag-img-flag',
+   now()),
+  ('bbbbbbbb-2222-2222-2222-222222222225',
+   'bbbbbbbb-2222-2222-2222-222222222223',
+   'e2e-flag-img-delete',
+   now());
+
+-- ── Switch to authenticated role for the review inserts ────────────
 set local role authenticated;
 set local request.jwt.claims to
   '{"sub": "1e6c7363-f8ea-4e5d-92a5-6b2e64bb2589", "role": "authenticated"}';
@@ -21,8 +54,8 @@ set local request.jwt.claims to
 do $$
 declare
   v_user_id uuid := '1e6c7363-f8ea-4e5d-92a5-6b2e64bb2589'; -- zeckstein@idtech.com
-  v_flag_photo  uuid;
-  v_del_photo   uuid;
+  v_flag_photo  uuid := 'bbbbbbbb-2222-2222-2222-222222222224';
+  v_del_photo   uuid := 'bbbbbbbb-2222-2222-2222-222222222225';
   v_flag_rev    uuid;
   v_accept_rev  uuid;
   v_del_flag    uuid;
@@ -34,9 +67,6 @@ declare
   v_join_loc    text;
   v_join_tag_n  int;
 begin
-  select id into v_flag_photo from public.photos where smugmug_image_id = 'placeholder-IMG_4823';
-  select id into v_del_photo  from public.photos where smugmug_image_id = 'placeholder-IMG_4824';
-
   -- ── 1. Flag the first photo (with quarantine + 2 tags + a note) ────────
   insert into public.reviews (photo_id, reviewer_id, decision, note, quarantine)
   values (v_flag_photo, v_user_id, 'flag', 'needs senior review', true)
@@ -76,7 +106,7 @@ begin
   if v_join_count <> 1 then
     raise exception 'flag join: expected 1 row, got %', v_join_count;
   end if;
-  if v_join_div <> 'iD Tech Camps' or v_join_loc <> 'Adelphi University' then
+  if v_join_div <> 'E2E Flag Test Division' or v_join_loc <> 'E2E Flag Test Location' then
     raise exception 'flag join: wrong division/location: % / %', v_join_div, v_join_loc;
   end if;
   if v_join_tag_n <> 2 then

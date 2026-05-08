@@ -1,16 +1,24 @@
--- One-off server-side check for the step-6 review wiring. Inserts an approve
+-- Server-side check for the step-6 review wiring. Inserts an approve
 -- review (with rating + positive tag) and a flag review (with quarantine=true,
 -- a note, and two negative tags) using the real authenticated user's id, then
 -- asserts every trigger and check constraint produced the expected side
 -- effects. Wrapped in `begin; ... rollback;` so the dev queue is unaffected.
 --
--- IMPORTANT: This test runs under the `authenticated` role with the user's
--- JWT claims pinned, so RLS is in force exactly as it is in production. The
--- earlier version of this test ran as the service role (the default for
--- `supabase db query`) and silently missed migration 6's trigger-vs-RLS bug:
--- the trigger's inner UPDATE on `photos` was zero-rowed by RLS, but as
--- service role the UPDATE went through and the test passed. Migration 14
--- marks those triggers SECURITY DEFINER. Don't relax the role pin below.
+-- IMPORTANT: This test runs the review inserts under the `authenticated`
+-- role with the user's JWT claims pinned, so RLS is in force exactly as
+-- it is in production. The earlier version of this test ran as the
+-- service role (the default for `supabase db query`) and silently
+-- missed migration 6's trigger-vs-RLS bug: the trigger's inner UPDATE
+-- on `photos` was zero-rowed by RLS, but as service role the UPDATE
+-- went through and the test passed. Migration 14 marks those triggers
+-- SECURITY DEFINER. Don't relax the role pin below.
+--
+-- Step 8.8 (May 2026): the test used to depend on the placeholder
+-- photos seeded by migration 13. Migration 25 dropped those, so the
+-- test now seeds its own division/location/week/photo fixtures up
+-- front (under the service role), then flips to the authenticated
+-- role for the review inserts. Fixture rows are rolled back at the
+-- end of the transaction so nothing leaks between runs.
 --
 -- Run with:
 --   npx supabase db query --file supabase/tests/e2e_review_flow.sql --linked
@@ -19,6 +27,38 @@
 
 begin;
 
+-- ── Fixture rows (service role) ─────────────────────────────────────
+-- Use predictable test-prefixed identifiers so any leak from a
+-- mid-rolled-back run is obvious. The captured_at value is set to a
+-- recent date so any "newest_first" queue ordering test that
+-- happens to filter by date doesn't accidentally exclude the row.
+insert into public.divisions (id, name, smugmug_folder_id) values
+  ('aaaaaaaa-1111-1111-1111-111111111111', 'E2E Review Test Division', 'e2e-review-div');
+insert into public.locations (id, division_id, name, smugmug_folder_id) values
+  ('aaaaaaaa-1111-1111-1111-111111111112',
+   'aaaaaaaa-1111-1111-1111-111111111111',
+   'E2E Review Test Location',
+   'e2e-review-loc');
+insert into public.camp_weeks (id, location_id, name, smugmug_folder_id, starts_on, ends_on) values
+  ('aaaaaaaa-1111-1111-1111-111111111113',
+   'aaaaaaaa-1111-1111-1111-111111111112',
+   'E2E Review Test Week',
+   'e2e-review-week',
+   current_date - 1,
+   current_date + 5);
+insert into public.photos (id, camp_week_id, smugmug_image_id, caption, captured_at) values
+  ('aaaaaaaa-1111-1111-1111-111111111114',
+   'aaaaaaaa-1111-1111-1111-111111111113',
+   'e2e-review-img-approve',
+   'approve fixture',
+   now()),
+  ('aaaaaaaa-1111-1111-1111-111111111115',
+   'aaaaaaaa-1111-1111-1111-111111111113',
+   'e2e-review-img-flag',
+   'flag fixture',
+   now());
+
+-- ── Switch to authenticated role for the review inserts ────────────
 set local role authenticated;
 set local request.jwt.claims to
   '{"sub": "1e6c7363-f8ea-4e5d-92a5-6b2e64bb2589", "role": "authenticated"}';
@@ -26,8 +66,8 @@ set local request.jwt.claims to
 do $$
 declare
   v_user_id uuid := '1e6c7363-f8ea-4e5d-92a5-6b2e64bb2589'; -- zeckstein@idtech.com
-  v_approve_photo uuid;
-  v_flag_photo    uuid;
+  v_approve_photo uuid := 'aaaaaaaa-1111-1111-1111-111111111114';
+  v_flag_photo    uuid := 'aaaaaaaa-1111-1111-1111-111111111115';
   v_approve_rev   uuid;
   v_flag_rev      uuid;
   v_status        text;
@@ -39,9 +79,6 @@ declare
 begin
   select last_active_at into v_last_before
   from public.profiles where id = v_user_id;
-
-  select id into v_approve_photo from public.photos where smugmug_image_id = 'placeholder-IMG_4821';
-  select id into v_flag_photo    from public.photos where smugmug_image_id = 'placeholder-IMG_4822';
 
   -- ── Approve flow ─────────────────────────────────────────────
   insert into public.reviews (photo_id, reviewer_id, decision, rating)

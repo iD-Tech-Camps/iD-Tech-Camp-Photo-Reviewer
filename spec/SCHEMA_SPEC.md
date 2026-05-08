@@ -1,6 +1,6 @@
 # iD Photo Reviewer — Database Schema Spec (Step 5 + step-6 fixes)
 
-> **Status: implemented.** This document was originally the brief for step 5 and is now the reference for what's actually in the database. The schema lives in `supabase/migrations/20260505000001_*.sql` through `supabase/migrations/20260507000023_*.sql`, applied to the work-account Supabase project (`idtech-photo-reviewer`). The few places where the implementation diverges from the original brief are called out inline with **`Implementation note`** blocks.
+> **Status: implemented.** This document was originally the brief for step 5 and is now the reference for what's actually in the database. The schema lives in `supabase/migrations/20260505000001_*.sql` through `supabase/migrations/20260507000025_*.sql`, applied to the work-account Supabase project (`idtech-photo-reviewer`). The few places where the implementation diverges from the original brief are called out inline with **`Implementation note`** blocks.
 >
 > **Two material changes since the original step-5 brief landed:**
 >
@@ -13,7 +13,7 @@
 
 The app has two operating purposes that share one data model:
 
-1. **Public-facing pipeline.** Reviewers triage photos uploaded to SmugMug by camp directors, marking them `approve` (great for parents) or `flag` (a senior should look). Photos are public by default; the only time a flag affects parent visibility is when the reviewer explicitly checks "quarantine" on a flag — in which case the photo moves to a hidden SmugMug folder until a senior resolves it.
+1. **Public-facing pipeline.** Reviewers triage photos uploaded to SmugMug by camp directors, marking them `approve` (great for parents) or `flag` (a senior should look). Photos are public by default; the only time a flag affects parent visibility is when the reviewer explicitly checks "quarantine" on a flag — in which case the photo's SmugMug `Image.Hidden` flag is flipped to `true` so it stops appearing in public album views and search until a senior resolves it.
 2. **Internal QA pipeline.** During the camp week (typically Tuesdays), senior reviewers look at incoming photos to spot brand/setup/safety issues. They use the same flag mechanism as everyone else; tags like `off-brand` route notifications to the right specialist senior. Acting on the underlying ops issue happens outside this app.
 
 There are three roles: `reviewer` (default), `senior`, and `admin`. Seniors do everything reviewers do plus they can resolve flags by approving (re-rating, re-tagging) or deleting. Admins additionally manage tags, examples, points, routing rules, and app settings.
@@ -60,7 +60,7 @@ Notes:
 - `photo_status` is the photo's *workflow* state. Visibility (`is_quarantined`) is a separate dimension — a `flagged` photo may or may not be quarantined.
 - `decision` covers all three actions a person can take on a photo. There is no separate "accept" decision; a senior bringing a flagged photo back is just performing `approve` (with rating + tags, same as any reviewer).
 
-Migration 17 (sub-step 7.6d) added a `bonus_period_mode` enum (`recurring` \| `one-time`) used by `bonus_periods`. Migration 21 (step 8.2) added four SmugMug-import enums (`smugmug_mode`, `queue_order`, `sync_kind`, `sync_status`) used by `smugmug_config` and `sync_log` — see those table sections for membership. Migration 23 (step 8.7) appended `quarantine_move` to `sync_kind` for the per-photo SmugMug folder move audit trail.
+Migration 17 (sub-step 7.6d) added a `bonus_period_mode` enum (`recurring` \| `one-time`) used by `bonus_periods`. Migration 21 (step 8.2) added four SmugMug-import enums (`smugmug_mode`, `queue_order`, `sync_kind`, `sync_status`) used by `smugmug_config` and `sync_log` — see those table sections for membership. Migration 23 (step 8.7) appended `quarantine_move` to `sync_kind` for the per-photo SmugMug visibility-toggle audit trail; the originally-planned `quarantine_album_key` column on `smugmug_config` was added by 23 and dropped again by migration 24 once the implementation simplified to `Image.Hidden` and no longer needed a cached album.
 
 ---
 
@@ -128,7 +128,7 @@ Index `camp_weeks_dates_idx` on `(starts_on, ends_on)` for date-range queries.
 | `height` | int | |
 | `current_status` | photo_status not null | `default 'pending'` — maintained by trigger |
 | `is_quarantined` | bool not null | `default false` — maintained by trigger |
-| `smugmug_folder_id` | text | which SmugMug folder it's currently in (public week folder OR hidden quarantine folder) |
+| `smugmug_folder_id` | text | the SmugMug album the photo lives in (always its camp_week album — quarantine is now expressed as `Image.Hidden=true` on the SmugMug image, which doesn't move the image between albums). |
 | `priority` | int not null | `default 0` (added in migration 21, step 8.2). The Admin → SmugMug → "Prioritize in queue" action (step 8.5) calls `/api/smugmug/prioritize` to bulk-set `priority = 1` on every pending photo under a picked division/location/camp_week so those rows float to the top of the reviewer queue. The 8.4 import job leaves it at 0 for scheduled adds. **No per-row unprioritize in V1** — the only reset is the mode-switch "clear the queue" dialog, which deletes all unreviewed pending photos so the next sync rebuilds at `priority = 0`. |
 | `created_at` | timestamptz | `default now()` |
 | `updated_at` | timestamptz | `default now()` |
@@ -315,7 +315,6 @@ Single-row table backing the Admin → SmugMug screen's settings card. Same `id 
 | `queue_order` | queue_order not null | `newest_first` \| `oldest_first`. Selects the `captured_at` direction for the reviewer queue's `order by priority desc, captured_at <dir>` clause. `default 'newest_first'`. |
 | `last_sync_at` | timestamptz | mirrored from the most recent `sync_log.finished_at` for fast settings-card render. Maintained by the 8.4 sync handler. |
 | `last_sync_status` | text | plain text (not the `sync_status` enum) so the summary line can carry richer context than the strict three-value membership — e.g. `"success · +147 photos"` or `"partial · 3 errors, see log"`. |
-| `quarantine_album_key` | text | nullable; cached `AlbumKey` of the global Unlisted "Photo Reviewer — Quarantined" album at the SmugMug user root. **Added by migration 23 (step 8.7).** Lazy-populated by the first call to `/api/smugmug/quarantine` that needs to quarantine a photo (the route handler does a find-or-create against the SmugMug user root and persists the key here under a race-safe `update ... where id=1 and quarantine_album_key is null` so concurrent first-quarantines converge on a single album). Once set, every subsequent quarantine reuses the cached key with no SmugMug folder lookups. NULL means "no quarantine has ever happened in this environment yet"; clearing it manually + re-quarantining is the recovery path if the album gets deleted on SmugMug. |
 | `updated_at` | timestamptz | `default now()` |
 
 RLS follows the established read-by-everyone / write-by-admins pattern (policies `smugmug_config_select_authenticated`, `smugmug_config_write_admin`). Seeded as `(1, 'summer', date_trunc('year', current_date)::date, 'newest_first')`.
@@ -328,7 +327,7 @@ Append-only audit trail of SmugMug sync runs. Backs the sync-log table at the bo
 | `id` | uuid pk | `default gen_random_uuid()` |
 | `started_at` | timestamptz not null | `default now()` |
 | `finished_at` | timestamptz | nullable so an in-flight run can be `INSERT … RETURNING id` and updated when it completes |
-| `kind` | sync_kind not null | `scheduled` \| `manual` \| `mode_switch` \| `priority_add` \| `quarantine_move`. `scheduled` is the daily Vercel Cron run; `manual` is the admin's "Sync now" button; `mode_switch` is the bulk-clear that runs when the admin switches mode and chose "clear the queue"; `priority_add` is the manual "Add folder to queue" path; `quarantine_move` (added migration 23, step 8.7) is one row per call to `/api/smugmug/quarantine` — both successful moves (image relocated into / out of the global Quarantined album) and SmugMug-side failures land here, so admins can spot drift on the Sync log card without instrumenting a separate surface. |
+| `kind` | sync_kind not null | `scheduled` \| `manual` \| `mode_switch` \| `priority_add` \| `quarantine_move`. `scheduled` is the daily Vercel Cron run; `manual` is the admin's "Sync now" button; `mode_switch` is the bulk-clear that runs when the admin switches mode and chose "clear the queue"; `priority_add` is the manual "Add folder to queue" path; `quarantine_move` (added migration 23, step 8.7) is one row per call to `/api/smugmug/quarantine` — both successful `Image.Hidden` toggles and SmugMug-side failures land here, so admins can spot drift on the Sync log card without instrumenting a separate surface. The legacy name comes from the original "move into a quarantine album" design that was abandoned for `Image.Hidden`; the audit semantics are preserved across the rename. |
 | `status` | sync_status not null | `success` \| `partial` \| `failed`. `partial` covers per-photo errors that didn't sink the whole run. |
 | `photos_added` | int not null | `default 0` |
 | `photos_updated` | int not null | `default 0` |
@@ -463,21 +462,23 @@ Each step landed as its own migration file under `supabase/migrations/` so each 
 | `20260506000018_examples_storage.sql` | Step 7.6b: adds `examples.storage_path`, deletes the placeholder seeds from migration 7, creates the public `example-images` Storage bucket, adds storage.objects RLS policies (auth read; admin write), and adds the `public.reorder_examples(example_kind, uuid[])` RPC for atomic display-order updates. Backs `lib/examples.ts` and the rebuilt `AdminExamples` + `GuideScreen` UIs. |
 | `20260506000019_branding_favicon.sql` | Step 7.7a: adds `app_settings.favicon_storage_path` (nullable) and creates the public `branding-assets` Storage bucket with the same dual-layer RLS pattern migration 18 used for `example-images` (auth read; admin write at both bucket and storage.objects layers). Backs the `uploadFavicon` / `removeFavicon` helpers in `lib/app-settings.ts`, `SettingsProvider.setFavicon`, the Favicon card in Admin → Settings, and the `<link rel="icon">` in `app/layout.tsx → generateMetadata`. |
 | `20260507000020_per_user_theme.sql` | Step 7.7c: adds `profiles.theme` (`text not null default 'light'` + check `profiles_theme_chk` ∈ `('light','dark')`) and drops `app_settings.theme` / `app_settings.density` plus their named CHECK constraints. Theme is now per-user; density was never wired and is gone for good. The existing `profiles_update_self` RLS policy already permits self-edits — its with-check restricts only `role` and `team`, so theme writes pass without policy changes. Backs `lib/current-user.tsx` (now selects `role, theme` and exposes `useUpdateTheme`), `App.tsx` (applies `data-theme` from `useCurrentUser()`), the Brand-color card in Admin → Settings (accent only — Appearance card removed), and the new Appearance card on ProfileScreen. |
+| `20260507000025_drop_placeholder_dev_data.sql` | Step 8.8: deletes the placeholder photos (`smugmug_image_id like 'placeholder-IMG_%'`), placeholder camp week, and placeholder location seeded by migration 13 — by step 8 they're dev scaffolding that shouldn't ship alongside real SmugMug data. The four placeholder *divisions* stay because the 8.3 folder sync rewrites their `smugmug_folder_id` in place once it discovers the real ids. LIKE filters on the `placeholder-` prefix are production-safe: rows already reconciled by 8.3 no longer match. Reviews on placeholder photos cascade-delete via the `reviews.photo_id` FK. |
 
-Four tests live under `supabase/tests/` (deliberately outside `migrations/` so they aren't applied by `db push`). All four are transactions wrapped in `begin; ... rollback;`:
+Five tests live under `supabase/tests/` (deliberately outside `migrations/` so they aren't applied by `db push`). All five are transactions wrapped in `begin; ... rollback;`:
 
 | File | Role context | What it covers |
 |---|---|---|
 | `smoke_test.sql` | service role (default) | Schema-level: enums, hierarchy FKs, trigger basics, both check constraints |
-| `e2e_review_flow.sql` | `authenticated` + pinned JWT | Reviewer flow: approve + flag, all four triggers, both check constraints, RLS context as in production |
-| `e2e_flag_review_flow.sql` | `authenticated` + pinned JWT | Senior flow: flag transition, the FlagReview join shape, accept-after-flag, delete |
-| `e2e_reviewer_stats.sql` | `authenticated` + pinned JWT | `reviewer_stats` view shape: row-count parity with `profiles`, no NULL aggregates, and delta assertions on insert (totals, decisions, points, reviewed_today, last_reviewed_at) |
+| `e2e_review_flow.sql` | service role for fixture seed → `authenticated` + pinned JWT for review inserts | Reviewer flow: approve + flag, all four triggers, both check constraints, RLS context as in production. Step 8.8: now seeds its own division/location/week/photo fixtures up front (in service role, before the role pin) instead of depending on migration 13's placeholder photos. |
+| `e2e_flag_review_flow.sql` | service role for fixture seed → `authenticated` + pinned JWT for review inserts | Senior flow: flag transition, the FlagReview join shape, accept-after-flag, delete. Step 8.8: self-seeds fixtures, same pattern as above. |
+| `e2e_reviewer_stats.sql` | service role for fixture seed → `authenticated` + pinned JWT for review inserts | `reviewer_stats` view shape: row-count parity with `profiles`, no NULL aggregates, and delta assertions on insert (totals, decisions, points, reviewed_today, last_reviewed_at). Step 8.8: self-seeds fixtures, same pattern as above. |
+| `e2e_smugmug_sync_flow.sql` | service role | Step 8.8: validates the database contract the SmugMug sync engine relies on. Six scenarios — clean-slate insert, re-run no-op (no UPDATE without drift, unique constraint blocks duplicate insert), orphan handling (unreviewed deleted / reviewed preserved), re-parenting (camp_week_id moves rather than duplicating), reviewer-queue ordering (priority desc, captured_at <queueOrder>, non-pending excluded), mode-switch clear-the-queue (only unreviewed pending deleted). |
 
 ```bash
 npx supabase db query --file supabase/tests/<file>.sql --linked
 ```
 
-The last row of each is a sentinel string (`smoke test passed`, `e2e review flow passed`, `flag review flow passed`, `reviewer stats view passed`). Anything else means a `raise exception` triggered — read the error to find which assertion fired.
+The last row of each is a sentinel string (`smoke test passed`, `e2e review flow passed`, `flag review flow passed`, `reviewer stats view passed`, `e2e smugmug sync flow passed`). Anything else means a `raise exception` triggered — read the error to find which assertion fired.
 
 > **Don't write new client-flow tests as the service role.** `supabase db query` defaults to running as the postgres/service role, which **bypasses RLS entirely**. The original `smoke_test.sql` ran this way and missed the trigger-vs-RLS bug fixed by migration 14 because the service role had update privileges on `photos`. The three `e2e_*` tests now `set local role authenticated; set local request.jwt.claims to '{"sub": "<uid>", "role": "authenticated"}';` so RLS is enforced as in production. Keep that pattern for any test that simulates the app's own writes.
 

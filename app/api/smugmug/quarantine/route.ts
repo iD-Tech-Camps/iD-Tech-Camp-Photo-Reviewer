@@ -5,24 +5,26 @@ import { runQuarantineReconcile } from "@/lib/smugmug/sync/quarantine";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-// 60s ceiling; the reconcile path is at most a small handful of
-// SmugMug round-trips (album list + create on first run + move + image
-// refetch) and a few DB writes. 60 leaves slack for the very-first
-// run, which has the find-or-create work.
-export const maxDuration = 60;
+// 30s ceiling; the reconcile path is a single PATCH on the SmugMug
+// Image resource plus a couple of DB writes. The previous album-move
+// design needed 60s for a worst-case "first quarantine creates the
+// global album" run; the Hidden-flag approach has no such case.
+export const maxDuration = 30;
 
 interface QuarantineBody {
   photoId: string;
 }
 
 /**
- * Step 8.7 — Quarantine folder move endpoint.
+ * Step 8.7 — Quarantine endpoint.
  *
  * Called from `ReviewScreen.commitDecision` after a flag-with-quarantine
  * submission and from `FlagReview.resolve` after a senior accept or
  * delete on a previously-quarantined photo. The client doesn't tell
  * the server *what* to do — it just identifies the photo and the
- * server reads the photo's freshly-trigger-updated state to decide.
+ * server reads the photo's freshly-trigger-updated state to decide
+ * whether to PATCH `Image.Hidden=true` (quarantine), `false` (release),
+ * or do nothing (senior delete on an already-flagged photo).
  *
  * Authentication: any authenticated user. Reviewers, seniors, and
  * admins all have legitimate paths to this endpoint, and the actual

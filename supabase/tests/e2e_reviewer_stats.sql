@@ -13,6 +13,11 @@
 --     the view never returns NULL aggregates that the UI would have to
 --     special-case.
 --
+-- Step 8.8 (May 2026): the test used to depend on the placeholder
+-- photos seeded by migration 13. Migration 25 dropped those, so the
+-- test now seeds its own division/location/week/photo fixtures up
+-- front (under the service role) before flipping to authenticated.
+--
 -- Run with:
 --   npx supabase db query --file supabase/tests/e2e_reviewer_stats.sql --linked
 --
@@ -20,6 +25,32 @@
 
 begin;
 
+-- ── Fixture rows (service role) ─────────────────────────────────────
+insert into public.divisions (id, name, smugmug_folder_id) values
+  ('cccccccc-3333-3333-3333-333333333331', 'E2E Stats Test Division', 'e2e-stats-div');
+insert into public.locations (id, division_id, name, smugmug_folder_id) values
+  ('cccccccc-3333-3333-3333-333333333332',
+   'cccccccc-3333-3333-3333-333333333331',
+   'E2E Stats Test Location',
+   'e2e-stats-loc');
+insert into public.camp_weeks (id, location_id, name, smugmug_folder_id, starts_on, ends_on) values
+  ('cccccccc-3333-3333-3333-333333333333',
+   'cccccccc-3333-3333-3333-333333333332',
+   'E2E Stats Test Week',
+   'e2e-stats-week',
+   current_date - 1,
+   current_date + 5);
+insert into public.photos (id, camp_week_id, smugmug_image_id, captured_at) values
+  ('cccccccc-3333-3333-3333-333333333334',
+   'cccccccc-3333-3333-3333-333333333333',
+   'e2e-stats-img-approve',
+   now()),
+  ('cccccccc-3333-3333-3333-333333333335',
+   'cccccccc-3333-3333-3333-333333333333',
+   'e2e-stats-img-flag',
+   now());
+
+-- ── Switch to authenticated role for the review inserts ────────────
 set local role authenticated;
 set local request.jwt.claims to
   '{"sub": "1e6c7363-f8ea-4e5d-92a5-6b2e64bb2589", "role": "authenticated"}';
@@ -27,8 +58,8 @@ set local request.jwt.claims to
 do $$
 declare
   v_user_id uuid := '1e6c7363-f8ea-4e5d-92a5-6b2e64bb2589';
-  v_approve_photo uuid;
-  v_flag_photo    uuid;
+  v_approve_photo uuid := 'cccccccc-3333-3333-3333-333333333334';
+  v_flag_photo    uuid := 'cccccccc-3333-3333-3333-333333333335';
   v_row_count       int;
   v_profile_count   int;
   v_zero_check      int;
@@ -77,9 +108,6 @@ begin
   if not found then
     raise exception 'reviewer_stats has no row for test user %', v_user_id;
   end if;
-
-  select id into v_approve_photo from public.photos where smugmug_image_id = 'placeholder-IMG_4823';
-  select id into v_flag_photo    from public.photos where smugmug_image_id = 'placeholder-IMG_4824';
 
   -- ── Insert one approve + one flag and recompute ────────────────
   insert into public.reviews (photo_id, reviewer_id, decision, rating)

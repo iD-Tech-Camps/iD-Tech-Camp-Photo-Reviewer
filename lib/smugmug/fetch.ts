@@ -19,7 +19,7 @@ export class SmugMugApiError extends Error {
   bodyExcerpt: string;
 
   constructor(status: number, url: string, bodyExcerpt: string) {
-    super(`SmugMug ${status} for ${url}: ${bodyExcerpt.slice(0, 200)}`);
+    super(`SmugMug ${status} for ${url}: ${bodyExcerpt.slice(0, 800)}`);
     this.name = "SmugMugApiError";
     this.status = status;
     this.url = url;
@@ -28,9 +28,20 @@ export class SmugMugApiError extends Error {
 }
 
 export interface FetchOptions {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   query?: Record<string, string | number | undefined | null>;
   formBody?: Record<string, string>;
+  /**
+   * JSON body for PATCH/DELETE/POST. Mutually exclusive with `formBody`.
+   *
+   * Note: per OAuth 1.0a, JSON request bodies are NOT included in the
+   * signature base string — only query-string params and
+   * `application/x-www-form-urlencoded` body params are. SmugMug accepts
+   * both content types; we send JSON for typed verbs like the
+   * AlbumImage PATCH (relocate-image) where the natural payload is a
+   * structured object reference (`{ AlbumUri: "/api/v2/album/<key>" }`).
+   */
+  jsonBody?: unknown;
   credentials?: OAuth1Credentials;
 }
 
@@ -95,9 +106,17 @@ export async function smugmugFetch<T>(
     };
 
     let body: string | undefined;
+    if (opts.formBody && opts.jsonBody !== undefined) {
+      throw new Error(
+        "smugmugFetch: pass either formBody or jsonBody, not both."
+      );
+    }
     if (opts.formBody) {
       headers["Content-Type"] = "application/x-www-form-urlencoded";
       body = new URLSearchParams(opts.formBody).toString();
+    } else if (opts.jsonBody !== undefined) {
+      headers["Content-Type"] = "application/json";
+      body = JSON.stringify(opts.jsonBody);
     }
 
     let response: Response;
@@ -171,7 +190,7 @@ export async function smugmugFetch<T>(
       continue;
     }
 
-    const bodyText = (await response.text()).slice(0, 500);
+    const bodyText = (await response.text()).slice(0, 2000);
 
     if (response.status === 429 && attempt429 < MAX_RETRIES_429) {
       const retryAfter = Number(response.headers.get("Retry-After"));
