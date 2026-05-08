@@ -51,53 +51,10 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
-// Placeholder shell for the SmugMug Import screen. Replaces the old
-// AdminAssignment mock UI (batch settings / auto-reassign / reminders /
-// flag-notification rules) which never persisted anything — the
-// notifications + idle/inactive transitions parts of that mock are
-// being routed to step 11 instead.
-//
-// Step 8 fleshes this out: admins will browse the SmugMug folder tree
-// here, add/remove camp_weeks (and possibly whole locations) into a
-// prioritized import pool, and trigger the import job that pulls real
-// photos into `public.photos`. Until then this is a static "what lives
-// here" placeholder so the nav entry isn't a dead route.
-export function SmugMugImport() {
-  return (
-    <>
-      <PageHeader
-        eyebrow="Admin · SmugMug import"
-        title="SmugMug <em>import.</em>"
-        sub="Pick which SmugMug folders feed the review queue."
-      />
-
-      <div className="page-body">
-        <div className="card" style={{ maxWidth: 720 }}>
-          <div className="card-eyebrow" style={{ color: "var(--lake)" }}>Coming in step 8</div>
-          <h3 className="card-title" style={{ marginTop: 6, marginBottom: 10 }}>
-            Admin-curated import pool
-          </h3>
-          <div style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.55 }}>
-            This is where admins will browse the SmugMug folder tree, add specific camp weeks
-            (and possibly whole locations) into the review queue, and reorder them by priority.
-            The reviewer queue will pull from the highest-priority folder first, so you can
-            steer attention toward whatever camp you most need cleared.
-          </div>
-          <div style={{
-            marginTop: 14, padding: 12,
-            background: "var(--paper-2)", borderRadius: 8,
-            border: "1px solid var(--rule)",
-            fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5,
-          }}>
-            Until this lands, the queue runs against a single seeded camp week
-            (Adelphi University · May 25–29, 2026). The import job that backs this
-            screen will replace those placeholder rows with real SmugMug photos.
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
+// The real Admin → SmugMug screen lives in [./AdminSmugMug.tsx]; re-exported
+// here so App.tsx's barrel-style import doesn't churn. Step 8.5 retired the
+// static placeholder that originally shipped from this file.
+export { SmugMugImport } from "./AdminSmugMug";
 
 export function AdminPoints() {
   const supabase = React.useMemo(() => createClient(), []);

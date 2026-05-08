@@ -3,10 +3,7 @@
 import React from "react";
 import { Icon } from "@/components/Icon";
 import { PageHeader, ToastApi } from "@/components/Shell";
-import {
-  PhotoPlaceholder,
-  photoPaletteFor,
-} from "@/components/data";
+import { PhotoImg } from "@/components/PhotoImg";
 import { useCurrentUser } from "@/lib/current-user";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -112,9 +109,14 @@ export function FlagReviewScreen({ toast }: { toast: ToastApi }) {
     }
   };
 
-  const download = (photo: FlaggedQueueItem) => {
-    downloadPhoto(photo);
-    if (toast?.show) toast.show(`Downloading ${photo.smugmugImageId}.png`, "download");
+  const download = async (photo: FlaggedQueueItem) => {
+    const ok = await downloadPhoto(photo);
+    if (!toast?.show) return;
+    if (ok) {
+      toast.show(`Downloading ${photo.smugmugImageId}.jpg`, "download");
+    } else {
+      toast.show("Couldn't fetch the photo from SmugMug.");
+    }
   };
 
   return (
@@ -245,14 +247,11 @@ function FlagQueueList({
                   borderRadius: 4, position: "relative", overflow: "hidden",
                 }}
               >
-                <PhotoPlaceholder
-                  photo={{
-                    id: p.smugmugImageId,
-                    camp: campLabel,
-                    activity: p.caption ?? undefined,
-                  }}
-                  hideLabel
-                  compact
+                <PhotoImg
+                  src={p.thumbnailUrl ?? p.imageUrl}
+                  alt={p.caption ?? p.smugmugImageId}
+                  loading="lazy"
+                  fit="cover"
                 />
               </div>
               <div style={{ minWidth: 0, flex: 1 }}>
@@ -384,12 +383,11 @@ function FlagDetailPanel({
             background: "var(--paper-3)",
           }}
         >
-          <PhotoPlaceholder
-            photo={{
-              id: photo.smugmugImageId,
-              camp: campLabel,
-              activity: photo.caption ?? undefined,
-            }}
+          <PhotoImg
+            src={photo.imageUrl ?? photo.thumbnailUrl}
+            alt={photo.caption ?? `Flagged photo ${photo.smugmugImageId}`}
+            loading="eager"
+            fit="contain"
           />
         </div>
         <div
@@ -731,58 +729,40 @@ function formatRelative(iso: string): string {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-// ── download helper (procedural placeholder until SmugMug image_url lands) ─
+// ── download helper ──────────────────────────────────────────────────────
+// Fetches the real SmugMug image and triggers a browser download.
+// Returns false if no usable URL is available or the fetch fails — the
+// caller surfaces an error toast in that case rather than silently no-op'ing.
+//
+// We fetch + blob-ify rather than just setting `<a download>` directly on
+// the SmugMug URL because cross-origin downloads ignore the `download`
+// attribute (the browser navigates instead). Going through a blob URL
+// forces the actual download path. SmugMug allows direct fetch from the
+// browser as long as the URL is the public ArchivedUri; no auth needed.
+async function downloadPhoto(photo: FlaggedQueueItem): Promise<boolean> {
+  if (typeof document === "undefined") return false;
+  const url = photo.imageUrl ?? photo.thumbnailUrl;
+  if (!url) return false;
 
-function downloadPhoto(photo: FlaggedQueueItem) {
-  if (typeof document === "undefined") return;
-  const W = 1600;
-  const H = 1067;
-  const canvas = document.createElement("canvas");
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  const [c1, c2] = photoPaletteFor(photo.smugmugImageId);
-  const grad = ctx.createLinearGradient(0, 0, W * 0.4, H);
-  grad.addColorStop(0, c1);
-  grad.addColorStop(1, c2);
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H);
-
-  const veil = ctx.createRadialGradient(
-    W / 2, H / 2, Math.min(W, H) * 0.3,
-    W / 2, H / 2, Math.max(W, H) * 0.7,
-  );
-  veil.addColorStop(0, "rgba(0,0,0,0)");
-  veil.addColorStop(1, "rgba(0,0,0,0.4)");
-  ctx.fillStyle = veil;
-  ctx.fillRect(0, 0, W, H);
-
-  const campLabel = [photo.divisionName, photo.locationName].filter(Boolean).join(" · ");
-
-  ctx.fillStyle = "rgba(255,255,255,0.92)";
-  ctx.font = "500 28px ui-monospace, SFMono-Regular, Menlo, monospace";
-  ctx.textBaseline = "alphabetic";
-  ctx.fillText(campLabel.toUpperCase(), 40, H - 36);
-  const idText = photo.smugmugImageId;
-  const idWidth = ctx.measureText(idText).width;
-  ctx.fillText(idText, W - 40 - idWidth, H - 36);
-
-  ctx.fillStyle = "rgba(255,255,255,0.7)";
-  ctx.font = "400 18px ui-monospace, SFMono-Regular, Menlo, monospace";
-  const sub = [photo.caption, formatDate(photo.capturedAt)].filter(Boolean).join(" · ");
-  ctx.fillText(sub, 40, H - 64);
-
-  canvas.toBlob((blob) => {
-    if (!blob) return;
-    const url = URL.createObjectURL(blob);
+  try {
+    const res = await fetch(url, { mode: "cors" });
+    if (!res.ok) return false;
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = `${photo.smugmugImageId}.png`;
+    a.href = blobUrl;
+    // Pick a friendly filename: smugmug image id + an extension inferred
+    // from the blob mime type (defaults to .jpg, which matches what
+    // SmugMug serves for ArchivedUri the vast majority of the time).
+    const ext = blob.type === "image/png" ? "png" : "jpg";
+    a.download = `${photo.smugmugImageId}.${ext}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }, "image/png");
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+    return true;
+  } catch (err) {
+    console.error("[flag-review] download failed:", err);
+    return false;
+  }
 }

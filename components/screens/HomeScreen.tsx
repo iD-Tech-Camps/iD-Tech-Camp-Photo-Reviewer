@@ -3,15 +3,19 @@
 import React from "react";
 import { Icon } from "@/components/Icon";
 import { BonusPennant, PageHeader, useActiveBonusPeriod } from "@/components/Shell";
-import { PhotoPlaceholder } from "@/components/data";
+import { PhotoImg } from "@/components/PhotoImg";
 import { useSettings, fillTemplate } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
+import { createClient } from "@/lib/supabase/client";
+import { fetchRecentPhotoThumbs, type HeroThumb } from "@/lib/reviews";
 
-// Decorative thumbnail strip on the home screen — purely visual stand-ins
-// until real SmugMug thumbnails land in step 8. The ids are picked so each
-// one hashes to a different palette in PhotoPlaceholder; the labels are
-// hidden anyway (hideLabel).
-const HERO_THUMB_IDS = ["p0","p1","p2","p3","p4","p5","p6","p7","p8","p9"];
+// Decorative thumbnail strip on the home screen. As of step 8.6 these are
+// real SmugMug thumbnails pulled from `photos.thumbnail_url` for the next
+// 10 pending photos in queue order — the strip doubles as a "what's
+// coming up" preview rather than a random sample. When the queue is
+// empty (off-season, fresh DB), the strip collapses entirely so the
+// header doesn't dangle a row of empty tiles.
+const HERO_THUMB_COUNT = 10;
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) =>
@@ -41,6 +45,22 @@ export function HomeScreen({
     count: pendingCount ?? "—",
   });
 
+  // Pull the next-up photos for the decorative strip. We don't block the
+  // page render on this; the strip just doesn't show until thumbs arrive.
+  // Failure is silent — the strip is decorative and an offline DB shouldn't
+  // gate getting to "Start reviewing".
+  const [thumbs, setThumbs] = React.useState<HeroThumb[] | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchRecentPhotoThumbs(createClient(), HERO_THUMB_COUNT)
+      .then((rows) => { if (!cancelled) setThumbs(rows); })
+      .catch((err) => {
+        console.warn("[home-screen] thumbs fetch failed:", err?.message ?? err);
+        if (!cancelled) setThumbs([]);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   return (
     <>
       <PageHeader
@@ -61,23 +81,30 @@ export function HomeScreen({
       }}>
         <div style={{ maxWidth: 640, width: "100%", textAlign: "center" }}>
 
-          <div style={{
-            display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8,
-            marginBottom: 28,
-          }}>
-            {HERO_THUMB_IDS.map(id => (
-              <div key={id} style={{
-                aspectRatio: "3/2",
-                borderRadius: 6,
-                overflow: "hidden",
-                position: "relative",
-                background: "var(--paper-3)",
-                boxShadow: "var(--shadow-sm)",
-              }}>
-                <PhotoPlaceholder photo={{ id }} compact hideLabel />
-              </div>
-            ))}
-          </div>
+          {thumbs && thumbs.length > 0 && (
+            <div style={{
+              display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8,
+              marginBottom: 28,
+            }}>
+              {thumbs.map((t) => (
+                <div key={t.id} style={{
+                  aspectRatio: "3/2",
+                  borderRadius: 6,
+                  overflow: "hidden",
+                  position: "relative",
+                  background: "var(--paper-3)",
+                  boxShadow: "var(--shadow-sm)",
+                }}>
+                  <PhotoImg
+                    src={t.thumbnailUrl}
+                    alt=""
+                    loading="lazy"
+                    fit="cover"
+                  />
+                </div>
+              ))}
+            </div>
+          )}
 
           <h2 style={{
             fontFamily: "var(--font-display)",

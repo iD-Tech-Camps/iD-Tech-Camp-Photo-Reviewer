@@ -8,7 +8,7 @@ export type { OAuth1Credentials } from "./oauth";
 export { loadCredentialsFromEnv, buildAuthorizationHeader } from "./oauth";
 export * from "./types";
 
-export { getNode, listNodeChildren } from "./nodes";
+export { getNode, listNodeChildren, getAlbumKeyForNode } from "./nodes";
 export { getAlbum, listAlbumImages } from "./albums";
 export { getImage } from "./images";
 export { getUserRootNode } from "./users";

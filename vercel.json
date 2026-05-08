@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/smugmug/sync-scheduled",
+      "schedule": "0 8 * * *"
+    }
+  ]
+}

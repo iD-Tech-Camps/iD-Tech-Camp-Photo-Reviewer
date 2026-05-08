@@ -3,13 +3,27 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // One photo as the reviewer queue needs it. Camel-cased here so the UI doesn't
 // have to think about Postgres conventions; the underlying columns are
 // snake_case and joined out of `photos -> camp_weeks -> locations -> divisions`.
+//
+// The three URL fields are populated by the 8.4 photo-sync engine:
+//   - `imageUrl`     → SmugMug `ArchivedUri` (highest-fidelity URL the basic
+//     image payload exposes without a follow-up `!sizes` call); used by the
+//     reviewer hero and the senior detail card.
+//   - `thumbnailUrl` → SmugMug `ThumbnailUrl`; used everywhere a small thumb
+//     is enough (HomeScreen hero strip, FlagReview queue list, AdminSmugMug
+//     queue card).
+//   - `smugmugUrl`   → public SmugMug page; not rendered yet, but kept on the
+//     type so the senior "open in SmugMug" affordance lands without another
+//     query change.
 export type ReviewQueuePhoto = {
   id: string;                 // uuid
-  smugmugImageId: string;     // stable string for placeholder palette
+  smugmugImageId: string;     // stable string, used as react key + alt fallback
   caption: string | null;
   capturedAt: string | null;  // ISO timestamp
   width: number | null;
   height: number | null;
+  imageUrl: string | null;
+  thumbnailUrl: string | null;
+  smugmugUrl: string | null;
   campLabel: string;          // "iD Tech Camps · Adelphi University"
 };
 
@@ -20,6 +34,9 @@ type RawPhotoRow = {
   captured_at: string | null;
   width: number | null;
   height: number | null;
+  image_url: string | null;
+  thumbnail_url: string | null;
+  smugmug_url: string | null;
   camp_weeks: {
     name: string;
     locations: {
@@ -31,19 +48,32 @@ type RawPhotoRow = {
 
 // Pulls the next batch of `pending` photos to review, joined to the folder
 // hierarchy so the UI can show "Division · Location" without extra round-trips.
-// Ordered by capture time so reviewers see chronological day-of-camp flow.
+//
+// Ordering reflects the live `smugmug_config` posture (set by step 8.5):
+//   - `priority desc` floats admin-prioritized photos to the top
+//     (Admin → SmugMug → Prioritize in queue stamps `priority = 1`).
+//   - `captured_at <queueOrder>` follows the admin-chosen direction
+//     (`newest_first` is summer-default; `oldest_first` is the chronological
+//     flow option).
+//
+// This is the query the partial composite index `photos_pending_priority_idx`
+// (migration 21) is shaped for — `(priority desc, captured_at) where current_status = 'pending'`.
 export async function fetchPendingPhotos(
   supabase: SupabaseClient,
   limit = 10,
+  queueOrder: "newest_first" | "oldest_first" = "newest_first",
 ): Promise<ReviewQueuePhoto[]> {
+  const ascending = queueOrder === "oldest_first";
   const { data, error } = await supabase
     .from("photos")
     .select(
       "id, smugmug_image_id, caption, captured_at, width, height, " +
+      "image_url, thumbnail_url, smugmug_url, " +
       "camp_weeks ( name, locations ( name, divisions ( name ) ) )",
     )
     .eq("current_status", "pending")
-    .order("captured_at", { ascending: true, nullsFirst: false })
+    .order("priority",    { ascending: false })
+    .order("captured_at", { ascending, nullsFirst: false })
     .limit(limit);
 
   if (error) throw error;
@@ -61,9 +91,45 @@ export async function fetchPendingPhotos(
       capturedAt: p.captured_at,
       width: p.width,
       height: p.height,
+      imageUrl: p.image_url,
+      thumbnailUrl: p.thumbnail_url,
+      smugmugUrl: p.smugmug_url,
       campLabel,
     };
   });
+}
+
+// Decorative-strip variant: pulls a small batch of recent pending photos for
+// the HomeScreen hero. Same ordering as the reviewer queue (priority desc,
+// captured_at <queueOrder>) so the strip doubles as a preview of "what's
+// coming up next" rather than a random sample. Returns just thumbnails +
+// id; callers don't need the full review payload.
+export type HeroThumb = {
+  id: string;
+  thumbnailUrl: string | null;
+};
+
+export async function fetchRecentPhotoThumbs(
+  supabase: SupabaseClient,
+  limit = 10,
+  queueOrder: "newest_first" | "oldest_first" = "newest_first",
+): Promise<HeroThumb[]> {
+  const ascending = queueOrder === "oldest_first";
+  const { data, error } = await supabase
+    .from("photos")
+    .select("id, thumbnail_url")
+    .eq("current_status", "pending")
+    .not("thumbnail_url", "is", null)
+    .order("priority",    { ascending: false })
+    .order("captured_at", { ascending, nullsFirst: false })
+    .limit(limit);
+
+  if (error) throw error;
+
+  return ((data ?? []) as { id: string; thumbnail_url: string | null }[]).map((r) => ({
+    id: r.id,
+    thumbnailUrl: r.thumbnail_url,
+  }));
 }
 
 // One flagged photo as the senior queue needs it. Includes the triggering
@@ -77,6 +143,9 @@ export type FlaggedQueueItem = {
   capturedAt: string | null;
   width: number | null;
   height: number | null;
+  imageUrl: string | null;
+  thumbnailUrl: string | null;
+  smugmugUrl: string | null;
   divisionName: string | null;
   locationName: string | null;
   campWeekName: string | null;
@@ -100,6 +169,9 @@ type RawFlaggedRow = {
   captured_at: string | null;
   width: number | null;
   height: number | null;
+  image_url: string | null;
+  thumbnail_url: string | null;
+  smugmug_url: string | null;
   camp_weeks: {
     name: string;
     starts_on: string | null;
@@ -127,6 +199,7 @@ export async function fetchFlaggedPhotos(
     .from("photos")
     .select(
       "id, smugmug_image_id, caption, captured_at, width, height, " +
+      "image_url, thumbnail_url, smugmug_url, " +
       "camp_weeks ( name, starts_on, ends_on, locations ( name, divisions ( name ) ) ), " +
       "reviews ( id, decision, note, quarantine, created_at, " +
         "profiles ( full_name, email ), review_tags ( tag_id ) )",
@@ -156,6 +229,9 @@ export async function fetchFlaggedPhotos(
       capturedAt: p.captured_at,
       width: p.width,
       height: p.height,
+      imageUrl: p.image_url,
+      thumbnailUrl: p.thumbnail_url,
+      smugmugUrl: p.smugmug_url,
       divisionName: p.camp_weeks?.locations?.divisions?.name ?? null,
       locationName: p.camp_weeks?.locations?.name ?? null,
       campWeekName: p.camp_weeks?.name ?? null,

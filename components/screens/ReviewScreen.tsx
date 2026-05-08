@@ -3,7 +3,7 @@
 import React from "react";
 import { Icon } from "@/components/Icon";
 import { BonusPennant, fireConfetti, ToastApi, useActiveBonusPeriod } from "@/components/Shell";
-import { PhotoPlaceholder } from "@/components/data";
+import { PhotoImg } from "@/components/PhotoImg";
 import { useSettings } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
 import { createClient } from "@/lib/supabase/client";
@@ -18,6 +18,7 @@ import {
   fetchPointsConfig,
   type PointsConfig,
 } from "@/lib/points-config";
+import { fetchSmugmugConfig } from "@/lib/smugmug-config";
 
 type Decision = {
   decision: "approve" | "flag";
@@ -75,10 +76,23 @@ export function ReviewScreen({
   // dedupe is needed. Tags load in parallel — the modals open instantly with
   // an empty chip list and fill in once tags arrive (typically in the same
   // tick), instead of blocking the photo render on the tag round-trip.
+  //
+  // The fetchPendingPhotos call respects the admin-set queue_order from
+  // smugmug_config (newest_first vs oldest_first). Reading the config row is
+  // a lightweight singleton select; on failure we silently fall back to the
+  // function's default ('newest_first') rather than blocking session start.
   React.useEffect(() => {
     const supabase = createClient();
     let cancelled = false;
-    fetchPendingPhotos(supabase, 10)
+    fetchSmugmugConfig(supabase)
+      .catch((err) => {
+        console.warn("[review-screen] smugmug_config fetch failed:", err?.message ?? err);
+        return null;
+      })
+      .then((cfg) => {
+        const queueOrder = cfg?.queueOrder ?? "newest_first";
+        return fetchPendingPhotos(supabase, 10, queueOrder);
+      })
       .then((rows) => {
         if (!cancelled) setPhotos(rows);
       })
@@ -268,11 +282,12 @@ export function ReviewScreen({
                     : pulse === "flag"    ? "3px solid var(--sun)"
                     : "none",
             }}>
-              <PhotoPlaceholder photo={{
-                id: photo.smugmugImageId,
-                camp: photo.campLabel,
-                activity: photo.caption ?? undefined,
-              }} />
+              <PhotoImg
+                src={photo.imageUrl ?? photo.thumbnailUrl}
+                alt={photo.caption ?? `Photo ${photo.smugmugImageId}`}
+                loading="eager"
+                fit="cover"
+              />
             </div>
           </div>
 

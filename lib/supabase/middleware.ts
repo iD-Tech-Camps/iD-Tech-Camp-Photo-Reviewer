@@ -1,7 +1,11 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/auth/callback"];
+// `/api/smugmug/sync-scheduled` is the Vercel-Cron entry point — it
+// has no Supabase user session by design (cron auth is a CRON_SECRET
+// bearer token, enforced inside the route handler). Without this
+// whitelist the middleware redirects every cron call to /login.
+const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/smugmug/sync-scheduled"];
 
 function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some(

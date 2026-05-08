@@ -129,7 +129,7 @@ Index `camp_weeks_dates_idx` on `(starts_on, ends_on)` for date-range queries.
 | `current_status` | photo_status not null | `default 'pending'` — maintained by trigger |
 | `is_quarantined` | bool not null | `default false` — maintained by trigger |
 | `smugmug_folder_id` | text | which SmugMug folder it's currently in (public week folder OR hidden quarantine folder) |
-| `priority` | int not null | `default 0` (added in migration 21, step 8.2). Manual "Add folder to queue" (step 8.5) writes `priority = 1` so those photos jump to the top of the reviewer queue. The 8.4 import job leaves it at 0 for scheduled adds. |
+| `priority` | int not null | `default 0` (added in migration 21, step 8.2). The Admin → SmugMug → "Prioritize in queue" action (step 8.5) calls `/api/smugmug/prioritize` to bulk-set `priority = 1` on every pending photo under a picked division/location/camp_week so those rows float to the top of the reviewer queue. The 8.4 import job leaves it at 0 for scheduled adds. **No per-row unprioritize in V1** — the only reset is the mode-switch "clear the queue" dialog, which deletes all unreviewed pending photos so the next sync rebuilds at `priority = 0`. |
 | `created_at` | timestamptz | `default now()` |
 | `updated_at` | timestamptz | `default now()` |
 
@@ -309,7 +309,7 @@ Single-row table backing the Admin → SmugMug screen's settings card. Same `id 
 | col | type | notes |
 |---|---|---|
 | `id` | smallint pk | always 1 |
-| `mode` | smugmug_mode not null | `summer` \| `off_season`. Summer is the active-season fast-window mode (sliding window: weeks where `ends_on >= today - 14 days AND starts_on <= today + 7 days`); off-season is admin-driven archival cleanup (no upper bound, lower bound = `earliest_fetch_date`). |
+| `mode` | smugmug_mode not null | `summer` \| `off_season`. Both modes use a single lower bound on `camp_weeks.starts_on` with no upper bound: in `summer`, the bound is `season_start_date` (the admin pins it to the first day of camp for the season); in `off_season`, the bound is `earliest_fetch_date` (admin-curated, used for archival-cleanup work between summers). The "newest week first" reviewer ordering falls out of `priority desc, captured_at <queue_order>` rather than any extra mode logic. |
 | `season_start_date` | date | consulted in summer mode. Seeded to Jan 1 of the current year as a sensible default; the admin moves it to the actual first-day-of-camp when configuring for the season. |
 | `earliest_fetch_date` | date | consulted in off-season mode. Nullable — only one of the two date columns is meaningful at a time. |
 | `queue_order` | queue_order not null | `newest_first` \| `oldest_first`. Selects the `captured_at` direction for the reviewer queue's `order by priority desc, captured_at <dir>` clause. `default 'newest_first'`. |
@@ -338,6 +338,8 @@ Append-only audit trail of SmugMug sync runs. Backs the sync-log table at the bo
 Index `sync_log_started_at_idx` on `(started_at desc)` for the table view.
 
 RLS is **admin-read-only**: policy `sync_log_select_admin` permits `select` only when `public.is_admin()`. There is no authenticated write policy because all writes flow through the cron + manual sync handlers (8.4) running under the service role, which bypasses RLS by design — the auth check happens at the handler level *before* the service-role client is constructed, not at the database layer.
+
+> **Implementation note (step 8.4 — run lifecycle).** `lib/smugmug/sync/photos.ts → runPhotoSync` writes each row in two passes: an INSERT up front with `started_at = now()` and a placeholder `status = 'success'`, then a single UPDATE on completion that sets `finished_at`, the real terminal `status` (`success` / `partial` / `failed`), the three counters, and `error_summary`. Two-pass means a hard failure mid-run (process killed, SmugMug auth blew up, etc.) still leaves a sync_log row with a populated `started_at` and a `finished_at IS NULL` — that's how the admin sync-log table (8.5) will detect "the run never finished" without inventing a fourth enum value. The same handler also writes `smugmug_config.last_sync_at` + `last_sync_status` (e.g. `"success · +147 ~3 -2"` or `"failed · season_start_date is NULL"`) so the Admin → SmugMug settings card can render the latest summary without joining `sync_log`.
 
 ### Storage
 

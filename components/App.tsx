@@ -184,7 +184,7 @@ function AppInner() {
         {activeScreen === "admin-overview"   && <AdminOverview toast={toast} />}
         {activeScreen === "admin-points"     && <AdminPoints />}
         {activeScreen === "admin-examples"   && <AdminExamples toast={toast} />}
-        {activeScreen === "admin-smugmug"    && <SmugMugImport />}
+        {activeScreen === "admin-smugmug"    && <SmugMugImport toast={toast} />}
         {activeScreen === "admin-settings"   && <AdminSettings />}
       </main>
       {toast.node}
