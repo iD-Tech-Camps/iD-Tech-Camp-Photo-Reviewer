@@ -1276,15 +1276,19 @@ function SyncLogCard({ refreshTick }: { refreshTick: number }) {
 
 function KindPill({ kind }: { kind: SyncKind }) {
   const label =
-    kind === "scheduled"     ? "Scheduled" :
-    kind === "manual"        ? "Manual"    :
-    kind === "mode_switch"   ? "Mode switch" :
-    "Priority";
+    kind === "scheduled"       ? "Scheduled"    :
+    kind === "manual"          ? "Manual"       :
+    kind === "mode_switch"     ? "Mode switch"  :
+    kind === "priority_add"    ? "Priority"     :
+    kind === "quarantine_move" ? "Quarantine"   :
+    "Other";
   const cls =
-    kind === "scheduled"     ? "pill pill-lake" :
-    kind === "manual"        ? "pill pill-moss" :
-    kind === "mode_switch"   ? "pill pill-rose" :
-    "pill pill-sun";
+    kind === "scheduled"       ? "pill pill-lake" :
+    kind === "manual"          ? "pill pill-moss" :
+    kind === "mode_switch"     ? "pill pill-rose" :
+    kind === "priority_add"    ? "pill pill-sun"  :
+    kind === "quarantine_move" ? "pill pill-rose" :
+    "pill";
   return <span className={cls}>{label}</span>;
 }
 

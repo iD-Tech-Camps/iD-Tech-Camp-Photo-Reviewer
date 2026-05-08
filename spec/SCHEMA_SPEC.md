@@ -1,6 +1,6 @@
 # iD Photo Reviewer — Database Schema Spec (Step 5 + step-6 fixes)
 
-> **Status: implemented.** This document was originally the brief for step 5 and is now the reference for what's actually in the database. The schema lives in `supabase/migrations/20260505000001_*.sql` through `supabase/migrations/20260507000022_*.sql`, applied to the work-account Supabase project (`idtech-photo-reviewer`). The few places where the implementation diverges from the original brief are called out inline with **`Implementation note`** blocks.
+> **Status: implemented.** This document was originally the brief for step 5 and is now the reference for what's actually in the database. The schema lives in `supabase/migrations/20260505000001_*.sql` through `supabase/migrations/20260507000023_*.sql`, applied to the work-account Supabase project (`idtech-photo-reviewer`). The few places where the implementation diverges from the original brief are called out inline with **`Implementation note`** blocks.
 >
 > **Two material changes since the original step-5 brief landed:**
 >
@@ -60,7 +60,7 @@ Notes:
 - `photo_status` is the photo's *workflow* state. Visibility (`is_quarantined`) is a separate dimension — a `flagged` photo may or may not be quarantined.
 - `decision` covers all three actions a person can take on a photo. There is no separate "accept" decision; a senior bringing a flagged photo back is just performing `approve` (with rating + tags, same as any reviewer).
 
-Migration 17 (sub-step 7.6d) added a `bonus_period_mode` enum (`recurring` \| `one-time`) used by `bonus_periods`. Migration 21 (step 8.2) added four SmugMug-import enums (`smugmug_mode`, `queue_order`, `sync_kind`, `sync_status`) used by `smugmug_config` and `sync_log` — see those table sections for membership.
+Migration 17 (sub-step 7.6d) added a `bonus_period_mode` enum (`recurring` \| `one-time`) used by `bonus_periods`. Migration 21 (step 8.2) added four SmugMug-import enums (`smugmug_mode`, `queue_order`, `sync_kind`, `sync_status`) used by `smugmug_config` and `sync_log` — see those table sections for membership. Migration 23 (step 8.7) appended `quarantine_move` to `sync_kind` for the per-photo SmugMug folder move audit trail.
 
 ---
 
@@ -315,6 +315,7 @@ Single-row table backing the Admin → SmugMug screen's settings card. Same `id 
 | `queue_order` | queue_order not null | `newest_first` \| `oldest_first`. Selects the `captured_at` direction for the reviewer queue's `order by priority desc, captured_at <dir>` clause. `default 'newest_first'`. |
 | `last_sync_at` | timestamptz | mirrored from the most recent `sync_log.finished_at` for fast settings-card render. Maintained by the 8.4 sync handler. |
 | `last_sync_status` | text | plain text (not the `sync_status` enum) so the summary line can carry richer context than the strict three-value membership — e.g. `"success · +147 photos"` or `"partial · 3 errors, see log"`. |
+| `quarantine_album_key` | text | nullable; cached `AlbumKey` of the global Unlisted "Photo Reviewer — Quarantined" album at the SmugMug user root. **Added by migration 23 (step 8.7).** Lazy-populated by the first call to `/api/smugmug/quarantine` that needs to quarantine a photo (the route handler does a find-or-create against the SmugMug user root and persists the key here under a race-safe `update ... where id=1 and quarantine_album_key is null` so concurrent first-quarantines converge on a single album). Once set, every subsequent quarantine reuses the cached key with no SmugMug folder lookups. NULL means "no quarantine has ever happened in this environment yet"; clearing it manually + re-quarantining is the recovery path if the album gets deleted on SmugMug. |
 | `updated_at` | timestamptz | `default now()` |
 
 RLS follows the established read-by-everyone / write-by-admins pattern (policies `smugmug_config_select_authenticated`, `smugmug_config_write_admin`). Seeded as `(1, 'summer', date_trunc('year', current_date)::date, 'newest_first')`.
@@ -327,7 +328,7 @@ Append-only audit trail of SmugMug sync runs. Backs the sync-log table at the bo
 | `id` | uuid pk | `default gen_random_uuid()` |
 | `started_at` | timestamptz not null | `default now()` |
 | `finished_at` | timestamptz | nullable so an in-flight run can be `INSERT … RETURNING id` and updated when it completes |
-| `kind` | sync_kind not null | `scheduled` \| `manual` \| `mode_switch` \| `priority_add`. `scheduled` is the daily Vercel Cron run; `manual` is the admin's "Sync now" button; `mode_switch` is the bulk-clear that runs when the admin switches mode and chose "clear the queue"; `priority_add` is the manual "Add folder to queue" path. |
+| `kind` | sync_kind not null | `scheduled` \| `manual` \| `mode_switch` \| `priority_add` \| `quarantine_move`. `scheduled` is the daily Vercel Cron run; `manual` is the admin's "Sync now" button; `mode_switch` is the bulk-clear that runs when the admin switches mode and chose "clear the queue"; `priority_add` is the manual "Add folder to queue" path; `quarantine_move` (added migration 23, step 8.7) is one row per call to `/api/smugmug/quarantine` — both successful moves (image relocated into / out of the global Quarantined album) and SmugMug-side failures land here, so admins can spot drift on the Sync log card without instrumenting a separate surface. |
 | `status` | sync_status not null | `success` \| `partial` \| `failed`. `partial` covers per-photo errors that didn't sink the whole run. |
 | `photos_added` | int not null | `default 0` |
 | `photos_updated` | int not null | `default 0` |

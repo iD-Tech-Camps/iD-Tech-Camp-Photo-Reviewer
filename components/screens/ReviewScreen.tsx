@@ -19,6 +19,7 @@ import {
   type PointsConfig,
 } from "@/lib/points-config";
 import { fetchSmugmugConfig } from "@/lib/smugmug-config";
+import { triggerQuarantineMove } from "@/lib/quarantine-trigger";
 
 type Decision = {
   decision: "approve" | "flag";
@@ -170,6 +171,16 @@ export function ReviewScreen({
       toast.show?.(err?.message ? `Couldn't save: ${err.message}` : "Couldn't save your review.");
       setSubmitting(false);
       return;
+    }
+
+    // Step 8.7 — fire the SmugMug quarantine move endpoint when this
+    // submission actually quarantined the photo. Fire-and-forget: the
+    // user's decision is already saved, the trigger has already
+    // flipped photos.is_quarantined, and the move is just a side
+    // effect we want eventually-consistent. Failures land as sync_log
+    // drift rows; the reviewer never sees them.
+    if (d.decision === "flag" && d.quarantine) {
+      void triggerQuarantineMove(photo.id);
     }
 
     const full: Decision = { ...d, pts };
@@ -757,8 +768,10 @@ function FlagModal({
 // "Quarantine" elevates a flag from a routine second-opinion request to a
 // hide-now action — the photo stops being publicly visible until a senior
 // resolves it. Schema-wise this just sets `reviews.quarantine = true`; a
-// trigger flips `photos.is_quarantined` and the SmugMug import job (step 8)
-// will mirror that into the hidden folder.
+// trigger flips `photos.is_quarantined`, and step 8.7 mirrors that into a
+// global Unlisted "Photo Reviewer — Quarantined" album on SmugMug via a
+// fire-and-forget call to `/api/smugmug/quarantine` from `commitDecision`
+// above (senior accept moves the image back to its camp_week album).
 function QuarantineCheckbox({
   value,
   onChange,

@@ -12,6 +12,7 @@ import {
   type FlaggedQueueItem,
 } from "@/lib/reviews";
 import { buildTagLabelLookup, fetchTags } from "@/lib/tags";
+import { triggerQuarantineMove } from "@/lib/quarantine-trigger";
 
 type Resolution = "accepted" | "deleted";
 
@@ -86,6 +87,17 @@ export function FlagReviewScreen({ toast }: { toast: ToastApi }) {
       toast.show?.(err?.message ? `Couldn't save: ${err.message}` : "Couldn't save your decision.");
       setSubmitting(false);
       return;
+    }
+
+    // Step 8.7 — fire the SmugMug quarantine move endpoint when the
+    // photo we just resolved was quarantined. The reconcile core
+    // decides what to do server-side based on the freshly-trigger-
+    // updated DB state: senior accept moves the image back to its
+    // camp_week album; senior delete is a no-op (image stays put per
+    // spec). Fire-and-forget either way — failures land as sync_log
+    // drift rows for an admin to reconcile later.
+    if (photo.flagReview.quarantine) {
+      void triggerQuarantineMove(photo.id);
     }
 
     setQueue((prev) => {

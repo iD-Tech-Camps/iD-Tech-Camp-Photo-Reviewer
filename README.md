@@ -40,7 +40,7 @@ Both are also set in Vercel (all environments). Domain-restriction is enforced a
 Reviewers see one photo at a time and have two actions:
 
 - **Approve** (`A`) — share-worthy. Pick a star rating (1–5) and optional positive tags.
-- **Flag** (`F`) — anything that isn't a clear approve. Tag every issue you see (quality, safety, consent, etc.) and add an optional reason note. A senior reviewer makes the final call. The flag dialog also exposes a **Quarantine** checkbox; tick it for clear safety / dress-code / consent issues so the photo is hidden from the public folder until a senior resolves it (the trigger flips `photos.is_quarantined` on insert; the SmugMug folder move lands with step 8).
+- **Flag** (`F`) — anything that isn't a clear approve. Tag every issue you see (quality, safety, consent, etc.) and add an optional reason note. A senior reviewer makes the final call. The flag dialog also exposes a **Quarantine** checkbox; tick it for clear safety / dress-code / consent issues. The `reviews_update_quarantine` trigger flips `photos.is_quarantined`, and a fire-and-forget call to `/api/smugmug/quarantine` physically moves the SmugMug image into a single global Unlisted "Photo Reviewer — Quarantined" album at the SmugMug user root so it's no longer visible in the public camp folder. Senior accept on Flag review moves it back to its camp_week album; senior delete leaves it in quarantine for an admin to clean up on SmugMug. Failures don't block the reviewer — they land as a `quarantine_move` row on `sync_log`, surfaced under Admin → SmugMug → Sync log.
 
 There is no separate reject action — if a photo isn't acceptable, flag it.
 
@@ -87,11 +87,11 @@ Three actions per photo:
 
 - **Accept** — writes an `approve` review under the senior's id; the trigger flips `current_status` back to `approved` and clears any quarantine.
 - **Delete** — writes a `delete` review (requires `senior` or `admin`); the trigger sets `current_status = 'deleted'`.
-- **Download** — generates a PNG of the placeholder render so it can be shared with a camp director offline (no DB write). Will switch to the real SmugMug image URL once step 8 lands.
+- **Download** — fetches the real SmugMug image (`image_url`, falling back to `thumbnail_url`), blob-URLs the response, and triggers a browser download with a friendly filename. No DB write.
 
 ### SmugMug import (Admin)
 
-`Admin → SmugMug import` is currently a static placeholder. Step 8 turns it into the screen where admins browse the SmugMug folder tree, add specific camp weeks (and possibly whole locations) into the review queue, and reorder them by priority — so reviewers always start with whatever camp most needs cleared.
+`Admin → SmugMug import` is the operational dashboard for the photo pipeline: settings (mode, season-start / earliest-fetch dates, queue order), a "Sync now" button + folder-tree picker for prioritizing weeks at the top of the reviewer queue, the live pending queue with all/priority/recent filters, and a sync-log table that shows the last 20 runs (scheduled cron, manual, mode-switch, priority-add, and `quarantine_move` per-photo folder reconciles) with expandable error details on the failed rows.
 
 ## Database
 
@@ -134,7 +134,7 @@ lib/
 middleware.ts         Root middleware → lib/supabase/middleware.ts (session refresh + auth gating)
 styles/legacy.css     Source of truth for visual styling (Tailwind installed but unused)
 supabase/
-  migrations/         20 SQL migrations, applied to the work-account project
+  migrations/         23 SQL migrations, applied to the work-account project
   tests/              smoke (service role) + three e2e tests (run under role=authenticated)
 spec/
   PROJECT_CONTEXT.md  Working-session handoff doc — read this first
