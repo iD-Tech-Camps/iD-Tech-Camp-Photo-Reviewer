@@ -364,7 +364,17 @@ function shortKey(key: string): string {
 
 function formatError(err: unknown): string {
   if (err instanceof SmugMugApiError) {
-    return `SmugMug ${err.status}: ${err.bodyExcerpt.slice(0, 120)}`;
+    // Include the URL so a `quarantine_move / failed` row in sync_log
+    // tells us *which* endpoint blew up (album-create vs. move vs.
+    // image GET vs. authuser). Path only — the URL is long and the
+    // base host (api.smugmug.com) is implied.
+    let path = err.url;
+    try {
+      path = new URL(err.url).pathname + new URL(err.url).search;
+    } catch {
+      // Leave the raw URL if it's somehow not parseable.
+    }
+    return `SmugMug ${err.status} on ${path}: ${err.bodyExcerpt.slice(0, 160)}`;
   }
   if (err instanceof Error) return err.message;
   return String(err);

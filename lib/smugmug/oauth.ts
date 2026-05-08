@@ -90,29 +90,37 @@ export function buildAuthorizationHeader(opts: SignOptions): string {
 }
 
 export function loadCredentialsFromEnv(): OAuth1Credentials {
-  const {
-    SMUGMUG_API_KEY,
-    SMUGMUG_API_SECRET,
-    SMUGMUG_ACCESS_TOKEN,
-    SMUGMUG_ACCESS_TOKEN_SECRET,
-  } = process.env;
+  const consumerKey = sanitizeEnv("SMUGMUG_API_KEY");
+  const consumerSecret = sanitizeEnv("SMUGMUG_API_SECRET");
+  const accessToken = sanitizeEnv("SMUGMUG_ACCESS_TOKEN");
+  const accessTokenSecret = sanitizeEnv("SMUGMUG_ACCESS_TOKEN_SECRET");
 
-  if (
-    !SMUGMUG_API_KEY ||
-    !SMUGMUG_API_SECRET ||
-    !SMUGMUG_ACCESS_TOKEN ||
-    !SMUGMUG_ACCESS_TOKEN_SECRET
-  ) {
+  if (!consumerKey || !consumerSecret || !accessToken || !accessTokenSecret) {
     throw new Error(
       "SmugMug credentials missing. Set SMUGMUG_API_KEY, SMUGMUG_API_SECRET, " +
         "SMUGMUG_ACCESS_TOKEN, and SMUGMUG_ACCESS_TOKEN_SECRET in .env.local."
     );
   }
 
-  return {
-    consumerKey: SMUGMUG_API_KEY,
-    consumerSecret: SMUGMUG_API_SECRET,
-    accessToken: SMUGMUG_ACCESS_TOKEN,
-    accessTokenSecret: SMUGMUG_ACCESS_TOKEN_SECRET,
-  };
+  return { consumerKey, consumerSecret, accessToken, accessTokenSecret };
+}
+
+// Defensive normalization for credentials read from .env.local. Trims
+// whitespace and strips a single layer of surrounding straight or curly
+// quotes — the two most common foot-guns when editing a .env file by
+// hand. Either of those silently corrupts the OAuth signing key and
+// SmugMug returns oauth_problem=signature_invalid (sometimes mapped
+// through to nonce_used), which is hard to debug because the error
+// looks like a replay attack rather than a credential-shape problem.
+function sanitizeEnv(name: string): string {
+  const raw = process.env[name];
+  if (!raw) return "";
+  let v = raw.trim();
+  const first = v.charAt(0);
+  const last = v.charAt(v.length - 1);
+  const QUOTES = new Set(['"', "'", "\u201C", "\u201D", "\u2018", "\u2019"]);
+  if (v.length >= 2 && QUOTES.has(first) && QUOTES.has(last)) {
+    v = v.slice(1, -1).trim();
+  }
+  return v;
 }
