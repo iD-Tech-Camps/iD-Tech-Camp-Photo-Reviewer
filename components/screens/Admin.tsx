@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Icon } from "@/components/Icon";
-import { PageHeader, type ToastApi } from "@/components/Shell";
+import { BrandLogo, PageHeader, type ToastApi } from "@/components/Shell";
 import { useSettings, AppSettings, BonusPeriod, BonusPeriodMode } from "@/components/settings";
 import { useCurrentUser, ROLE_LABEL } from "@/lib/current-user";
 import { createClient } from "@/lib/supabase/client";
@@ -2657,7 +2657,7 @@ export function AdminSettings() {
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
               Shown in the sidebar and in browser tab.
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
               <FieldRow label="App name">
                 <DebouncedTextInput className="input"
                   value={settings.brandName}
@@ -2670,21 +2670,13 @@ export function AdminSettings() {
                   onCommit={(v) => set("brandTagline", v)}
                   maxLength={48} />
               </FieldRow>
-              <FieldRow label="Mark" hint="1 char">
-                <DebouncedTextInput className="input"
-                  style={{ textAlign: "center", fontFamily: "var(--font-display)", fontSize: 20 }}
-                  value={settings.brandMark}
-                  onCommit={(v) => set("brandMark", v)}
-                  transform={(raw) => raw.slice(0, 2)}
-                  maxLength={2} />
-              </FieldRow>
             </div>
           </div>
 
           <div className="card">
-            <h3 className="card-title" style={{ marginBottom: 4 }}>Favicon</h3>
+            <h3 className="card-title" style={{ marginBottom: 4 }}>Logo &amp; favicon</h3>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
-              Shown in the browser tab. PNG, max 1 MB. Leave empty to show no icon.
+              Shown in the sidebar next to the app name and in the browser tab. PNG, max 1 MB. Leave empty to show no logo.
             </div>
             <input
               ref={faviconFileInputRef}
@@ -2852,8 +2844,8 @@ export function AdminSettings() {
               background: "var(--paper-2)", border: "1px solid var(--rule)",
               display: "flex", alignItems: "center", gap: 10, marginBottom: 14,
             }}>
-              <div className="brand-mark" style={{ flexShrink: 0 }}>
-                <span>{settings.brandMark}</span>
+              <div style={{ flexShrink: 0 }}>
+                <BrandLogo url={faviconUrl} alt={settings.brandName} />
               </div>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div className="brand-name" style={{
@@ -2891,12 +2883,6 @@ export function AdminSettings() {
             </div>
           </div>
 
-          <div className="card" style={{ background: "var(--lake-soft)", borderColor: "transparent" }}>
-            <div className="card-eyebrow">About</div>
-            <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.5, color: "var(--ink-2)" }}>
-              Settings live on the <code style={{ fontFamily: "var(--font-mono)", fontSize: 11, background: "var(--paper)", padding: "1px 4px", borderRadius: 3 }}>app_settings</code> table in Supabase. Edits here are seen by every reviewer on their next page load.
-            </div>
-          </div>
         </div>
       </div>
     </>

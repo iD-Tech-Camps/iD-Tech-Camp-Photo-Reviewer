@@ -131,6 +131,12 @@ button {
   opacity: 0.7;
 }
 .brand-mark span { position: relative; z-index: 1; }
+/* When the brand-mark holds an uploaded favicon, drop the dark tile +
+   sun gradient so the image renders cleanly without a colored backdrop. */
+.brand-mark.brand-mark-image {
+  background: transparent;
+}
+.brand-mark.brand-mark-image::after { content: none; }
 .brand-name {
   font-family: var(--font-display);
   font-size: 17px;

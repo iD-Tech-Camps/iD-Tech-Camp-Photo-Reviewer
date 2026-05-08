@@ -13,6 +13,7 @@ import {
 } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
 import { fetchFlaggedCount } from "@/lib/reviews";
+import { brandingAssetUrl } from "@/lib/app-settings";
 
 export function Sidebar({
   current,
@@ -80,10 +81,16 @@ export function Sidebar({
     { id: "admin-settings",   label: "App settings",    icon: "gear" },
   ];
 
+  const supabaseRef = React.useRef<ReturnType<typeof createClient> | null>(null);
+  if (!supabaseRef.current) supabaseRef.current = createClient();
+  const logoUrl = settings.faviconStoragePath
+    ? brandingAssetUrl(supabaseRef.current, settings.faviconStoragePath)
+    : null;
+
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark"><span>{settings.brandMark}</span></div>
+        <BrandLogo url={logoUrl} alt={settings.brandName} />
         <div>
           <div className="brand-name">{settings.brandName}</div>
           <div className="brand-tag">{settings.brandTagline}</div>
@@ -179,6 +186,33 @@ export function Sidebar({
         </div>
       </div>
     </aside>
+  );
+}
+
+// Sidebar/preview logo. Renders the admin-uploaded favicon when present;
+// falls back to a blank tile so the brand row keeps its alignment when
+// no favicon has been configured yet.
+export function BrandLogo({
+  url,
+  alt,
+  size = 32,
+}: {
+  url: string | null;
+  alt: string;
+  size?: number;
+}) {
+  if (!url) {
+    return <div className="brand-mark" aria-hidden="true" style={{ width: size, height: size }} />;
+  }
+  return (
+    <div className="brand-mark brand-mark-image" style={{ width: size, height: size }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={url}
+        alt={alt}
+        style={{ width: "100%", height: "100%", objectFit: "contain" }}
+      />
+    </div>
   );
 }
 

@@ -1048,7 +1048,7 @@ function QueueListCard({
       </div>
       <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
         Pending photos in the reviewer queue, ordered the same way reviewers see them
-        (priority desc, captured_at {queueOrder === "newest_first" ? "newest first" : "oldest first"}).
+        (priority desc, uploaded {queueOrder === "newest_first" ? "newest first" : "oldest first"}).
       </div>
 
       {loadError && <ErrorBanner>{loadError}</ErrorBanner>}
@@ -1059,7 +1059,7 @@ function QueueListCard({
             <tr style={{ textAlign: "left", color: "var(--ink-3)", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em" }}>
               <th style={th}>Photo</th>
               <th style={th}>Camp</th>
-              <th style={th}>Captured</th>
+              <th style={th}>Uploaded</th>
               <th style={th}>Priority</th>
               <th style={th}>Status</th>
             </tr>
@@ -1069,7 +1069,7 @@ function QueueListCard({
               <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: "var(--ink-3)" }}>Loading…</td></tr>
             ) : rows.length === 0 ? (
               <tr><td colSpan={5} style={{ padding: 24, textAlign: "center", color: "var(--ink-3)" }}>
-                {filter === "priority" ? "No prioritized photos." : filter === "recent" ? "No photos captured in the last 14 days." : "Queue is empty."}
+                {filter === "priority" ? "No prioritized photos." : filter === "recent" ? "No photos uploaded in the last 14 days." : "Queue is empty."}
               </td></tr>
             ) : rows.map((r) => (
               <QueueRowView key={r.id} row={r} />

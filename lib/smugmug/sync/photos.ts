@@ -559,9 +559,13 @@ function mapImage(img: SmugMugImage, weekFolderId: string): MappedPhoto {
   return {
     smugmug_image_id: img.ImageKey,
     caption: img.Caption ?? img.Title ?? null,
-    captured_at: parseDateOrNull(
-      img.DateTimeOriginal ?? img.Date ?? img.DateTimeUploaded
-    ),
+    // Use DateTimeUploaded as the canonical timestamp. EXIF
+    // DateTimeOriginal is unreliable on the iD Tech account — many
+    // images lack EXIF and SmugMug substitutes a Y2K placeholder
+    // (~2001-01-01) that pollutes ordering and review-side displays.
+    // `Date` is a fallback for legacy responses that omit the explicit
+    // upload field.
+    captured_at: parseDateOrNull(img.DateTimeUploaded ?? img.Date),
     width: typeof img.Width === "number" ? img.Width : null,
     height: typeof img.Height === "number" ? img.Height : null,
     // ArchivedUri is the highest-fidelity URL the basic Image payload
