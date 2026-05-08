@@ -13,7 +13,7 @@ export const runtime = "nodejs";
  * SmugMug error on API failure, or 401/403 if the caller isn't an admin.
  */
 export async function GET() {
-  const supabase = createClient();
+  const supabase = await createClient();
 
   const {
     data: { user },

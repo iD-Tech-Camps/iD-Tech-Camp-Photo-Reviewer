@@ -41,13 +41,12 @@ Step 7 (Supabase persistence) is complete. The reviewer + senior flows, tags, ex
 
 ### What does NOT work yet
 - Admin Overview "Active reviewers" denominator equals total profile count (no `profiles.status` filter). → **step 11** — wired alongside the `profile_status` idle/inactive transitions in the notifications-backbone step.
-- `npm audit` reports 4 high-severity issues in Next.js 14.x; major-version upgrade pending. → **step 9**.
 
 ---
 
 ## Tech stack
 
-- **Framework:** Next.js 14 (App Router) + TypeScript + Tailwind (installed but mostly unused — legacy CSS is the source of truth for visual styling)
+- **Framework:** Next.js 15.5.x (App Router, on the `backport` LTS line) + React 19 + TypeScript + Tailwind (installed but mostly unused — legacy CSS is the source of truth for visual styling)
 - **Hosting:** Vercel (auto-deploys on push to `main`)
 - **Database + Auth:** Supabase (Postgres + Google OAuth via `@supabase/ssr`)
 - **OAuth provider:** Google Cloud (Internal Workspace app)
@@ -175,7 +174,7 @@ Supabase publishable pair set in Vercel (all environments) and `.env.local` for 
 | 6 | MVP scope refactor | ✅ Done |
 | 7 | Replace `localStorage` with Supabase persistence | ✅ Done |
 | 8 | SmugMug API integration — admin-curated import pool with folder priority (not full auto-ingest) | ✅ Done |
-| 9 | Next.js security upgrade (resolves audit warnings) | Pending |
+| 9 | Next.js security upgrade (resolves audit warnings) | ✅ Done |
 | 10 | Polish + team rollout | Pending |
 | 11 | **Notifications backbone** — reminders, nudges, role-change pings, senior-routing fan-out on flag insert, `profile_status` idle/inactive transitions | Pending |
 
@@ -250,7 +249,7 @@ Any signed-in `@idtech.com` Google account becomes a reviewer automatically via 
 - **The RLS-vs-trigger gotcha (resolved).** Trigger functions on `reviews` originally ran as the invoker. Their inner `UPDATE public.photos SET current_status = ...` was silently zero-rowed because `photos` has only a SELECT policy for authenticated users (writes are reserved for the import job via service role). Reviews inserted, but the photo status never moved. **Migration 14 marks all four review trigger functions `security definer set search_path = public`.** Anytime you write a trigger that mutates an RLS-protected table, mark it `security definer` or it'll fail silently in production.
 - **Theme has a brief light-mode flash on cold loads.** `data-theme` stays `light` until the profile fetch resolves, so dark-mode users see ~few-hundred-ms of light flash on first paint. Acceptable for an internal app; SSR-injecting the theme would mean reading Supabase from the server layout and isn't worth it.
 - **Browsers cache favicons aggressively.** After an admin replaces the favicon on Admin → Settings, reviewers may need to hard-refresh before they see the new icon. The replacement code already lands at a fresh storage path so the URL changes, but some browsers still cache by host.
-- **`npm audit` reports 4 high-severity issues in Next.js 14.x.** The fix is a major-version upgrade (14 → 16). Deferred until after core features are working. **Don't run `npm audit fix --force`** — it will break the project mid-development.
+- **Step 9 upgraded to Next 15.5.x LTS, not 16.** Pinned to `next@15.5.18` (the `backport` dist-tag) over `latest@16.x` to close every CVE in the original audit while skipping 16-only churn (Turbopack-default production builds, Node 20+ minimum, more lifecycle deprecations). The remaining 2 moderate `npm audit` items are an inherited postcss XSS in CSS-tooling reachable via `next/node_modules/postcss`; they would persist on Next 16 too and aren't worth chasing until Next bumps the bundled postcss. The Next-15 forced rewrite was async `cookies()` — handled in [lib/supabase/server.ts](../lib/supabase/server.ts) (now `async function createClient()` with `await cookies()`) and at every `await createClient()` server-side call site. `@dnd-kit/*` v6 was kept (works under React 19; v7 migration not needed) and the legacy `.eslintrc.json` was kept (still accepted by `eslint-config-next@15.5.x`; flat-config migration only becomes mandatory at v16). Spike notes in [STEP_9_SPIKE_NOTES.md](./STEP_9_SPIKE_NOTES.md). **Don't run `npm audit fix --force`** — it will downgrade Next.
 - **Pre-existing build warning:** `no-page-custom-font` in `app/layout.tsx`. Cosmetic only. Google Fonts are loaded via `<link>` rather than `next/font` to preserve the existing CSS font stacks unchanged.
 - **Vercel does not follow GitHub redirects.** If the repo is moved/transferred again in the future, the Vercel project must be manually reconnected to the new repo location. (Same for the local `origin` remote URL — that was updated to the new canonical work-org URL on 2026-05-05.)
 - **Tag deletes can soft-fail (by design).** `review_tags.tag_id → tags.id` is `on delete restrict`, so once a tag has ever been used on a flag/approve, hard-deleting it raises `23503`. The Admin TagLibrary catches that and falls back to flipping `active = false`, which hides the tag from the review modals while keeping historical labels intact via `buildTagLabelLookup` (which includes inactive rows). If you ever need to bulk-purge truly unused tags, hitting the DB with `delete from public.tags where active = false and id not in (select tag_id from public.review_tags)` is safe.

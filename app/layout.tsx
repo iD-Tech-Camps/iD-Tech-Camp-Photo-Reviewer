@@ -18,7 +18,7 @@ export async function generateMetadata(): Promise<Metadata> {
   let title = FALLBACK_TITLE;
   let iconUrl: string | null = null;
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
     const settings = await fetchAppSettings(supabase);
     if (settings) {
       const name = settings.brandName.trim();

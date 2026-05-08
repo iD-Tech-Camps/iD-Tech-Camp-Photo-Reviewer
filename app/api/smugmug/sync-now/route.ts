@@ -46,7 +46,7 @@ function describeError(err: unknown): { message: string; details?: unknown } {
  *             errorSummary, perWeekErrors, syncLogId }.
  */
 export async function POST() {
-  const supabase = createClient();
+  const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();

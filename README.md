@@ -1,6 +1,6 @@
 # iD Tech Camp Photo Reviewer Web App
 
-Internal tool for iD Tech employees to review, tag, and triage photos pulled from the company's SmugMug account. Next.js 14 (App Router) + TypeScript + Supabase (Postgres + Google OAuth).
+Internal tool for iD Tech employees to review, tag, and triage photos pulled from the company's SmugMug account. Next.js 15 (App Router) + React 19 + TypeScript + Supabase (Postgres + Google OAuth).
 
 For working-session context (architecture, roadmap, decisions, known gotchas), see [`spec/PROJECT_CONTEXT.md`](./spec/PROJECT_CONTEXT.md). For the database design, see [`spec/SCHEMA_SPEC.md`](./spec/SCHEMA_SPEC.md).
 
