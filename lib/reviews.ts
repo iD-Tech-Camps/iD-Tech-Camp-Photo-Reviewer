@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { photoImageProxyUrl } from "./photo-image-url";
 
 // One photo as the reviewer queue needs it. Camel-cased here so the UI doesn't
 // have to think about Postgres conventions; the underlying columns are
@@ -92,8 +91,8 @@ export async function fetchPendingPhotos(
       capturedAt: p.captured_at,
       width: p.width,
       height: p.height,
-      imageUrl: photoImageProxyUrl(p.id, p.image_url, "full"),
-      thumbnailUrl: photoImageProxyUrl(p.id, p.thumbnail_url, "thumb"),
+      imageUrl: p.image_url,
+      thumbnailUrl: p.thumbnail_url,
       smugmugUrl: p.smugmug_url,
       campLabel,
     };
@@ -129,7 +128,7 @@ export async function fetchRecentPhotoThumbs(
 
   return ((data ?? []) as { id: string; thumbnail_url: string | null }[]).map((r) => ({
     id: r.id,
-    thumbnailUrl: photoImageProxyUrl(r.id, r.thumbnail_url, "thumb"),
+    thumbnailUrl: r.thumbnail_url,
   }));
 }
 
@@ -230,8 +229,8 @@ export async function fetchFlaggedPhotos(
       capturedAt: p.captured_at,
       width: p.width,
       height: p.height,
-      imageUrl: photoImageProxyUrl(p.id, p.image_url, "full"),
-      thumbnailUrl: photoImageProxyUrl(p.id, p.thumbnail_url, "thumb"),
+      imageUrl: p.image_url,
+      thumbnailUrl: p.thumbnail_url,
       smugmugUrl: p.smugmug_url,
       divisionName: p.camp_weeks?.locations?.divisions?.name ?? null,
       locationName: p.camp_weeks?.locations?.name ?? null,

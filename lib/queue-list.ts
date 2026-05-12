@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { photoImageProxyUrl } from "./photo-image-url";
 
 // Read helper for the Admin → SmugMug queue list. The reviewer queue
 // (lib/reviews.ts → fetchPendingPhotos) is intentionally tighter — it
@@ -62,7 +61,7 @@ function mapRow(r: RawQueueRow): QueueRow {
   return {
     id:             r.id,
     smugmugImageId: r.smugmug_image_id,
-    thumbnailUrl:   photoImageProxyUrl(r.id, r.thumbnail_url, "thumb"),
+    thumbnailUrl:   r.thumbnail_url,
     smugmugUrl:     r.smugmug_url,
     capturedAt:     r.captured_at,
     caption:        r.caption,
