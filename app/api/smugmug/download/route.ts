@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { buildAuthorizationHeader, loadCredentialsFromEnv } from "@/lib/smugmug/oauth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -82,31 +83,15 @@ async function handle(req: NextRequest) {
     return NextResponse.json({ error: "no_source_url" }, { status: 404 });
   }
 
-  // Plain `fetch` — the SmugMug `ArchivedUri` is a public CDN URL that
-  // does not require OAuth signing. Hidden=true (quarantined) images
-  // remain reachable by direct URL; SmugMug's Hidden flag only removes
-  // them from public galleries and search.
-  //
-  // SmugMug's CDN bot-filters requests without a sensible User-Agent
-  // (returns an empty 200 body or a 403 depending on the path), so we
-  // send a vanilla desktop UA. We also buffer the bytes into memory
-  // rather than piping the upstream ReadableStream straight back: image
-  // payloads are small enough (a few MB at most for ArchivedUri) that
-  // buffering is safer than relying on streaming through Vercel's
-  // Node runtime, which has been finicky about cross-fetch ReadableStream
-  // pass-through in the past.
+  // iD Tech's SmugMug account is private, so the ArchivedUri is gated:
+  // an anonymous fetch comes back 403 from the CDN. OAuth 1.0a signing
+  // (same credentials we use against api.smugmug.com) authenticates the
+  // download. We re-sign each redirect hop because OAuth binds the URL
+  // into the signing base string — same reason `lib/smugmug/fetch.ts`
+  // uses `redirect: "manual"` for the API client.
   let upstream: Response;
   try {
-    upstream = await fetch(sourceUrl, {
-      cache: "no-store",
-      redirect: "follow",
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
-      },
-    });
+    upstream = await signedImageFetch(sourceUrl);
   } catch (err) {
     console.error("[/api/smugmug/download] upstream fetch failed:", err);
     return NextResponse.json(
@@ -125,6 +110,11 @@ async function handle(req: NextRequest) {
     );
   }
 
+  // Buffer the bytes into memory rather than piping the upstream
+  // ReadableStream straight back: image payloads are small enough (a
+  // few MB at most for ArchivedUri) that buffering is safer than
+  // relying on streaming through Vercel's Node runtime, which has been
+  // finicky about cross-fetch ReadableStream pass-through in the past.
   let bytes: ArrayBuffer;
   try {
     bytes = await upstream.arrayBuffer();
@@ -151,4 +141,40 @@ async function handle(req: NextRequest) {
       "Cache-Control": "no-store",
     },
   });
+}
+
+const MAX_REDIRECTS = 5;
+
+/**
+ * OAuth 1.0a-signed fetch for SmugMug image binaries. Unlike
+ * `lib/smugmug/fetch.ts → smugmugFetch`, this one returns the raw
+ * `Response` (no JSON envelope unwrap) because the body is binary.
+ *
+ * Re-signs each redirect hop manually for the same reason the API
+ * client does: OAuth binds the request URL into the base string, and
+ * undici's auto-follow would replay the original nonce against a
+ * different URL — SmugMug rejects that as `oauth_problem=nonce_used`.
+ */
+async function signedImageFetch(initialUrl: string): Promise<Response> {
+  const credentials = loadCredentialsFromEnv();
+  let url = initialUrl;
+  let hops = 0;
+  while (true) {
+    const authHeader = buildAuthorizationHeader({ method: "GET", url, credentials });
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: authHeader, Accept: "image/*" },
+      cache: "no-store",
+      redirect: "manual",
+    });
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get("location");
+      if (!location) return res;
+      if (hops >= MAX_REDIRECTS) return res;
+      url = new URL(location, url).toString();
+      hops++;
+      continue;
+    }
+    return res;
+  }
 }
