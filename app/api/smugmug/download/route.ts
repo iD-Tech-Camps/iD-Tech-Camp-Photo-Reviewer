@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/service";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -23,6 +22,21 @@ export const maxDuration = 60;
  * header so the browser actually saves the file.
  */
 export async function GET(req: NextRequest) {
+  try {
+    return await handle(req);
+  } catch (err) {
+    console.error("[/api/smugmug/download] uncaught:", err);
+    return NextResponse.json(
+      {
+        error: "unexpected_error",
+        message: err instanceof Error ? err.message : String(err),
+      },
+      { status: 500 },
+    );
+  }
+}
+
+async function handle(req: NextRequest) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -46,12 +60,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "photoId_required" }, { status: 400 });
   }
 
-  // Service-role read — `photos` has SELECT for authenticated users so
-  // an anon-style read would work too, but the route is already gated
-  // by the role check above and the service client avoids one round
-  // trip's worth of RLS overhead.
-  const service = createServiceClient();
-  const { data: photo, error } = await service
+  // `photos` has a SELECT policy for authenticated users, so the
+  // session-scoped client is enough. (Avoiding `createServiceClient`
+  // here also keeps this route working when SUPABASE_SERVICE_ROLE_KEY
+  // hasn't been pushed to the deployment environment yet.)
+  const { data: photo, error } = await supabase
     .from("photos")
     .select("smugmug_image_id, image_url, thumbnail_url")
     .eq("id", photoId)
@@ -73,19 +86,55 @@ export async function GET(req: NextRequest) {
   // does not require OAuth signing. Hidden=true (quarantined) images
   // remain reachable by direct URL; SmugMug's Hidden flag only removes
   // them from public galleries and search.
+  //
+  // SmugMug's CDN bot-filters requests without a sensible User-Agent
+  // (returns an empty 200 body or a 403 depending on the path), so we
+  // send a vanilla desktop UA. We also buffer the bytes into memory
+  // rather than piping the upstream ReadableStream straight back: image
+  // payloads are small enough (a few MB at most for ArchivedUri) that
+  // buffering is safer than relying on streaming through Vercel's
+  // Node runtime, which has been finicky about cross-fetch ReadableStream
+  // pass-through in the past.
   let upstream: Response;
   try {
-    upstream = await fetch(sourceUrl, { cache: "no-store", redirect: "follow" });
+    upstream = await fetch(sourceUrl, {
+      cache: "no-store",
+      redirect: "follow",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+          "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      },
+    });
   } catch (err) {
     console.error("[/api/smugmug/download] upstream fetch failed:", err);
     return NextResponse.json(
-      { error: "upstream_fetch_failed", message: err instanceof Error ? err.message : String(err) },
+      {
+        error: "upstream_fetch_failed",
+        message: err instanceof Error ? err.message : String(err),
+      },
       { status: 502 },
     );
   }
-  if (!upstream.ok || !upstream.body) {
+  if (!upstream.ok) {
+    const bodyExcerpt = await upstream.text().then((t) => t.slice(0, 400)).catch(() => "");
     return NextResponse.json(
-      { error: "upstream_not_ok", status: upstream.status },
+      { error: "upstream_not_ok", status: upstream.status, body: bodyExcerpt },
+      { status: 502 },
+    );
+  }
+
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await upstream.arrayBuffer();
+  } catch (err) {
+    console.error("[/api/smugmug/download] read upstream body failed:", err);
+    return NextResponse.json(
+      {
+        error: "upstream_read_failed",
+        message: err instanceof Error ? err.message : String(err),
+      },
       { status: 502 },
     );
   }
@@ -93,13 +142,13 @@ export async function GET(req: NextRequest) {
   const contentType = upstream.headers.get("content-type") ?? "image/jpeg";
   const ext = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
   const filename = `${row.smugmug_image_id}.${ext}`;
-  const headers = new Headers({
-    "Content-Type": contentType,
-    "Content-Disposition": `attachment; filename="${filename}"`,
-    "Cache-Control": "no-store",
+  return new Response(bytes, {
+    status: 200,
+    headers: {
+      "Content-Type": contentType,
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Length": String(bytes.byteLength),
+      "Cache-Control": "no-store",
+    },
   });
-  const contentLength = upstream.headers.get("content-length");
-  if (contentLength) headers.set("Content-Length", contentLength);
-
-  return new Response(upstream.body, { status: 200, headers });
 }
