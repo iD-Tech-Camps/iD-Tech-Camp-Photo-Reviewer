@@ -742,31 +742,31 @@ function formatRelative(iso: string): string {
 }
 
 // ── download helper ──────────────────────────────────────────────────────
-// Triggers a browser download of the photo's full-resolution SmugMug image.
+// Fetches the real SmugMug image and triggers a browser download.
 // Returns false if no usable URL is available or the fetch fails — the
 // caller surfaces an error toast in that case rather than silently no-op'ing.
 //
-// We go through our own `/api/smugmug/download` proxy rather than fetching
-// the SmugMug URL directly because `photos.smugmug.com` does not return
-// CORS headers — a direct `fetch()` from the browser is blocked, even
-// though `<img src>` rendering works (image elements don't enforce CORS).
-// The proxy fetches the bytes server-side and re-emits them same-origin
-// with a `Content-Disposition: attachment` header, so the resulting blob
-// download just works.
+// We fetch + blob-ify rather than just setting `<a download>` directly on
+// the SmugMug URL because cross-origin downloads ignore the `download`
+// attribute (the browser navigates instead). Going through a blob URL
+// forces the actual download path. SmugMug allows direct fetch from the
+// browser as long as the URL is the public ArchivedUri; no auth needed.
 async function downloadPhoto(photo: FlaggedQueueItem): Promise<boolean> {
   if (typeof document === "undefined") return false;
-  if (!photo.imageUrl && !photo.thumbnailUrl) return false;
+  const url = photo.imageUrl ?? photo.thumbnailUrl;
+  if (!url) return false;
 
   try {
-    const res = await fetch(`/api/smugmug/download?photoId=${encodeURIComponent(photo.id)}`, {
-      cache: "no-store",
-    });
+    const res = await fetch(url, { mode: "cors" });
     if (!res.ok) return false;
     const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = blobUrl;
-    const ext = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
+    // Pick a friendly filename: smugmug image id + an extension inferred
+    // from the blob mime type (defaults to .jpg, which matches what
+    // SmugMug serves for ArchivedUri the vast majority of the time).
+    const ext = blob.type === "image/png" ? "png" : "jpg";
     a.download = `${photo.smugmugImageId}.${ext}`;
     document.body.appendChild(a);
     a.click();
