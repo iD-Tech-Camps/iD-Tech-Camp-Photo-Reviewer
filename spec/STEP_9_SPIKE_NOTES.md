@@ -83,7 +83,7 @@ The bulk of the original budget was for unknowns the spike collapsed. The remain
 3. Apply the `await createClient()` / `await cookies()` diff catalogued in section 4.
 4. `npm run lint && npm run build` clean.
 5. `npm run dev` and run the manual click-through retest list (sign-in, middleware, OAuth callback, every SmugMug admin action, cron handler, AdminExamples drag-reorder mouse + keyboard, reviewer approve, reviewer flag-with-quarantine, senior accept, senior delete).
-6. Push, watch Vercel build, repeat the smoke test against the preview URL.
+6. Push, watch the build in [Vercel (`i-d-tech` / `id-tech-camp-photo-reviewer`)](https://vercel.com/i-d-tech/id-tech-camp-photo-reviewer), repeat the smoke test against the preview URL.
 7. Merge. Update [PROJECT_CONTEXT.md](./PROJECT_CONTEXT.md) (move step 9 to ✅, drop the "npm audit reports 4 high-severity issues" gotcha, refresh the "Tech stack" Next.js / React versions, refresh the migration-count line) and the framework version line in [README.md](../README.md).
 
 ## 7. Out of scope — explicit non-goals for step 9

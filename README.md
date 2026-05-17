@@ -14,6 +14,16 @@ npm run dev
 
 `.env.local` needs `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`. For cron routes locally, set `CRON_SECRET` to match Vercel.
 
+## Deployment (Vercel)
+
+| | |
+|---|---|
+| Team / project | [`i-d-tech` / `id-tech-camp-photo-reviewer`](https://vercel.com/i-d-tech/id-tech-camp-photo-reviewer) |
+| Production branch | `main` (auto-deploy on push when Git is connected) |
+| Production URL | https://id-tech-camp-photo-reviewer.vercel.app |
+
+CLI link (from repo root): `npx vercel link` → team **i-d-tech**, project **id-tech-camp-photo-reviewer**. Production deploy: `npx vercel --prod`.
+
 ## Scripts
 
 | Command | Purpose |
