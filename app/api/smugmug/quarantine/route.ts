@@ -16,22 +16,20 @@ interface QuarantineBody {
 }
 
 /**
- * Step 8.7 — Quarantine endpoint.
+ * Step 8.7 — Quarantine endpoint (post-triage-refactor edit).
  *
- * Called from `ReviewScreen.commitDecision` after a flag-with-quarantine
- * submission and from `FlagReview.resolve` after a senior accept or
- * delete on a previously-quarantined photo. The client doesn't tell
- * the server *what* to do — it just identifies the photo and the
- * server reads the photo's freshly-trigger-updated state to decide
- * whether to PATCH `Image.Hidden=true` (quarantine), `false` (release),
- * or do nothing (senior delete on an already-flagged photo).
+ * Called by the triage flow (Step 3) after a reviewer quarantines a
+ * photo or a senior releases one. The client doesn't tell the server
+ * *what* to do — it just identifies the photo and the server reads
+ * the photo's freshly-trigger-updated state to decide whether to
+ * PATCH `Image.Hidden=true` (quarantine) or `false` (release).
  *
  * Authentication: any authenticated user. Reviewers, seniors, and
  * admins all have legitimate paths to this endpoint, and the actual
- * "should I move this?" call is gated by `photos.is_quarantined` /
- * `current_status` (written by triggers under SECURITY DEFINER), not
- * by the caller's role. A malicious caller can only ever ask us to
- * reconcile to whatever state a real review has already established.
+ * "should I move this?" call is gated by `photos.is_quarantined`
+ * (written by triggers under SECURITY DEFINER), not by the caller's
+ * role. A malicious caller can only ever ask us to reconcile to
+ * whatever state a real triage action has already established.
  *
  * The handler always returns 200, even when SmugMug fails. The
  * payload's `drift: true` flag lets the client log a console warning

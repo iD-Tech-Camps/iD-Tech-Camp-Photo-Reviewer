@@ -2,10 +2,16 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 // Single-row SmugMug ingestion configuration (migration 21, step 8.2).
 // Read by the 8.4 photo-sync core to decide which camp_weeks are
-// in-scope; written by the Admin → SmugMug screen (8.5). Same singleton
-// pattern as points_config and app_settings: id is always 1.
+// in-scope; written by the Admin → SmugMug screen. Same singleton
+// pattern as app_settings: id is always 1.
+//
+// `mode` + the `smugmug_mode` enum are kept post-refactor as a placeholder
+// for the future quality-review spec — no current code consumes the
+// distinction (the sync handlers always pick a date column directly),
+// but they survive so the future spec doesn't have to recreate them.
+// `queue_order` was dropped in migration 26 (reviewer queue is gone;
+// triage iterates camp_weeks, not photos).
 export type SmugmugMode = "summer" | "off_season";
-export type QueueOrder  = "newest_first" | "oldest_first";
 
 export type SmugmugConfig = {
   mode: SmugmugMode;
@@ -17,7 +23,6 @@ export type SmugmugConfig = {
   // Lower bound for `camp_weeks.starts_on` in off-season mode (admin
   // sets this when working through archival cleanup between summers).
   earliestFetchDate: string | null;
-  queueOrder: QueueOrder;
   // Mirrored from the most recent successful sync_log row by the 8.4
   // sync handlers — exposed here so the settings card can render the
   // last-sync line without joining sync_log.
@@ -30,14 +35,13 @@ type RawSmugmugConfigRow = {
   mode: SmugmugMode;
   season_start_date: string | null;
   earliest_fetch_date: string | null;
-  queue_order: QueueOrder;
   last_sync_at: string | null;
   last_sync_status: string | null;
   updated_at: string;
 };
 
 const COLUMNS =
-  "mode, season_start_date, earliest_fetch_date, queue_order, " +
+  "mode, season_start_date, earliest_fetch_date, " +
   "last_sync_at, last_sync_status, updated_at";
 
 function mapRow(r: RawSmugmugConfigRow): SmugmugConfig {
@@ -45,7 +49,6 @@ function mapRow(r: RawSmugmugConfigRow): SmugmugConfig {
     mode:               r.mode,
     seasonStartDate:    r.season_start_date,
     earliestFetchDate:  r.earliest_fetch_date,
-    queueOrder:         r.queue_order,
     lastSyncAt:         r.last_sync_at,
     lastSyncStatus:     r.last_sync_status,
     updatedAt:          r.updated_at,
@@ -81,14 +84,13 @@ export async function updateSmugmugConfig(
   supabase: SupabaseClient,
   patch: Partial<Pick<
     SmugmugConfig,
-    "mode" | "seasonStartDate" | "earliestFetchDate" | "queueOrder"
+    "mode" | "seasonStartDate" | "earliestFetchDate"
   >>,
 ): Promise<SmugmugConfig> {
   const rowPatch: Record<string, unknown> = {};
   if (patch.mode               !== undefined) rowPatch.mode                = patch.mode;
   if (patch.seasonStartDate    !== undefined) rowPatch.season_start_date   = patch.seasonStartDate;
   if (patch.earliestFetchDate  !== undefined) rowPatch.earliest_fetch_date = patch.earliestFetchDate;
-  if (patch.queueOrder         !== undefined) rowPatch.queue_order         = patch.queueOrder;
   rowPatch.updated_at = new Date().toISOString();
 
   const { data, error } = await supabase

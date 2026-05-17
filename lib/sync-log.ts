@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // service-role sync handlers (8.4 + 8.5 endpoints), which bypass RLS;
 // reads here go through the `sync_log_select_admin` policy that gates
 // non-admins out at the database layer.
-export type SyncKind   = "scheduled" | "manual" | "mode_switch" | "priority_add" | "quarantine_move";
+export type SyncKind   = "scheduled" | "manual" | "quarantine_move" | "triage_sample";
 export type SyncStatus = "success"   | "partial" | "failed";
 
 export type SyncLogRow = {

@@ -4,40 +4,32 @@ import { SmugMugApiError } from "../fetch";
 import { setImageHidden } from "../quarantine";
 
 /**
- * Step 8.7 — quarantine reconcile core.
+ * Step 8.7 — quarantine reconcile core (post-triage-refactor edit).
  *
  * Single entry point used by the `/api/smugmug/quarantine` route. Reads
- * the photo's current DB state (which the `reviews_update_quarantine`
- * trigger has already written by the time we run), decides what the
- * SmugMug-side picture should look like, and reconciles it via a
- * single PATCH on `Image.Hidden`.
+ * the photo's current DB state, decides what the SmugMug-side picture
+ * should look like, and reconciles it via a single PATCH on
+ * `Image.Hidden`.
  *
- * Decision rule:
+ * Decision rule (post migration 26):
  *
- *   is_quarantined = true                                  → Hidden=true
- *   is_quarantined = false  AND  current_status = deleted  → noop
- *   is_quarantined = false  AND  current_status <> deleted → Hidden=false
+ *   is_quarantined = true   → Hidden=true
+ *   is_quarantined = false  → Hidden=false
  *
- * The "deleted = noop" branch is intentional: a senior delete records
- * `current_status = 'deleted'` and clears the quarantine flag, but the
- * photo is exiting all queues and there's no reason to spend a SmugMug
- * round-trip toggling visibility on something an admin will likely
- * delete on SmugMug as a separate cleanup step. The image stays
- * Hidden=true if it was already, so it remains hidden from the public
- * until manually deleted.
+ * The "current_status=deleted → noop" branch came out with
+ * `photos.current_status` in migration 26. The new senior delete
+ * happens through the triage flow (Step 3) and doesn't touch
+ * `is_quarantined`; quarantine + delete are now orthogonal axes.
  *
  * Failure posture: never throw to the caller. Drift (SmugMug is down,
  * the image was deleted by hand on SmugMug, credentials are stale)
  * lands as a `sync_log` row with `kind='quarantine_move'` and
  * `status='failed'`, surfaced on the existing Admin → SmugMug → Sync
- * log card. The reviewer's flag submission and the senior's accept/
- * delete have already succeeded by the time we run; blocking them on
- * a SmugMug round-trip would be the wrong tradeoff.
+ * log card. The flag/quarantine submission has already succeeded by
+ * the time we run; blocking the caller on a SmugMug round-trip would
+ * be the wrong tradeoff.
  *
- * The `quarantine_move` sync_kind name is preserved for backwards
- * compatibility with existing log rows; semantically it now means
- * "any quarantine-driven SmugMug visibility change," which is the
- * same audit category just implemented differently underneath.
+ * The `quarantine_move` sync_kind survives migration 26's enum swap.
  */
 
 export type QuarantineAction = "quarantine" | "release" | "noop";
@@ -57,7 +49,6 @@ interface PhotoRow {
   id: string;
   smugmug_image_id: string;
   is_quarantined: boolean;
-  current_status: "pending" | "approved" | "flagged" | "deleted";
 }
 
 export async function runQuarantineReconcile(
@@ -79,20 +70,11 @@ export async function runQuarantineReconcile(
   }
   console.log(
     `[quarantine] photo state: imageKey=${photo.smugmug_image_id} ` +
-      `is_quarantined=${photo.is_quarantined} status=${photo.current_status}`
+      `is_quarantined=${photo.is_quarantined}`
   );
 
   const intent = decideIntent(photo);
   console.log(`[quarantine] intent=${intent.action} (${intent.reason})`);
-  if (intent.action === "noop") {
-    return {
-      ok: true,
-      action: "noop",
-      drift: false,
-      message: intent.reason,
-      syncLogId: null,
-    };
-  }
 
   // Open the sync_log row up front so a hard failure mid-flow still
   // leaves a trail. Status starts as success; we overwrite on failure.
@@ -149,7 +131,7 @@ async function fetchPhoto(
 ): Promise<PhotoRow | null> {
   const { data, error } = await service
     .from("photos")
-    .select("id, smugmug_image_id, is_quarantined, current_status")
+    .select("id, smugmug_image_id, is_quarantined")
     .eq("id", photoId)
     .maybeSingle();
   if (error) throw new Error(`photo lookup failed: ${error.message}`);
@@ -205,15 +187,9 @@ async function finalizeSyncLog(
 
 function decideIntent(
   photo: PhotoRow
-): { action: "quarantine" | "release"; reason: string } | { action: "noop"; reason: string } {
+): { action: "quarantine" | "release"; reason: string } {
   if (photo.is_quarantined) {
     return { action: "quarantine", reason: "is_quarantined=true" };
-  }
-  if (photo.current_status === "deleted") {
-    return {
-      action: "noop",
-      reason: "current_status=deleted; image visibility stays as-is per spec",
-    };
   }
   return { action: "release", reason: "is_quarantined=false" };
 }

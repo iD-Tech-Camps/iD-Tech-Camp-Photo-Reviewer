@@ -1,0 +1,153 @@
+-- TRIAGE_SPEC §4 — trigger-level contract tests.
+-- Run locally after migrations 27+28:
+--   npx supabase db reset
+--   npx supabase db query --file supabase/tests/e2e_triage_triggers.sql
+
+begin;
+
+insert into auth.users (
+  id, instance_id, aud, role, email,
+  encrypted_password, email_confirmed_at,
+  raw_app_meta_data, raw_user_meta_data,
+  created_at, updated_at
+) values (
+  'eeeeeeee-1111-1111-1111-111111111101',
+  '00000000-0000-0000-0000-000000000000',
+  'authenticated', 'authenticated', 'e2e-triage-senior@test.local',
+  crypt('pw', gen_salt('bf')), now(), '{}'::jsonb, '{}'::jsonb, now(), now()
+), (
+  'eeeeeeee-1111-1111-1111-111111111102',
+  '00000000-0000-0000-0000-000000000000',
+  'authenticated', 'authenticated', 'e2e-triage-reviewer@test.local',
+  crypt('pw', gen_salt('bf')), now(), '{}'::jsonb, '{}'::jsonb, now(), now()
+) on conflict (id) do nothing;
+
+update public.profiles set role = 'senior' where id = 'eeeeeeee-1111-1111-1111-111111111101';
+
+insert into public.divisions (id, name, smugmug_folder_id) values
+  ('eeeeeeee-2222-2222-2222-222222222201', 'E2E Triage Division', 'e2e-triage-div');
+
+insert into public.locations (id, division_id, name, smugmug_folder_id) values
+  ('eeeeeeee-2222-2222-2222-222222222202',
+   'eeeeeeee-2222-2222-2222-222222222201',
+   'E2E Triage Location', 'e2e-triage-loc');
+
+do $$
+declare
+  v_loc uuid := 'eeeeeeee-2222-2222-2222-222222222202';
+  v_week1 uuid;
+  v_week2 uuid;
+  v_role public.camp_week_triage_role;
+  v_state public.camp_week_triage_state;
+  v_photo_state public.photo_triage_state;
+  v_count int;
+  v_claim_id uuid;
+begin
+  -- ── 1. Role derivation ─────────────────────────────────────────────
+  insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
+  values (v_loc, 'Week 1', 'e2e-triage-w1', date '2026-06-01', date '2026-06-05')
+  returning id into v_week1;
+
+  select triage_role into v_role from public.camp_weeks where id = v_week1;
+  if v_role <> 'first_week' then
+    raise exception 'role derivation: expected first_week, got %', v_role;
+  end if;
+
+  insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
+  values (v_loc, 'Week 2', 'e2e-triage-w2', date '2026-06-08', date '2026-06-12')
+  returning id into v_week2;
+
+  select triage_role into v_role from public.camp_weeks where id = v_week2;
+  if v_role <> 'none' then
+    raise exception 'role derivation: week2 should be none, got %', v_role;
+  end if;
+
+  update public.camp_weeks set is_first_week_override = true where id = v_week2;
+  select triage_role into v_role from public.camp_weeks where id = v_week2;
+  if v_role <> 'first_week' then
+    raise exception 'override true: expected first_week, got %', v_role;
+  end if;
+
+  -- Set role first (compute trigger does not fire on triage_role alone).
+  update public.camp_weeks set triage_role = 'second_week_recheck' where id = v_week2;
+  update public.camp_weeks set is_first_week_override = null where id = v_week2;
+  update public.camp_weeks set starts_on = date '2026-06-09' where id = v_week2;
+  select triage_role into v_role from public.camp_weeks where id = v_week2;
+  if v_role <> 'second_week_recheck' then
+    raise exception 'second_week_recheck should be preserved, got %', v_role;
+  end if;
+
+  raise notice 'scenario 1 OK: role derivation';
+
+  -- ── 2. Fanout none → first_week ──────────────────────────────────────
+  update public.camp_weeks set triage_role = 'none', triage_state = 'not_required' where id = v_week1;
+
+  insert into public.photos (camp_week_id, smugmug_image_id)
+  values (v_week1, 'e2e-triage-fanout-1');
+
+  update public.camp_weeks set triage_role = 'first_week' where id = v_week1;
+
+  select triage_state into v_state from public.camp_weeks where id = v_week1;
+  if v_state <> 'photos_in' then
+    raise exception 'fanout: expected photos_in, got %', v_state;
+  end if;
+
+  select triage_state into v_photo_state from public.photos where smugmug_image_id = 'e2e-triage-fanout-1';
+  if v_photo_state <> 'pending' then
+    raise exception 'fanout: photo should be pending, got %', v_photo_state;
+  end if;
+
+  raise notice 'scenario 2 OK: fanout';
+
+  -- ── 3. Recompute → triage_done; late photo reopens ───────────────────
+  update public.camp_weeks
+  set triage_state = 'triage_in_progress', triage_role = 'first_week'
+  where id = v_week1;
+
+  update public.photos set triage_state = 'clean' where camp_week_id = v_week1;
+
+  select triage_state into v_state from public.camp_weeks where id = v_week1;
+  if v_state <> 'triage_done' then
+    raise exception 'recompute: expected triage_done, got %', v_state;
+  end if;
+
+  insert into public.photos (camp_week_id, smugmug_image_id)
+  values (v_week1, 'e2e-triage-late');
+
+  select triage_state into v_state from public.camp_weeks where id = v_week1;
+  if v_state <> 'triage_in_progress' then
+    raise exception 'late photo: expected triage_in_progress, got %', v_state;
+  end if;
+
+  raise notice 'scenario 3 OK: recompute';
+
+  -- ── 4. Signoff side effect → second_week_recheck ─────────────────────
+  update public.camp_weeks
+  set triage_role = 'none', triage_state = 'not_required',
+      signoff_at = null, recheck_flagged_at = null
+  where id in (v_week1, v_week2);
+
+  update public.camp_weeks set triage_role = 'first_week' where id = v_week1;
+  update public.camp_weeks set triage_state = 'triage_done' where id = v_week1;
+  update public.camp_weeks set triage_role = 'none', triage_state = 'not_required' where id = v_week2;
+
+  perform set_config('request.jwt.claim.sub', 'eeeeeeee-1111-1111-1111-111111111101', true);
+  perform public.triage_signoff_camp_week(v_week1, true);
+
+  select triage_role into v_role from public.camp_weeks where id = v_week2;
+  if v_role <> 'second_week_recheck' then
+    raise exception 'signoff: sibling should be second_week_recheck, got %', v_role;
+  end if;
+
+  select triage_state into v_state from public.camp_weeks where id = v_week1;
+  if v_state <> 'complete' then
+    raise exception 'signoff: week1 should be complete, got %', v_state;
+  end if;
+
+  raise notice 'scenario 4 OK: signoff side effect';
+end;
+$$;
+
+select 'e2e triage triggers passed' as result;
+
+rollback;

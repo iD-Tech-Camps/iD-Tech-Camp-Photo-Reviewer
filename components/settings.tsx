@@ -9,31 +9,16 @@ import {
   removeFavicon as dbRemoveFavicon,
   type DbAppSettings,
 } from "@/lib/app-settings";
-import {
-  fetchBonusPeriods,
-  createBonusPeriod as dbCreateBonusPeriod,
-  updateBonusPeriod as dbUpdateBonusPeriod,
-  deleteBonusPeriod as dbDeleteBonusPeriod,
-  setBonusPeriodEnabled as dbSetBonusPeriodEnabled,
-  type BonusPeriod,
-  type BonusPeriodMode,
-} from "@/lib/bonus-periods";
 
-// Re-export so existing imports (`@/components/settings`) keep resolving.
-// The canonical source of these types is now `lib/bonus-periods.ts`.
-export type { BonusPeriod, BonusPeriodMode };
-
+// Branding shape the app needs at runtime. Migration 26 dropped the five
+// reviewer-copy fields (home_greeting, home_subtitle, completion_*,
+// empty_queue_message) and the bonus_periods table — both belonged to
+// the marketing-review surface. Any triage-flow copy keys land here
+// when they're introduced.
 export type AppSettings = {
   brandName: string;
   brandTagline: string;
   brandMark: string;
-
-  homeGreeting: string;
-  homeSubtitle: string;
-
-  completionTitle: string;
-  completionMessage: string;
-  emptyQueueMessage: string;
 
   // Brand color. Theme is per-user (see profiles.theme + useCurrentUser);
   // density was dropped in step 7.7c (never wired to the DOM/CSS).
@@ -48,15 +33,8 @@ export type AppSettings = {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   brandName: "Treeline",
-  brandTagline: "Photo Review · iD Tech",
+  brandTagline: "Camp Triage · iD Tech",
   brandMark: "Ƭ",
-
-  homeGreeting: "Ready when you are, {name}.",
-  homeSubtitle: "A fresh batch of {count} photos is waiting.",
-
-  completionTitle: "Batch complete.",
-  completionMessage: "Nice work. The next batch will be ready shortly.",
-  emptyQueueMessage: "No photos waiting right now. Check back soon.",
 
   accent: "sun",
 
@@ -64,99 +42,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
 
   faviconStoragePath: null,
 };
-
-// Returns the highest-multiplier BonusPeriod that is currently active,
-// or null if none. "Active" means: enabled, and `now` falls within either
-// the recurring weekly window or the one-time datetime range.
-//
-// All timestamps are interpreted in the reviewer's local browser timezone —
-// the admin schedules in their tz and reviewers see the pennant in theirs.
-// That's the simplest model and matches how the admin UI presents times.
-export function activeBonusPeriod(
-  periods: BonusPeriod[] | undefined | null,
-  now: Date = new Date(),
-): BonusPeriod | null {
-  if (!periods || periods.length === 0) return null;
-  let best: BonusPeriod | null = null;
-  for (const p of periods) {
-    if (!p.enabled) continue;
-    if (!isBonusPeriodActiveAt(p, now)) continue;
-    if (!best || p.multiplier > best.multiplier) best = p;
-  }
-  return best;
-}
-
-function isBonusPeriodActiveAt(p: BonusPeriod, now: Date): boolean {
-  if (p.mode === "recurring") {
-    if (!p.days.includes(now.getDay())) return false;
-    const start = parseHHMM(p.startTime);
-    const end = parseHHMM(p.endTime);
-    if (start === null || end === null || end <= start) return false;
-    const minutes = now.getHours() * 60 + now.getMinutes();
-    return minutes >= start && minutes < end;
-  }
-  if (!p.startAt || !p.endAt) return false;
-  const s = new Date(p.startAt).getTime();
-  const e = new Date(p.endAt).getTime();
-  if (Number.isNaN(s) || Number.isNaN(e) || e <= s) return false;
-  const t = now.getTime();
-  return t >= s && t < e;
-}
-
-function parseHHMM(hhmm: string): number | null {
-  const parts = hhmm.split(":");
-  if (parts.length !== 2) return null;
-  const h = parseInt(parts[0], 10);
-  const m = parseInt(parts[1], 10);
-  if (Number.isNaN(h) || Number.isNaN(m)) return null;
-  return h * 60 + m;
-}
-
-// Formats a `BonusPeriod`'s active window in a way reviewers can read at a
-// glance. The pennant on HomeScreen and ReviewScreen calls this so the
-// reviewer knows when the bonus runs (and crucially, when it ends so they
-// can decide whether to bank reviews now).
-//
-// Recurring → "10:00 AM – 11:00 AM" (start–end)
-// One-time, same calendar day → "Jun 5, 10:00 AM – 5:00 PM"
-// One-time, multi-day → "Jun 5, 10:00 AM – Jun 6, 5:00 PM"
-//
-// Both timestamps are rendered in the reviewer's local timezone, matching
-// how the admin scheduled them.
-export function formatBonusWindow(p: BonusPeriod): string {
-  if (p.mode === "recurring") {
-    return `${formatTime12(p.startTime)} – ${formatTime12(p.endTime)}`;
-  }
-  if (!p.startAt || !p.endAt) return "";
-  const s = new Date(p.startAt);
-  const e = new Date(p.endAt);
-  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return "";
-  const sameDay =
-    s.getFullYear() === e.getFullYear() &&
-    s.getMonth() === e.getMonth() &&
-    s.getDate() === e.getDate();
-  const dateFmt: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
-  const timeFmt: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
-  if (sameDay) {
-    return `${s.toLocaleDateString(undefined, dateFmt)}, ${s.toLocaleTimeString(undefined, timeFmt)} – ${e.toLocaleTimeString(undefined, timeFmt)}`;
-  }
-  return `${s.toLocaleDateString(undefined, dateFmt)}, ${s.toLocaleTimeString(undefined, timeFmt)} – ${e.toLocaleDateString(undefined, dateFmt)}, ${e.toLocaleTimeString(undefined, timeFmt)}`;
-}
-
-// Pretty multiplier: 2× / 1.5× rather than 2.0× / 1.5×.
-export function formatBonusMultiplier(multiplier: number): string {
-  return multiplier % 1 === 0 ? `${multiplier}×` : `${multiplier.toFixed(1)}×`;
-}
-
-function formatTime12(hhmm: string): string {
-  const [hStr, mStr] = hhmm.split(":");
-  const h = parseInt(hStr, 10);
-  if (Number.isNaN(h)) return hhmm;
-  const m = mStr ?? "00";
-  const period = h >= 12 ? "PM" : "AM";
-  const h12 = ((h + 11) % 12) + 1;
-  return `${h12}:${m} ${period}`;
-}
 
 // ── App settings (single-row) ───────────────────────────────────────────────
 
@@ -193,11 +78,6 @@ const DB_BACKED_KEYS = [
   "brandName",
   "brandTagline",
   "brandMark",
-  "homeGreeting",
-  "homeSubtitle",
-  "completionTitle",
-  "completionMessage",
-  "emptyQueueMessage",
   "supportEmail",
   "accent",
 ] as const satisfies readonly (keyof DbAppSettings)[];
@@ -323,144 +203,4 @@ export function useSettings(): Ctx {
     };
   }
   return ctx;
-}
-
-// ── Bonus periods (multi-row) ───────────────────────────────────────────────
-// Step 7.6d split the schedule out of AppSettings into its own DB table
-// (`bonus_periods`, migration 17). It needed its own provider because the
-// shape is a list rather than a singleton object, and CRUD is row-based.
-//
-// Consumers:
-//   - Shell.tsx → useActiveBonusPeriod uses the `periods` slice
-//   - HomeScreen / ReviewScreen render a pennant when an active period exists
-//   - Admin → Points & rules → Points multiplier bonus reads + writes here
-
-type BonusPeriodsCtx = {
-  periods: BonusPeriod[];
-  hydrated: boolean;
-  saveError: string | null;
-  create: (period: Omit<BonusPeriod, "id">) => Promise<void>;
-  update: (id: string, period: Partial<BonusPeriod> & { mode: BonusPeriodMode }) => Promise<void>;
-  remove: (id: string) => Promise<void>;
-  toggle: (id: string, enabled: boolean) => Promise<void>;
-};
-
-const BonusPeriodsContext = React.createContext<BonusPeriodsCtx | null>(null);
-
-export function BonusPeriodsProvider({ children }: { children: React.ReactNode }) {
-  const [periods, setPeriods] = React.useState<BonusPeriod[]>([]);
-  const [hydrated, setHydrated] = React.useState(false);
-  const [saveError, setSaveError] = React.useState<string | null>(null);
-  const supabase = React.useMemo(() => createClient(), []);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    fetchBonusPeriods(supabase)
-      .then((rows) => {
-        if (cancelled) return;
-        setPeriods(rows);
-        setHydrated(true);
-      })
-      .catch((err) => {
-        console.warn("[bonus-periods] fetch failed:", err?.message ?? err);
-        if (!cancelled) setHydrated(true);
-      });
-    return () => { cancelled = true; };
-  }, [supabase]);
-
-  // Each mutation does the optimistic update locally and reconciles with
-  // the DB result. On error we surface it via `saveError` and roll the
-  // local list back to the pre-write snapshot.
-
-  const create = React.useCallback(async (period: Omit<BonusPeriod, "id">) => {
-    setSaveError(null);
-    const previous = periods;
-    // Temporary id placeholder for the optimistic insertion.
-    const placeholder: BonusPeriod = { ...period, id: `temp_${Date.now()}` };
-    setPeriods([...previous, placeholder]);
-    try {
-      const created = await dbCreateBonusPeriod(supabase, period);
-      setPeriods((prev) => prev.map((p) => (p.id === placeholder.id ? created : p)));
-    } catch (err: any) {
-      console.error("[bonus-periods] create failed:", err);
-      setSaveError(err?.message ?? "Couldn't save bonus period.");
-      setPeriods(previous);
-    }
-  }, [periods, supabase]);
-
-  const update = React.useCallback(
-    async (id: string, period: Partial<BonusPeriod> & { mode: BonusPeriodMode }) => {
-      setSaveError(null);
-      const previous = periods;
-      setPeriods((prev) => prev.map((p) => (p.id === id ? { ...p, ...period } : p)));
-      try {
-        const updated = await dbUpdateBonusPeriod(supabase, id, period);
-        setPeriods((prev) => prev.map((p) => (p.id === id ? updated : p)));
-      } catch (err: any) {
-        console.error("[bonus-periods] update failed:", err);
-        setSaveError(err?.message ?? "Couldn't save bonus period.");
-        setPeriods(previous);
-      }
-    },
-    [periods, supabase],
-  );
-
-  const remove = React.useCallback(async (id: string) => {
-    setSaveError(null);
-    const previous = periods;
-    setPeriods((prev) => prev.filter((p) => p.id !== id));
-    try {
-      await dbDeleteBonusPeriod(supabase, id);
-    } catch (err: any) {
-      console.error("[bonus-periods] delete failed:", err);
-      setSaveError(err?.message ?? "Couldn't remove bonus period.");
-      setPeriods(previous);
-    }
-  }, [periods, supabase]);
-
-  const toggle = React.useCallback(async (id: string, enabled: boolean) => {
-    setSaveError(null);
-    const previous = periods;
-    setPeriods((prev) => prev.map((p) => (p.id === id ? { ...p, enabled } : p)));
-    try {
-      await dbSetBonusPeriodEnabled(supabase, id, enabled);
-    } catch (err: any) {
-      console.error("[bonus-periods] toggle failed:", err);
-      setSaveError(err?.message ?? "Couldn't update bonus period.");
-      setPeriods(previous);
-    }
-  }, [periods, supabase]);
-
-  return (
-    <BonusPeriodsContext.Provider value={{ periods, hydrated, saveError, create, update, remove, toggle }}>
-      {children}
-    </BonusPeriodsContext.Provider>
-  );
-}
-
-export function useBonusPeriods(): BonusPeriodsCtx {
-  const ctx = React.useContext(BonusPeriodsContext);
-  if (!ctx) {
-    return {
-      periods: [],
-      hydrated: false,
-      saveError: null,
-      create: async () => {},
-      update: async () => {},
-      remove: async () => {},
-      toggle: async () => {},
-    };
-  }
-  return ctx;
-}
-
-// ── Templating ──────────────────────────────────────────────────────────────
-
-export function fillTemplate(
-  template: string,
-  vars: Record<string, string | number>,
-): string {
-  return template.replace(/\{(\w+)\}/g, (_, key) =>
-    key in vars ? String(vars[key]) : `{${key}}`,
-  );
 }

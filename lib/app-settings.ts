@@ -1,22 +1,18 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-// Persisted shape for everything in the AppSettings type that lives on the
-// `app_settings` single-row table (see migration 16, plus 19 for the
-// favicon column). Bonus periods stay separate — they're a list, modeled
-// by their own table in 7.6d.
+// Persisted shape for the branding slice of `app_settings`. The five
+// reviewer-copy columns (home_greeting, home_subtitle, completion_*,
+// empty_queue_message) were dropped in migration 26 — they templated the
+// marketing-review batch UX, which no longer exists. New triage copy
+// fields (if any) get their own keys when they land.
 //
-// Keys mirror the camelCase the SettingsProvider uses; lib/app-settings.ts
-// is the single place that maps between snake_case columns and the
-// runtime shape.
+// Keys mirror the camelCase the SettingsProvider uses; this file is the
+// single place that maps between snake_case columns and the runtime
+// shape.
 export type DbAppSettings = {
   brandName: string;
   brandTagline: string;
   brandMark: string;
-  homeGreeting: string;
-  homeSubtitle: string;
-  completionTitle: string;
-  completionMessage: string;
-  emptyQueueMessage: string;
   supportEmail: string;
   // Brand color — the only "appearance" knob still global. Theme moved to
   // profiles in step 7.7c (per-user); density was dropped (never wired).
@@ -30,11 +26,6 @@ type RawAppSettingsRow = {
   brand_name: string | null;
   brand_tagline: string | null;
   brand_mark: string | null;
-  home_greeting: string;
-  home_subtitle: string;
-  completion_title: string;
-  completion_message: string;
-  empty_queue_message: string;
   support_email: string;
   accent: "sun" | "lake" | "moss" | "rose";
   favicon_storage_path: string | null;
@@ -42,8 +33,6 @@ type RawAppSettingsRow = {
 
 const COLUMNS =
   "brand_name, brand_tagline, brand_mark, " +
-  "home_greeting, home_subtitle, " +
-  "completion_title, completion_message, empty_queue_message, " +
   "support_email, accent, favicon_storage_path";
 
 // Bucket holding admin-uploaded brand artifacts (favicon today, possibly
@@ -68,11 +57,6 @@ function mapRow(r: RawAppSettingsRow): DbAppSettings {
     brandName:          r.brand_name ?? "",
     brandTagline:       r.brand_tagline ?? "",
     brandMark:          r.brand_mark ?? "",
-    homeGreeting:       r.home_greeting,
-    homeSubtitle:       r.home_subtitle,
-    completionTitle:    r.completion_title,
-    completionMessage:  r.completion_message,
-    emptyQueueMessage:  r.empty_queue_message,
     supportEmail:       r.support_email,
     accent:             r.accent,
     faviconStoragePath: r.favicon_storage_path,
@@ -98,18 +82,13 @@ export async function fetchAppSettings(
 
 // Convert a partial camelCase patch from the UI into the snake_case shape
 // the DB expects. Undefined keys are skipped (only changed fields are
-// written), so a button that only edits `theme` doesn't roundtrip every
+// written), so a button that only edits `accent` doesn't roundtrip every
 // other column.
 function toRowPatch(patch: Partial<DbAppSettings>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (patch.brandName          !== undefined) out.brand_name           = patch.brandName;
   if (patch.brandTagline       !== undefined) out.brand_tagline        = patch.brandTagline;
   if (patch.brandMark          !== undefined) out.brand_mark           = patch.brandMark;
-  if (patch.homeGreeting       !== undefined) out.home_greeting        = patch.homeGreeting;
-  if (patch.homeSubtitle       !== undefined) out.home_subtitle        = patch.homeSubtitle;
-  if (patch.completionTitle    !== undefined) out.completion_title     = patch.completionTitle;
-  if (patch.completionMessage  !== undefined) out.completion_message   = patch.completionMessage;
-  if (patch.emptyQueueMessage  !== undefined) out.empty_queue_message  = patch.emptyQueueMessage;
   if (patch.supportEmail       !== undefined) out.support_email        = patch.supportEmail;
   if (patch.accent             !== undefined) out.accent               = patch.accent;
   if (patch.faviconStoragePath !== undefined) out.favicon_storage_path = patch.faviconStoragePath;

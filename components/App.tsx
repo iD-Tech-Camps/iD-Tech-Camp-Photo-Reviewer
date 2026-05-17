@@ -1,50 +1,40 @@
 "use client";
 
 import React from "react";
-import { Sidebar, fireConfetti, useToast } from "@/components/Shell";
-import { HomeScreen } from "@/components/screens/HomeScreen";
-import { ReviewScreen, SessionComplete } from "@/components/screens/ReviewScreen";
-import {
-  ProfileScreen,
-  GuideScreen,
-} from "@/components/screens/LeaderboardProfileGuide";
+import { Sidebar, useToast } from "@/components/Shell";
 import {
   AdminOverview,
-  AdminPoints,
-  AdminExamples,
+  AdminTags,
   AdminSettings,
   SmugMugImport,
 } from "@/components/screens/Admin";
-import { FlagReviewScreen } from "@/components/screens/FlagReview";
-import { BonusPeriodsProvider, SettingsProvider, useSettings } from "@/components/settings";
+import { AdminTriageSettings } from "@/components/screens/AdminTriage";
+import { AdminLocationsNotes } from "@/components/screens/AdminLocations";
+import { TriageApp } from "@/components/screens/Triage";
+import { SettingsProvider, useSettings } from "@/components/settings";
 import { UserProvider, useCurrentUser, type Role } from "@/lib/current-user";
-import { createClient } from "@/lib/supabase/client";
-import { fetchPendingCount } from "@/lib/reviews";
 
 const VALID_SCREENS = [
-  "review",
-  "profile",
-  "guide",
-  "flag-review",
+  "triage",
   "admin-overview",
-  "admin-points",
-  "admin-examples",
+  "admin-triage",
+  "admin-locations",
+  "admin-tags",
   "admin-smugmug",
   "admin-settings",
 ];
 
-const SENIOR_SCREENS = new Set(["flag-review"]);
 const ADMIN_SCREENS = new Set([
   "admin-overview",
-  "admin-points",
-  "admin-examples",
+  "admin-triage",
+  "admin-locations",
+  "admin-tags",
   "admin-smugmug",
   "admin-settings",
 ]);
 
 function screenAllowedFor(screen: string, role: Role): boolean {
   if (ADMIN_SCREENS.has(screen)) return role === "admin";
-  if (SENIOR_SCREENS.has(screen)) return role === "senior" || role === "admin";
   return true;
 }
 
@@ -52,9 +42,7 @@ export default function App() {
   return (
     <UserProvider>
       <SettingsProvider>
-        <BonusPeriodsProvider>
-          <AppInner />
-        </BonusPeriodsProvider>
+        <AppInner />
       </SettingsProvider>
     </UserProvider>
   );
@@ -63,10 +51,7 @@ export default function App() {
 function AppInner() {
   const { settings } = useSettings();
   const { role, theme } = useCurrentUser();
-  const [screen, setScreen] = React.useState<string>("review");
-  const [mode, setMode] = React.useState<"nav" | "session" | "complete">("nav");
-  const [sessionResult, setSessionResult] = React.useState<Record<string, any> | null>(null);
-  const [showExamplesDrawer, setShowExamplesDrawer] = React.useState(true);
+  const [screen, setScreen] = React.useState<string>("triage");
   const toast = useToast();
 
   React.useEffect(() => {
@@ -81,17 +66,10 @@ function AppInner() {
 
   React.useEffect(() => {
     if (!screenAllowedFor(screen, role)) {
-      setScreen("review");
+      setScreen("triage");
     }
   }, [screen, role]);
 
-  // Theme is per-user (profiles.theme, step 7.7c) — read off useCurrentUser.
-  // Accent is global (app_settings.accent) — admin-curated brand color.
-  // Both flow through `data-theme` / `--sun` on <html> so the legacy CSS
-  // overrides in styles/legacy.css pick them up. Theme briefly stays
-  // `light` until the profile fetch resolves; that's a few hundred ms of
-  // light-mode flash for dark-mode users on cold loads, acceptable for
-  // an internal app.
   React.useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
@@ -110,82 +88,22 @@ function AppInner() {
     if (typeof document === "undefined") return;
     const name = settings.brandName.trim();
     const tag = settings.brandTagline.trim();
-    document.title = name && tag ? `${name} · ${tag}` : name || tag || "iD Tech Photo Reviewer";
+    document.title = name && tag ? `${name} · ${tag}` : name || tag || "iD Tech Camp Triage";
   }, [settings.brandName, settings.brandTagline]);
 
-  const handleStart = () => setMode("session");
-  const handleExit  = () => setMode("nav");
-  const handleComplete = (decisions: Record<string, any>) => {
-    setSessionResult(decisions);
-    setMode("complete");
-    setTimeout(() => fireConfetti(window.innerWidth * 0.2, window.innerHeight * 0.4, 60), 200);
-    setTimeout(() => fireConfetti(window.innerWidth * 0.8, window.innerHeight * 0.4, 60), 400);
-  };
-
-  // Live count of `pending` photos for the sidebar Review badge and the
-  // HomeScreen subtitle template ({{count}}). Refetches when the session
-  // ends so the badge reflects the work just completed. Null while the
-  // first request is in flight; consumers fall back to a placeholder.
-  const [pendingCount, setPendingCount] = React.useState<number | null>(null);
-  React.useEffect(() => {
-    if (mode !== "nav") return;
-    let cancelled = false;
-    const supabase = createClient();
-    fetchPendingCount(supabase)
-      .then((n) => { if (!cancelled) setPendingCount(n); })
-      .catch((err) => {
-        console.warn("[app] pending count fetch failed:", err?.message ?? err);
-      });
-    return () => { cancelled = true; };
-  }, [mode]);
-
-  if (mode === "session") {
-    return (
-      <>
-        <ReviewScreen
-          onComplete={handleComplete}
-          onExit={handleExit}
-          showExamplesDrawer={showExamplesDrawer}
-          setShowExamplesDrawer={setShowExamplesDrawer}
-          toast={toast}
-        />
-        {toast.node}
-      </>
-    );
-  }
-
-  if (mode === "complete") {
-    return (
-      <>
-        <SessionComplete
-          decisions={sessionResult ?? {}}
-          onHome={() => { setMode("nav"); setScreen("review"); }}
-          onAnother={() => setMode("session")}
-        />
-        {toast.node}
-      </>
-    );
-  }
-
-  const activeScreen = screenAllowedFor(screen, role) ? screen : "review";
+  const activeScreen = screenAllowedFor(screen, role) ? screen : "triage";
 
   return (
     <div className="app-shell" data-screen-label={activeScreen}>
-      <Sidebar
-        current={activeScreen}
-        onNav={setScreen}
-        pendingCount={pendingCount ?? undefined}
-      />
+      <Sidebar current={activeScreen} onNav={setScreen} />
       <main className="main">
-        {activeScreen === "review"      && <HomeScreen onStart={handleStart} onNav={setScreen} pendingCount={pendingCount ?? undefined} />}
-        {activeScreen === "profile"     && <ProfileScreen />}
-        {activeScreen === "guide"       && <GuideScreen />}
-        {activeScreen === "flag-review" && <FlagReviewScreen toast={toast} />}
-        {activeScreen === "admin-overview"   && <AdminOverview toast={toast} />}
-        {activeScreen === "admin-points"     && <AdminPoints />}
-        {activeScreen === "admin-examples"   && <AdminExamples toast={toast} />}
-        {activeScreen === "admin-smugmug"    && <SmugMugImport toast={toast} />}
-        {activeScreen === "admin-settings"   && <AdminSettings />}
+        {activeScreen === "triage"           && <TriageApp toast={toast} />}
+        {activeScreen === "admin-overview"  && <AdminOverview toast={toast} />}
+        {activeScreen === "admin-triage"    && <AdminTriageSettings toast={toast} />}
+        {activeScreen === "admin-locations" && <AdminLocationsNotes toast={toast} />}
+        {activeScreen === "admin-tags"      && <AdminTags />}
+        {activeScreen === "admin-smugmug"   && <SmugMugImport toast={toast} />}
+        {activeScreen === "admin-settings"  && <AdminSettings />}
       </main>
       {toast.node}
     </div>

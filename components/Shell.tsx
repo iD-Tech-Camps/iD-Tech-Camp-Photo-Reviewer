@@ -3,51 +3,25 @@
 import React from "react";
 import { Icon } from "@/components/Icon";
 import { createClient } from "@/lib/supabase/client";
-import {
-  useSettings,
-  useBonusPeriods,
-  activeBonusPeriod,
-  formatBonusWindow,
-  formatBonusMultiplier,
-  type BonusPeriod,
-} from "@/components/settings";
+import { useSettings } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
-import { fetchFlaggedCount } from "@/lib/reviews";
 import { brandingAssetUrl } from "@/lib/app-settings";
 
+// Sidebar nav — pared back during the triage refactor's demolition pass.
+// The reviewer/senior surfaces (Review, Profile, Guide, Flag review) are
+// gone; the triage hub + senior dashboard land in Step 3 and slot in
+// here. Until then everyone sees a single "Triage" placeholder; admins
+// also see the Admin section.
 export function Sidebar({
   current,
   onNav,
-  pendingCount,
 }: {
   current: string;
   onNav: (id: string) => void;
-  pendingCount?: number;
 }) {
   const { settings } = useSettings();
   const { email, fullName, firstName, initials, loading, role } = useCurrentUser();
   const [signingOut, setSigningOut] = React.useState(false);
-  const [flaggedCount, setFlaggedCount] = React.useState<number | null>(null);
-
-  // Pull the live flagged-queue count for the senior badge. Only seniors and
-  // admins see the badge, so skip the query for plain reviewers to save a
-  // round-trip.
-  const canSeeFlaggedBadge = role === "senior" || role === "admin";
-  React.useEffect(() => {
-    if (!canSeeFlaggedBadge) {
-      setFlaggedCount(null);
-      return;
-    }
-    let cancelled = false;
-    const supabase = createClient();
-    fetchFlaggedCount(supabase)
-      .then((n) => { if (!cancelled) setFlaggedCount(n); })
-      .catch((err) => {
-        console.warn("[sidebar] flagged count fetch failed:", err?.message ?? err);
-        if (!cancelled) setFlaggedCount(null);
-      });
-    return () => { cancelled = true; };
-  }, [canSeeFlaggedBadge, current]);
 
   const handleSignOut = async () => {
     if (signingOut) return;
@@ -60,25 +34,25 @@ export function Sidebar({
   const displayName = fullName || firstName || (email ? email.split("@")[0] : (loading ? "…" : "Reviewer"));
   const avatarInitials = loading ? "··" : initials;
 
-  const canSeeFlagReview = canSeeFlaggedBadge;
   const canSeeAdmin = role === "admin";
 
-  const userItems: { id: string; label: string; icon: string; badge?: number }[] = [
-    { id: "review",   label: "Review",           icon: "review", badge: pendingCount },
-    { id: "profile",  label: "My profile",       icon: "user" },
-    { id: "guide",    label: "Guide & examples", icon: "book" },
+  const userItems: { id: string; label: string; icon: string }[] = [
+    // Placeholder slot — replaced by the real triage hub in Step 3.
+    { id: "triage", label: "Triage", icon: "review" },
   ];
 
-  const seniorItems: { id: string; label: string; icon: string; badge?: number }[] = [
-    { id: "flag-review", label: "Flag review", icon: "flag", badge: flaggedCount ?? undefined },
-  ];
-
+  // Admin entries the demolition pass leaves standing. The remaining
+  // pre-refactor admin screens (Points & rules, Example library) are
+  // gone; Tags is extracted from the old Points & rules card into its
+  // own slot so admins can still manage the tag library while Step 3
+  // builds out the triage surfaces.
   const adminItems = [
-    { id: "admin-overview",   label: "Overview",        icon: "users" },
-    { id: "admin-points",     label: "Points & rules",  icon: "medal" },
-    { id: "admin-examples",   label: "Example library", icon: "image" },
-    { id: "admin-smugmug",    label: "SmugMug import",  icon: "download" },
-    { id: "admin-settings",   label: "App settings",    icon: "gear" },
+    { id: "admin-overview",  label: "Overview",         icon: "users" },
+    { id: "admin-triage",    label: "Triage settings",  icon: "star" },
+    { id: "admin-locations", label: "Locations notes", icon: "tag" },
+    { id: "admin-tags",      label: "Tag library",      icon: "tag" },
+    { id: "admin-smugmug",   label: "SmugMug import",   icon: "download" },
+    { id: "admin-settings",  label: "App settings",     icon: "gear" },
   ];
 
   const supabaseRef = React.useRef<ReturnType<typeof createClient> | null>(null);
@@ -106,26 +80,8 @@ export function Sidebar({
         >
           <Icon name={it.icon} />
           <span>{it.label}</span>
-          {it.badge ? <span className="badge">{it.badge}</span> : null}
         </button>
       ))}
-
-      {canSeeFlagReview && (
-        <>
-          <div className="nav-section">Senior</div>
-          {seniorItems.map(it => (
-            <button
-              key={it.id}
-              className={"nav-item" + (current === it.id ? " active" : "")}
-              onClick={() => onNav(it.id)}
-            >
-              <Icon name={it.icon} />
-              <span>{it.label}</span>
-              {it.badge ? <span className="badge">{it.badge}</span> : null}
-            </button>
-          ))}
-        </>
-      )}
 
       {canSeeAdmin && (
         <>
@@ -273,159 +229,28 @@ export function fireConfetti(
   }
 }
 
-type InfoToast   = { id: number; kind: "info";   msg: string; icon?: string; tone?: string };
-type PointsToast = { id: number; kind: "points"; amount: number; label: string };
-type Toast = InfoToast | PointsToast;
+type Toast = { id: number; kind: "info"; msg: string; icon?: string; tone?: string };
 
 export function useToast() {
   const [toasts, setToasts] = React.useState<Toast[]>([]);
-  const push = (t: Omit<InfoToast, "id"> | Omit<PointsToast, "id">) => {
+  const push = (t: Omit<Toast, "id" | "kind">) => {
     const id = Date.now() + Math.random();
-    setToasts(ts => [...ts, { ...t, id } as Toast]);
+    setToasts(ts => [...ts, { ...t, id, kind: "info" }]);
     setTimeout(() => setToasts(ts => ts.filter(x => x.id !== id)), 2400);
   };
-  const show = (msg: string, icon?: string) => push({ kind: "info", msg, icon });
-  const showPoints = (amount: number, label = "points") =>
-    push({ kind: "points", amount, label });
+  const show = (msg: string, icon?: string) => push({ msg, icon });
 
   const node = (
     <div className="toast-stack">
-      {toasts.map(t => {
-        if (t.kind === "points") {
-          return (
-            <div key={t.id} className="toast toast-points">
-              <Icon name="stars" size={20} />
-              <div>
-                <div className="toast-amount">+{t.amount}</div>
-                <div className="toast-label">{t.label}</div>
-              </div>
-            </div>
-          );
-        }
-        return (
-          <div key={t.id} className={"toast" + (t.tone ? " toast-" + t.tone : "")}>
-            {t.icon && <Icon name={t.icon} size={15} />}
-            <span>{t.msg}</span>
-          </div>
-        );
-      })}
+      {toasts.map(t => (
+        <div key={t.id} className={"toast" + (t.tone ? " toast-" + t.tone : "")}>
+          {t.icon && <Icon name={t.icon} size={15} />}
+          <span>{t.msg}</span>
+        </div>
+      ))}
     </div>
   );
-  return { show, showPoints, node };
+  return { show, node };
 }
 
 export type ToastApi = ReturnType<typeof useToast>;
-
-// Returns the currently-active Points Multiplier Bonus (if any) and
-// re-evaluates on a timer so windows that start or end mid-session update
-// without a refresh. Both HomeScreen and ReviewScreen subscribe so they
-// stay in sync. Tick interval is 30s — fine-grained enough that "ends in
-// 1 minute" wraps cleanly into "no bonus" without a noticeable delay, but
-// not so frequent that we waste re-renders.
-export function useActiveBonusPeriod(): BonusPeriod | null {
-  const { periods } = useBonusPeriods();
-  const [tick, setTick] = React.useState(0);
-  React.useEffect(() => {
-    const t = setInterval(() => setTick((n) => n + 1), 30_000);
-    return () => clearInterval(t);
-  }, []);
-  return React.useMemo(
-    () => activeBonusPeriod(periods),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [periods, tick],
-  );
-}
-
-// Visible callout that a Points Multiplier Bonus is currently active.
-// Two presentation modes:
-//
-//   * `compact` — a single `pennant`-styled flag with multiplier + label +
-//     window. Used inside the ReviewScreen header where horizontal space
-//     is at a premium.
-//   * `banner` — a softer, ~2-line callout with the same info, intended
-//     for the HomeScreen where the reviewer is still deciding whether to
-//     start a session.
-//
-// Both share the same source data and the same window-formatter, so the
-// content is consistent — only the chrome differs.
-export function BonusPennant({
-  period,
-  variant = "compact",
-}: {
-  period: BonusPeriod;
-  variant?: "compact" | "banner";
-}) {
-  const mult = formatBonusMultiplier(period.multiplier);
-  const label = period.label?.trim() || `${mult} bonus`;
-  const window = formatBonusWindow(period);
-
-  if (variant === "compact") {
-    return (
-      <span
-        className="pennant"
-        style={{ fontWeight: 600 }}
-        title={`Multiplier bonus active — ${label}, ${window}`}
-      >
-        {mult}&nbsp;·&nbsp;{label.toUpperCase()}
-        {window && <>&nbsp;·&nbsp;{window.toUpperCase()}</>}
-      </span>
-    );
-  }
-
-  return (
-    <div
-      role="status"
-      style={{
-        display: "inline-flex",
-        flexDirection: "column",
-        gap: 4,
-        padding: "12px 18px",
-        borderRadius: "var(--radius-sm)",
-        background: "var(--sun-soft)",
-        border: "1px solid var(--sun)",
-        color: "var(--ink)",
-        textAlign: "left",
-        maxWidth: "100%",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 22,
-            fontWeight: 600,
-            color: "var(--sun)",
-            letterSpacing: "-0.01em",
-          }}
-        >
-          {mult}
-        </span>
-        <span
-          style={{
-            fontFamily: "var(--font-display)",
-            fontSize: 16,
-            fontWeight: 500,
-            letterSpacing: "-0.01em",
-          }}
-        >
-          {label}
-        </span>
-        <span className="pill pill-sun" style={{ fontSize: 10 }}>
-          Active
-        </span>
-      </div>
-      {window && (
-        <div
-          style={{
-            fontSize: 12,
-            color: "var(--ink-2)",
-            fontFamily: "var(--font-mono)",
-            letterSpacing: "0.04em",
-          }}
-        >
-          {window}
-        </div>
-      )}
-    </div>
-  );
-}

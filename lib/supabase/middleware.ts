@@ -5,7 +5,13 @@ import { NextResponse, type NextRequest } from "next/server";
 // has no Supabase user session by design (cron auth is a CRON_SECRET
 // bearer token, enforced inside the route handler). Without this
 // whitelist the middleware redirects every cron call to /login.
-const PUBLIC_PATHS = ["/login", "/auth/callback", "/api/smugmug/sync-scheduled"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/auth/callback",
+  "/api/smugmug/sync-scheduled",
+  "/api/triage/sample-burst",
+  "/api/triage/sweep-claims",
+];
 
 function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some(

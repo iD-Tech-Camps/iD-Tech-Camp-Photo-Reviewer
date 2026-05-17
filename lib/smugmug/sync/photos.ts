@@ -13,16 +13,14 @@ import { mapWithConcurrency } from "./concurrency";
  * `/api/smugmug/sync-scheduled` route (Vercel Cron + CRON_SECRET). It
  * walks every in-scope camp week under a `synced=true` division,
  * enumerates each album's images via the SmugMug API, and reconciles
- * them into `public.photos` according to the rules pinned in
- * `spec/PROJECT_CONTEXT.md` step 8 / `spec/SCHEMA_SPEC.md`:
+ * them into `public.photos` according to spec/TRIAGE_SPEC.md §0:
  *
  *  - Photos already in the table are matched by `smugmug_image_id` and
  *    updated in place when fields drift; never re-inserted.
- *  - Photos missing from SmugMug that have no `reviews` rows yet are
- *    DELETE'd; the row count drives `sync_log.photos_removed`.
- *  - Photos missing from SmugMug that have at least one review row are
- *    left untouched in whatever terminal state their last review put
- *    them in. Review history is forever.
+ *  - Photos missing from SmugMug are DELETE'd unless preserved: any row
+ *    with triage history (`triage_events`) or `triage_state` other than
+ *    `not_required` stays in the DB.
+ *  - Removed row count drives `sync_log.photos_removed`.
  *  - Re-parented photos (same `smugmug_image_id`, different parent
  *    folder on SmugMug) get their `camp_week_id` updated.
  *
@@ -83,6 +81,7 @@ interface PhotoRow {
   id: string;
   camp_week_id: string;
   smugmug_image_id: string;
+  triage_state: string;
   caption: string | null;
   captured_at: string | null;
   width: number | null;
@@ -433,20 +432,20 @@ async function syncOneWeek(
     added += 1;
   }
 
-  // 2. Existing rows in this week that the walk didn't see — delete the
-  //    ones that have no review history. Reviewed rows stay forever.
+  // 2. Existing rows in this week that the walk didn't see — delete only
+  //    when triage has not touched them (TRIAGE_SPEC §0).
   const walkedKeySet = new Set(walkedKeys);
   const orphanIds = existing
     .filter((p) => !walkedKeySet.has(p.smugmug_image_id))
     .map((p) => p.id);
   let removed = 0;
   if (orphanIds.length > 0) {
-    const reviewedIds = await fetchPhotoIdsWithReviews(supabase, orphanIds);
-    const deletable = orphanIds.filter((id) => !reviewedIds.has(id));
-    if (deletable.length > 0) {
-      const { error } = await supabase.from("photos").delete().in("id", deletable);
+    const protectedIds = await fetchProtectedOrphanIds(supabase, orphanIds);
+    const deletableIds = orphanIds.filter((id) => !protectedIds.has(id));
+    if (deletableIds.length > 0) {
+      const { error } = await supabase.from("photos").delete().in("id", deletableIds);
       if (error) throw new Error(`photos delete failed: ${error.message}`);
-      removed = deletable.length;
+      removed = deletableIds.length;
     }
   }
 
@@ -464,7 +463,7 @@ async function fetchExistingForWeek(
     const { data, error } = await supabase
       .from("photos")
       .select(
-        "id, camp_week_id, smugmug_image_id, caption, captured_at, " +
+        "id, camp_week_id, smugmug_image_id, triage_state, caption, captured_at, " +
           "width, height, image_url, thumbnail_url, smugmug_url, smugmug_folder_id"
       )
       .eq("camp_week_id", campWeekId)
@@ -482,6 +481,45 @@ async function fetchExistingForWeek(
 // crowds out the URL when arr is large. SmugMug album sizes can hit a
 // few thousand images per week, so chunk the lookup.
 const KEY_BATCH_SIZE = 200;
+const ORPHAN_BATCH_SIZE = 200;
+
+/** Orphans with triage_events or triage_state <> not_required must not be deleted. */
+async function fetchProtectedOrphanIds(
+  supabase: SupabaseClient,
+  orphanIds: string[]
+): Promise<Set<string>> {
+  const protectedIds = new Set<string>();
+  if (orphanIds.length === 0) return protectedIds;
+
+  for (let i = 0; i < orphanIds.length; i += ORPHAN_BATCH_SIZE) {
+    const batch = orphanIds.slice(i, i + ORPHAN_BATCH_SIZE);
+
+    const { data: stateRows, error: stateErr } = await supabase
+      .from("photos")
+      .select("id")
+      .in("id", batch)
+      .neq("triage_state", "not_required");
+    if (stateErr) {
+      throw new Error(`photos triage_state read failed: ${stateErr.message}`);
+    }
+    for (const row of stateRows ?? []) {
+      protectedIds.add((row as { id: string }).id);
+    }
+
+    const { data: eventRows, error: eventErr } = await supabase
+      .from("triage_events")
+      .select("photo_id")
+      .in("photo_id", batch);
+    if (eventErr) {
+      throw new Error(`triage_events read failed: ${eventErr.message}`);
+    }
+    for (const row of eventRows ?? []) {
+      protectedIds.add((row as { photo_id: string }).photo_id);
+    }
+  }
+
+  return protectedIds;
+}
 
 async function fetchPhotosByKeysExcludingWeek(
   supabase: SupabaseClient,
@@ -495,7 +533,7 @@ async function fetchPhotosByKeysExcludingWeek(
     const { data, error } = await supabase
       .from("photos")
       .select(
-        "id, camp_week_id, smugmug_image_id, caption, captured_at, " +
+        "id, camp_week_id, smugmug_image_id, triage_state, caption, captured_at, " +
           "width, height, image_url, thumbnail_url, smugmug_url, smugmug_folder_id"
       )
       .in("smugmug_image_id", batch)
@@ -504,26 +542,6 @@ async function fetchPhotosByKeysExcludingWeek(
     out.push(...((data ?? []) as unknown as PhotoRow[]));
   }
   return out;
-}
-
-async function fetchPhotoIdsWithReviews(
-  supabase: SupabaseClient,
-  photoIds: string[]
-): Promise<Set<string>> {
-  if (photoIds.length === 0) return new Set();
-  const reviewed = new Set<string>();
-  for (let i = 0; i < photoIds.length; i += KEY_BATCH_SIZE) {
-    const batch = photoIds.slice(i, i + KEY_BATCH_SIZE);
-    const { data, error } = await supabase
-      .from("reviews")
-      .select("photo_id")
-      .in("photo_id", batch);
-    if (error) throw new Error(`reviews lookup failed: ${error.message}`);
-    for (const r of (data ?? []) as { photo_id: string }[]) {
-      reviewed.add(r.photo_id);
-    }
-  }
-  return reviewed;
 }
 
 async function insertPhotoRow(
