@@ -15,8 +15,8 @@ export function listNodeChildren(
 }
 
 /**
- * Given a node id, returns the album key for that node, or null if the
- * node isn't an Album. Used by the 8.4 photo-enumeration job to translate
+ * Given a node id, returns the album key for that node, or null when the
+ * node has no `Uris.Album` resource. Used by the 8.4 photo-enumeration job to translate
  * a `camp_weeks.smugmug_folder_id` (a Node id) into the album-scoped
  * endpoint that lists images.
  *
@@ -28,7 +28,6 @@ export function listNodeChildren(
  */
 export async function getAlbumKeyForNode(nodeId: string): Promise<string | null> {
   const node = await getNode(nodeId);
-  if (node.Type !== "Album") return null;
   const albumUri = node.Uris?.Album?.Uri;
   if (!albumUri) return null;
   const key = albumUri.split("/").filter(Boolean).pop();

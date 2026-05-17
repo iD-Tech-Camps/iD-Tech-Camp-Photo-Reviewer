@@ -17,6 +17,14 @@ begin
   if v_cfg <> 1 then
     raise exception 'triage_config singleton missing';
   end if;
+
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'triage_config'
+      and column_name = 'season_first_week_start'
+  ) then
+    raise exception 'triage_config.season_first_week_start missing (run migration 31)';
+  end if;
 end;
 $$;
 

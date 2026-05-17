@@ -25,13 +25,11 @@ import { mapWithConcurrency } from "./concurrency";
  *    folder on SmugMug) get their `camp_week_id` updated.
  *
  * Scope resolution:
- *  - `summer` mode: weeks where `starts_on >= smugmug_config.season_start_date`.
- *  - `off_season` mode: weeks where `starts_on >= smugmug_config.earliest_fetch_date`.
- *  - In both modes, the week's division must have `synced = true`.
+ *  - weeks where `starts_on >= triage_config.season_first_week_start`.
+ *  - the week's division must have `synced = true`.
  *
  * The Supabase client passed in MUST be a service-role client — every
- * write target (`photos`, `sync_log`, `smugmug_config`) is RLS-locked
- * against authenticated-role writes.
+ * write target (`photos`, `sync_log`) is RLS-locked against authenticated-role writes.
  */
 
 // Bounded fan-out so a sync with 150+ in-scope weeks doesn't fire 150+
@@ -46,7 +44,6 @@ export interface PhotoSyncOptions {
 }
 
 export interface PhotoSyncScope {
-  mode: "summer" | "off_season";
   cutoffDate: string;
   weekCount: number;
 }
@@ -55,6 +52,8 @@ export interface PhotoSyncResult {
   syncLogId: string | null;
   status: "success" | "partial" | "failed";
   scope: PhotoSyncScope | null;
+  weeksInScope: number;
+  imagesSeen: number;
   photosAdded: number;
   photosUpdated: number;
   photosRemoved: number;
@@ -62,10 +61,8 @@ export interface PhotoSyncResult {
   perWeekErrors: Array<{ campWeekId: string; smugmugFolderId: string; message: string }>;
 }
 
-interface SmugmugConfigRow {
-  mode: "summer" | "off_season";
-  season_start_date: string | null;
-  earliest_fetch_date: string | null;
+interface TriageConfigRow {
+  season_first_week_start: string;
 }
 
 interface CampWeekRow {
@@ -122,6 +119,8 @@ export async function runPhotoSync(
 
   let status: "success" | "partial" | "failed" = "success";
   let scope: PhotoSyncScope | null = null;
+  let weeksInScope = 0;
+  let imagesSeen = 0;
   let photosAdded = 0;
   let photosUpdated = 0;
   let photosRemoved = 0;
@@ -130,12 +129,12 @@ export async function runPhotoSync(
 
   try {
     // 2. Read config + compute the date cutoff.
-    const config = await fetchConfig(supabase);
-    const cutoffDate = resolveCutoff(config);
+    const cutoffDate = await fetchSyncCutoffDate(supabase);
 
     // 3. Resolve in-scope weeks.
     const weeks = await fetchInScopeWeeks(supabase, cutoffDate);
-    scope = { mode: config.mode, cutoffDate, weekCount: weeks.length };
+    weeksInScope = weeks.length;
+    scope = { cutoffDate, weekCount: weeks.length };
 
     // 4. Walk + reconcile each week, bounded in-flight.
     const perWeekResults = await mapWithConcurrency(
@@ -151,7 +150,7 @@ export async function runPhotoSync(
             smugmugFolderId: week.smugmug_folder_id,
             message,
           });
-          return { added: 0, updated: 0, removed: 0 };
+          return { added: 0, updated: 0, removed: 0, imagesSeen: 0 };
         }
       }
     );
@@ -160,6 +159,7 @@ export async function runPhotoSync(
       photosAdded += r.added;
       photosUpdated += r.updated;
       photosRemoved += r.removed;
+      imagesSeen += r.imagesSeen;
     }
 
     if (perWeekErrors.length > 0) {
@@ -172,20 +172,23 @@ export async function runPhotoSync(
     errorSummary = err instanceof Error ? err.message : String(err);
   }
 
-  // 5. Update sync_log + smugmug_config with the terminal state.
+  // 5. Finalize sync_log with terminal state.
   await finalizeSyncLog(supabase, syncLogId, {
     status,
+    weeks_in_scope: weeksInScope,
+    images_seen: imagesSeen,
     photos_added: photosAdded,
     photos_updated: photosUpdated,
     photos_removed: photosRemoved,
     error_summary: errorSummary,
   });
-  await updateConfigSummary(supabase, status, photosAdded, photosUpdated, photosRemoved, errorSummary);
 
   return {
     syncLogId,
     status,
     scope,
+    weeksInScope,
+    imagesSeen,
     photosAdded,
     photosUpdated,
     photosRemoved,
@@ -226,6 +229,8 @@ async function finalizeSyncLog(
   id: string,
   patch: {
     status: "success" | "partial" | "failed";
+    weeks_in_scope: number;
+    images_seen: number;
     photos_added: number;
     photos_updated: number;
     photos_removed: number;
@@ -247,62 +252,26 @@ async function finalizeSyncLog(
   }
 }
 
-async function updateConfigSummary(
-  supabase: SupabaseClient,
-  status: "success" | "partial" | "failed",
-  added: number,
-  updated: number,
-  removed: number,
-  errorSummary: string | null
-): Promise<void> {
-  const summary =
-    status === "failed"
-      ? `failed · ${errorSummary ?? "unknown error"}`
-      : `${status} · +${added} ~${updated} -${removed}`;
-  const { error } = await supabase
-    .from("smugmug_config")
-    .update({
-      last_sync_at: new Date().toISOString(),
-      last_sync_status: summary,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", 1);
-  if (error) {
-    console.error("[runPhotoSync] smugmug_config summary update failed:", error);
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Scope resolution
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function fetchConfig(supabase: SupabaseClient): Promise<SmugmugConfigRow> {
+async function fetchSyncCutoffDate(supabase: SupabaseClient): Promise<string> {
   const { data, error } = await supabase
-    .from("smugmug_config")
-    .select("mode, season_start_date, earliest_fetch_date")
+    .from("triage_config")
+    .select("season_first_week_start")
     .eq("id", 1)
     .single();
   if (error || !data) {
-    throw new Error(`smugmug_config read failed: ${error?.message ?? "no row"}`);
+    throw new Error(`triage_config read failed: ${error?.message ?? "no row"}`);
   }
-  return data as SmugmugConfigRow;
-}
-
-function resolveCutoff(config: SmugmugConfigRow): string {
-  if (config.mode === "summer") {
-    if (!config.season_start_date) {
-      throw new Error(
-        "smugmug_config.season_start_date is NULL but mode=summer; set it before syncing."
-      );
-    }
-    return config.season_start_date;
-  }
-  if (!config.earliest_fetch_date) {
+  const row = data as TriageConfigRow;
+  if (!row.season_first_week_start) {
     throw new Error(
-      "smugmug_config.earliest_fetch_date is NULL but mode=off_season; set it before syncing."
+      "triage_config.season_first_week_start is NULL; set First camp week start in App settings before syncing."
     );
   }
-  return config.earliest_fetch_date;
+  return row.season_first_week_start;
 }
 
 async function fetchInScopeWeeks(
@@ -368,7 +337,7 @@ async function fetchInScopeWeeks(
 async function syncOneWeek(
   supabase: SupabaseClient,
   week: CampWeekRow
-): Promise<{ added: number; updated: number; removed: number }> {
+): Promise<{ added: number; updated: number; removed: number; imagesSeen: number }> {
   // Resolve the album key for this week's SmugMug folder. Skip cleanly
   // if the node isn't actually an Album (e.g. someone synced a folder
   // that hasn't been turned into an album yet) — non-fatal; reconcile
@@ -449,7 +418,7 @@ async function syncOneWeek(
     }
   }
 
-  return { added, updated, removed };
+  return { added, updated, removed, imagesSeen: walked.length };
 }
 
 async function fetchExistingForWeek(

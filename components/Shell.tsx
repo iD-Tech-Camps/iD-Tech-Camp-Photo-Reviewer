@@ -48,10 +48,9 @@ export function Sidebar({
   // builds out the triage surfaces.
   const adminItems = [
     { id: "admin-overview",  label: "Overview",         icon: "users" },
-    { id: "admin-triage",    label: "Triage settings",  icon: "star" },
     { id: "admin-locations", label: "Locations notes", icon: "tag" },
     { id: "admin-tags",      label: "Tag library",      icon: "tag" },
-    { id: "admin-smugmug",   label: "SmugMug import",   icon: "download" },
+    { id: "admin-smugmug",   label: "Photo sync",       icon: "download" },
     { id: "admin-settings",  label: "App settings",     icon: "gear" },
   ];
 

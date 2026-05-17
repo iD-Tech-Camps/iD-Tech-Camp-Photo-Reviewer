@@ -16,6 +16,8 @@ export type SyncLogRow = {
   finishedAt: string | null;
   kind: SyncKind;
   status: SyncStatus;
+  weeksInScope: number | null;
+  imagesSeen: number | null;
   photosAdded: number;
   photosUpdated: number;
   photosRemoved: number;
@@ -33,6 +35,8 @@ type RawSyncLogRow = {
   finished_at: string | null;
   kind: SyncKind;
   status: SyncStatus;
+  weeks_in_scope: number | null;
+  images_seen: number | null;
   photos_added: number;
   photos_updated: number;
   photos_removed: number;
@@ -42,8 +46,9 @@ type RawSyncLogRow = {
 };
 
 const COLUMNS =
-  "id, started_at, finished_at, kind, status, photos_added, photos_updated, " +
-  "photos_removed, error_summary, triggered_by, profiles ( full_name, email )";
+  "id, started_at, finished_at, kind, status, weeks_in_scope, images_seen, " +
+  "photos_added, photos_updated, photos_removed, error_summary, triggered_by, " +
+  "profiles ( full_name, email )";
 
 function mapRow(r: RawSyncLogRow): SyncLogRow {
   return {
@@ -52,9 +57,11 @@ function mapRow(r: RawSyncLogRow): SyncLogRow {
     finishedAt:       r.finished_at,
     kind:             r.kind,
     status:           r.status,
-    photosAdded:      r.photos_added,
-    photosUpdated:    r.photos_updated,
-    photosRemoved:    r.photos_removed,
+    weeksInScope:     r.weeks_in_scope,
+    imagesSeen:       r.images_seen,
+    photosAdded:      Number(r.photos_added ?? 0),
+    photosUpdated:    Number(r.photos_updated ?? 0),
+    photosRemoved:    Number(r.photos_removed ?? 0),
     errorSummary:     r.error_summary,
     triggeredBy:      r.triggered_by,
     triggeredByName:  r.profiles?.full_name ?? null,
@@ -77,4 +84,51 @@ export async function fetchRecentSyncLog(
 
   if (error) throw error;
   return ((data ?? []) as unknown as RawSyncLogRow[]).map(mapRow);
+}
+
+/** Human-readable delta + scope line for the admin sync-log table. */
+export type LatestSyncSummary = {
+  startedAt: string;
+  finishedAt: string | null;
+  status: SyncStatus;
+  kind: SyncKind;
+  summaryLine: string;
+};
+
+/** Most recent sync_log row for the Photo sync header (replaces smugmug_config.last_sync_*). */
+export async function fetchLatestSyncSummary(
+  supabase: SupabaseClient,
+): Promise<LatestSyncSummary | null> {
+  const rows = await fetchRecentSyncLog(supabase, 1);
+  const row = rows[0];
+  if (!row) return null;
+
+  const counts = formatSyncLogCounts(row);
+  const summaryLine = row.finishedAt === null
+    ? "in flight"
+    : `${row.status} · ${counts}`;
+
+  return {
+    startedAt: row.startedAt,
+    finishedAt: row.finishedAt,
+    status: row.status,
+    kind: row.kind,
+    summaryLine,
+  };
+}
+
+export function formatSyncLogCounts(row: Pick<
+  SyncLogRow,
+  "kind" | "weeksInScope" | "imagesSeen" | "photosAdded" | "photosUpdated" | "photosRemoved"
+>): string {
+  const delta = `+${row.photosAdded} ~${row.photosUpdated} -${row.photosRemoved}`;
+  if (row.kind !== "scheduled" && row.kind !== "manual") return delta;
+  if (row.weeksInScope == null && row.imagesSeen == null) return delta;
+  const scope =
+    row.weeksInScope != null && row.imagesSeen != null
+      ? `${row.weeksInScope} wk · ${row.imagesSeen} img`
+      : row.weeksInScope != null
+        ? `${row.weeksInScope} wk`
+        : `${row.imagesSeen} img`;
+  return `${scope} · ${delta}`;
 }

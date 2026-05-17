@@ -39,8 +39,7 @@ function describeError(err: unknown): { message: string; details?: unknown } {
  *
  * POST /api/smugmug/sync-now
  *   Walks every camp_week under a synced=true division whose
- *   starts_on >= the current mode's cutoff date (smugmug_config.season_start_date
- *   in summer, earliest_fetch_date in off_season), enumerates each album's
+ *   starts_on >= triage_config.season_first_week_start, enumerates each album's
  *   images, and reconciles them into public.photos.
  *
  *   Returns { ok, status, scope, photosAdded, photosUpdated, photosRemoved,

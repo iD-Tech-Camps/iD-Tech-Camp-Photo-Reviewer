@@ -51,7 +51,7 @@ If **Sync now** returns 500 or 503 with `server_config_incomplete`, one or more 
 |------|--------|
 | **Staff reviewer** | Triage hub — claim slices, clean/flag photos |
 | **Senior** | Triage hub + per-week senior dashboard, signoff, positive assessments |
-| **Admin** | All of the above + triage settings, locations notes, tag library, SmugMug import, app branding |
+| **Admin** | All of the above + app settings (branding, season, triage knobs), locations notes, tag library, photo sync |
 
 ## Triage flow (summary)
 

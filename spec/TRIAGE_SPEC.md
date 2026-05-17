@@ -208,30 +208,30 @@ See §10 for semantics and §3f seed values.
 
 **`app_settings`** — demolition already dropped reviewer-copy columns. No new columns here; yearly triage knobs live in `triage_config`.
 
-**`smugmug_config`** — `mode` + `smugmug_mode` enum kept as placeholder per inventory.
-
 ### 3c. New tables
 
-**`triage_config`** — singleton, yearly setup (admin-edited each spring).
+**`triage_config`** — singleton, yearly setup (admin-edited each spring). Season bounds also drive SmugMug photo sync cutoff (`season_first_week_start`). `sample_burst_dow` / `sample_burst_hour` are DB-only (cron gate; not exposed in App settings UI).
 
 ```sql
 create table public.triage_config (
   id                         smallint primary key default 1 check (id = 1),
-  first_week_window_start    date    not null,
-  first_week_window_end      date    not null,
+  season_first_week_start    date    not null,
+  season_last_week_start     date    not null,
   max_for_triage_per_burst   int     not null default 200 check (max_for_triage_per_burst > 0),
   sample_burst_dow           smallint not null default 2 check (sample_burst_dow between 0 and 6),  -- 0=Sun, 2=Tue
   sample_burst_hour          smallint not null default 19 check (sample_burst_hour between 0 and 23),  -- UTC; aligns with vercel.json
   claim_expiry_minutes       int     not null default 60 check (claim_expiry_minutes > 0),
   updated_at                 timestamptz not null default now(),
-  check (first_week_window_end >= first_week_window_start)
+  check (season_last_week_start >= season_first_week_start)
 );
 
 insert into public.triage_config
-  (id, first_week_window_start, first_week_window_end, sample_burst_dow, sample_burst_hour)
+  (id, season_first_week_start, season_last_week_start, sample_burst_dow, sample_burst_hour)
 values
   (1, date '2026-05-24', date '2026-08-09', 2, 19);
 ```
+
+**Admin UX (post migration 31):** **App settings** — branding + season dates + triage knobs (`max_for_triage_per_burst`, `claim_expiry_minutes`). **Photo sync** — sync log, Sync now, last sync from `sync_log`, Reset sample flags, Run sample burst now.
 
 **`triage_claims`** — active and historical reviewer claims on a camp_week.
 
@@ -358,12 +358,12 @@ if NEW.is_first_week_override = TRUE  -> role := 'first_week'
 elif NEW.is_first_week_override = FALSE -> role := 'none'
 else
   let cfg     = (select * from triage_config where id = 1);
-  let in_window = NEW.starts_on between cfg.first_week_window_start and cfg.first_week_window_end;
+  let in_window = NEW.starts_on between cfg.season_first_week_start and cfg.season_last_week_start;
   let is_earliest_in_window = NOT EXISTS (
     select 1 from camp_weeks cw
     where cw.location_id = NEW.location_id
       and cw.id <> NEW.id
-      and cw.starts_on between cfg.first_week_window_start and cfg.first_week_window_end
+      and cw.starts_on between cfg.season_first_week_start and cfg.season_last_week_start
       and (cw.starts_on < NEW.starts_on
            or (cw.starts_on = NEW.starts_on and cw.id < NEW.id))
   );
@@ -375,7 +375,7 @@ if TG_OP = 'UPDATE' and OLD.triage_role = 'second_week_recheck' then role := 'se
 NEW.triage_role := role;
 ```
 
-**`tg_triage_config_after_update_recompute_all_roles`** — `after update of first_week_window_start, first_week_window_end` on `triage_config`. Re-derive every camp_week’s role (costly but rare).
+**`tg_triage_config_after_update_recompute_all_roles`** — `after update of season_first_week_start, season_last_week_start` on `triage_config`. Re-derive every camp_week’s role (costly but rare).
 
 ### 4b. `camp_weeks` role-change fanout to photos
 

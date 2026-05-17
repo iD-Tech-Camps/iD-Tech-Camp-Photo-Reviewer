@@ -6,7 +6,7 @@
 
 ## What this app is
 
-An internal **camp-week triage** tool for iD Tech. SmugMug syncs divisions, locations, camp weeks, and photos. Reviewers claim slices of photos within eligible weeks, mark them clean or flag them with ops-rubric tags. Seniors review flagged work per camp week, record positive assessments, and sign off. Admins configure yearly triage windows, tags, evergreen location notes, branding, and SmugMug import.
+An internal **camp-week triage** tool for iD Tech. SmugMug syncs divisions, locations, camp weeks, and photos. Reviewers claim slices of photos within eligible weeks, mark them clean or flag them with ops-rubric tags. Seniors review flagged work per camp week, record positive assessments, and sign off. Admins configure season bounds and triage knobs (App settings), tags, evergreen location notes, branding, and photo sync (Photo sync screen).
 
 The legacy marketing-review queue (approve/flag/points/leaderboard) was removed in migration 26. Git history preserves the old design.
 
@@ -50,7 +50,8 @@ app/api/smugmug/     # ping, sync-folders, sync-now, sync-scheduled, quarantine
 app/api/triage/      # claims, events, signoff, sample-burst, sweep-claims
 components/screens/
   Triage.tsx         # hub + claim grid + senior dashboard
-  AdminTriage.tsx    # yearly triage_config
+  Admin.tsx          # App settings (branding + triage_config season/triage)
+  AdminSmugMug.tsx   # Photo sync (log + sync / sample maintenance)
   AdminLocations.tsx # evergreen notes + 1st-week override
 lib/smugmug/sync/photos.ts  # orphan delete preserves triage history (§0)
 spec/TRIAGE_SPEC.md  # contract for schema + triggers + UI

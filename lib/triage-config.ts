@@ -1,36 +1,30 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type TriageConfig = {
-  firstWeekWindowStart: string;
-  firstWeekWindowEnd: string;
+  seasonFirstWeekStart: string;
+  seasonLastWeekStart: string;
   maxForTriagePerBurst: number;
-  sampleBurstDow: number;
-  sampleBurstHour: number;
   claimExpiryMinutes: number;
   updatedAt: string;
 };
 
 type RawRow = {
-  first_week_window_start: string;
-  first_week_window_end: string;
+  season_first_week_start: string;
+  season_last_week_start: string;
   max_for_triage_per_burst: number;
-  sample_burst_dow: number;
-  sample_burst_hour: number;
   claim_expiry_minutes: number;
   updated_at: string;
 };
 
 const COLUMNS =
-  "first_week_window_start, first_week_window_end, max_for_triage_per_burst, " +
-  "sample_burst_dow, sample_burst_hour, claim_expiry_minutes, updated_at";
+  "season_first_week_start, season_last_week_start, max_for_triage_per_burst, " +
+  "claim_expiry_minutes, updated_at";
 
 function mapRow(r: RawRow): TriageConfig {
   return {
-    firstWeekWindowStart: r.first_week_window_start,
-    firstWeekWindowEnd: r.first_week_window_end,
+    seasonFirstWeekStart: r.season_first_week_start,
+    seasonLastWeekStart: r.season_last_week_start,
     maxForTriagePerBurst: r.max_for_triage_per_burst,
-    sampleBurstDow: r.sample_burst_dow,
-    sampleBurstHour: r.sample_burst_hour,
     claimExpiryMinutes: r.claim_expiry_minutes,
     updatedAt: r.updated_at,
   };
@@ -50,11 +44,9 @@ export async function fetchTriageConfig(
 }
 
 export type UpdateTriageConfigInput = {
-  firstWeekWindowStart: string;
-  firstWeekWindowEnd: string;
+  seasonFirstWeekStart: string;
+  seasonLastWeekStart: string;
   maxForTriagePerBurst: number;
-  sampleBurstDow: number;
-  sampleBurstHour: number;
   claimExpiryMinutes: number;
 };
 
@@ -65,11 +57,9 @@ export async function updateTriageConfig(
   const { data, error } = await supabase
     .from("triage_config")
     .update({
-      first_week_window_start: input.firstWeekWindowStart,
-      first_week_window_end: input.firstWeekWindowEnd,
+      season_first_week_start: input.seasonFirstWeekStart,
+      season_last_week_start: input.seasonLastWeekStart,
       max_for_triage_per_burst: input.maxForTriagePerBurst,
-      sample_burst_dow: input.sampleBurstDow,
-      sample_burst_hour: input.sampleBurstHour,
       claim_expiry_minutes: input.claimExpiryMinutes,
       updated_at: new Date().toISOString(),
     })
@@ -88,5 +78,3 @@ export async function resetAllSampleFlags(
   if (error) throw error;
   return typeof data === "number" ? data : 0;
 }
-
-export const DOW_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];

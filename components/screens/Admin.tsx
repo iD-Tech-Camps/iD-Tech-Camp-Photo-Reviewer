@@ -2,6 +2,11 @@
 
 import React from "react";
 import { Icon } from "@/components/Icon";
+import {
+  fetchTriageConfig,
+  updateTriageConfig,
+  type TriageConfig,
+} from "@/lib/triage-config";
 import { BrandLogo, PageHeader, type ToastApi } from "@/components/Shell";
 import { useSettings, AppSettings } from "@/components/settings";
 import { useCurrentUser, ROLE_LABEL } from "@/lib/current-user";
@@ -754,10 +759,8 @@ function formatLastActive(iso: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AdminSettings — branding only (name, tagline, favicon, brand color).
-// The Reviewer copy + Completion + Empty states cards came out in
-// migration 26 along with their backing app_settings columns. Triage-flow
-// copy keys land here when they're added.
+// AdminSettings — branding (auto-save) plus season bounds and triage knobs
+// (explicit save on triage_config).
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ACCENT_OPTIONS: { id: AppSettings["accent"]; label: string; color: string }[] = [
@@ -774,12 +777,72 @@ const ACCENT_OPTIONS: { id: AppSettings["accent"]; label: string; color: string 
 const FAVICON_MAX_BYTES = 1 * 1024 * 1024;
 const FAVICON_ACCEPT = "image/png";
 
+type TriageForm = {
+  seasonFirstWeekStart: string;
+  seasonLastWeekStart: string;
+  maxForTriagePerBurst: number;
+  claimExpiryMinutes: number;
+};
+
 export function AdminSettings() {
   const { settings, hydrated, update, reset, setFavicon, saveError } = useSettings();
+  const supabase = React.useMemo(() => createClient(), []);
+  const [triageConfig, setTriageConfig] = React.useState<TriageConfig | null>(null);
+  const [triageLoadError, setTriageLoadError] = React.useState<string | null>(null);
+  const [triageSaveError, setTriageSaveError] = React.useState<string | null>(null);
+  const [triageBusy, setTriageBusy] = React.useState(false);
+  const [triageForm, setTriageForm] = React.useState<TriageForm>({
+    seasonFirstWeekStart: "",
+    seasonLastWeekStart: "",
+    maxForTriagePerBurst: 200,
+    claimExpiryMinutes: 60,
+  });
   const [confirmReset, setConfirmReset] = React.useState(false);
   const [faviconBusy, setFaviconBusy] = React.useState(false);
   const [faviconError, setFaviconError] = React.useState<string | null>(null);
   const faviconFileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchTriageConfig(supabase)
+      .then((c) => {
+        if (cancelled) return;
+        setTriageConfig(c);
+        setTriageForm({
+          seasonFirstWeekStart: c.seasonFirstWeekStart,
+          seasonLastWeekStart: c.seasonLastWeekStart,
+          maxForTriagePerBurst: c.maxForTriagePerBurst,
+          claimExpiryMinutes: c.claimExpiryMinutes,
+        });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setTriageLoadError(err?.message ?? "Failed to load triage settings");
+        }
+      });
+    return () => { cancelled = true; };
+  }, [supabase]);
+
+  const triageDirty = triageConfig !== null && (
+    triageForm.seasonFirstWeekStart !== triageConfig.seasonFirstWeekStart ||
+    triageForm.seasonLastWeekStart !== triageConfig.seasonLastWeekStart ||
+    triageForm.maxForTriagePerBurst !== triageConfig.maxForTriagePerBurst ||
+    triageForm.claimExpiryMinutes !== triageConfig.claimExpiryMinutes
+  );
+
+  const saveTriage = async () => {
+    if (!triageDirty || triageBusy) return;
+    setTriageBusy(true);
+    setTriageSaveError(null);
+    try {
+      const next = await updateTriageConfig(supabase, triageForm);
+      setTriageConfig(next);
+    } catch (err: unknown) {
+      setTriageSaveError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setTriageBusy(false);
+    }
+  };
 
   const set = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) =>
     update({ [key]: value } as Partial<AppSettings>);
@@ -817,7 +880,7 @@ export function AdminSettings() {
         eyebrow="Admin · Settings"
         title="App <em>settings.</em>"
         sub={hydrated
-          ? "Branding for the sidebar and browser tab. Changes save to the database automatically."
+          ? "Branding saves automatically. Season and triage settings use Save below."
           : "Loading current settings from the database…"}
       >
         {confirmReset ? (
@@ -977,6 +1040,109 @@ export function AdminSettings() {
             }}>
               Each reviewer chooses their own light/dark theme on the Profile screen.
             </div>
+          </div>
+
+
+          {triageLoadError && (
+            <div style={{
+              padding: 10,
+              border: "1px solid var(--rose)", borderRadius: 6,
+              background: "var(--rose-soft)", color: "var(--rose)",
+              fontSize: 12,
+            }}>
+              Couldn&apos;t load season / triage settings: {triageLoadError}
+            </div>
+          )}
+
+          <div className="card">
+            <h3 className="card-title" style={{ marginBottom: 4 }}>The season</h3>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
+              Bounds which camp weeks count for triage and which weeks SmugMug sync pulls photos for.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <FieldRow
+                label="First camp week start"
+                hint="Also controls which weeks SmugMug sync pulls photos for."
+              >
+                <input
+                  type="date"
+                  className="input"
+                  disabled={triageConfig === null || triageBusy}
+                  value={triageForm.seasonFirstWeekStart}
+                  onChange={(e) => setTriageForm((f) => ({ ...f, seasonFirstWeekStart: e.target.value }))}
+                />
+              </FieldRow>
+              <FieldRow
+                label="Last camp week start"
+                hint="Include weeks that start on or before this date."
+              >
+                <input
+                  type="date"
+                  className="input"
+                  disabled={triageConfig === null || triageBusy}
+                  value={triageForm.seasonLastWeekStart}
+                  onChange={(e) => setTriageForm((f) => ({ ...f, seasonLastWeekStart: e.target.value }))}
+                />
+              </FieldRow>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3 className="card-title" style={{ marginBottom: 4 }}>Triage</h3>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
+              Sample burst schedule is fixed in cron (Tuesday 19:00 UTC). Reset samples and run burst live on Photo sync.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <FieldRow label="Photos to sample each week">
+                <input
+                  type="number"
+                  min={1}
+                  className="input"
+                  disabled={triageConfig === null || triageBusy}
+                  value={triageForm.maxForTriagePerBurst}
+                  onChange={(e) => setTriageForm((f) => ({
+                    ...f,
+                    maxForTriagePerBurst: Number(e.target.value),
+                  }))}
+                />
+              </FieldRow>
+              <FieldRow label="Release abandoned claims after (minutes)">
+                <input
+                  type="number"
+                  min={1}
+                  className="input"
+                  disabled={triageConfig === null || triageBusy}
+                  value={triageForm.claimExpiryMinutes}
+                  onChange={(e) => setTriageForm((f) => ({
+                    ...f,
+                    claimExpiryMinutes: Number(e.target.value),
+                  }))}
+                />
+              </FieldRow>
+            </div>
+          </div>
+
+          {triageSaveError && (
+            <div style={{
+              padding: 10,
+              border: "1px solid var(--rose)", borderRadius: 6,
+              background: "var(--rose-soft)", color: "var(--rose)",
+              fontSize: 12,
+            }}>
+              {triageSaveError}
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={saveTriage}
+              disabled={!triageDirty || triageBusy || triageConfig === null}
+              style={{ opacity: triageDirty && !triageBusy ? 1 : 0.5 }}
+            >
+              <Icon name="check" size={12} /> {triageBusy ? "Saving…" : "Save season & triage"}
+            </button>
           </div>
 
         </div>

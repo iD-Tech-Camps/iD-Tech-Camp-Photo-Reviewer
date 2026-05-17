@@ -8,7 +8,6 @@ import {
   AdminSettings,
   SmugMugImport,
 } from "@/components/screens/Admin";
-import { AdminTriageSettings } from "@/components/screens/AdminTriage";
 import { AdminLocationsNotes } from "@/components/screens/AdminLocations";
 import { TriageApp } from "@/components/screens/Triage";
 import { SettingsProvider, useSettings } from "@/components/settings";
@@ -17,7 +16,6 @@ import { UserProvider, useCurrentUser, type Role } from "@/lib/current-user";
 const VALID_SCREENS = [
   "triage",
   "admin-overview",
-  "admin-triage",
   "admin-locations",
   "admin-tags",
   "admin-smugmug",
@@ -26,7 +24,6 @@ const VALID_SCREENS = [
 
 const ADMIN_SCREENS = new Set([
   "admin-overview",
-  "admin-triage",
   "admin-locations",
   "admin-tags",
   "admin-smugmug",
@@ -99,7 +96,6 @@ function AppInner() {
       <main className="main">
         {activeScreen === "triage"           && <TriageApp toast={toast} />}
         {activeScreen === "admin-overview"  && <AdminOverview toast={toast} />}
-        {activeScreen === "admin-triage"    && <AdminTriageSettings toast={toast} />}
         {activeScreen === "admin-locations" && <AdminLocationsNotes toast={toast} />}
         {activeScreen === "admin-tags"      && <AdminTags />}
         {activeScreen === "admin-smugmug"   && <SmugMugImport toast={toast} />}
