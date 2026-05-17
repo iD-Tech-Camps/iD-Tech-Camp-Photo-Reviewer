@@ -24,6 +24,19 @@ npm run dev
 
 CLI link (from repo root): `npx vercel link` → team **i-d-tech**, project **id-tech-camp-photo-reviewer**. Production deploy: `npx vercel --prod`.
 
+**Environment variables (Vercel → Settings → Environment Variables):** after a project transfer, copy all secrets from the old project. Photo sync and crons need at least:
+
+| Variable | Used by |
+|----------|---------|
+| `NEXT_PUBLIC_SUPABASE_URL` | App + API |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | App + API |
+| `SUPABASE_SERVICE_ROLE_KEY` | Sync, quarantine, crons (server-only) |
+| `SMUGMUG_API_KEY` / `SMUGMUG_API_SECRET` | SmugMug OAuth |
+| `SMUGMUG_ACCESS_TOKEN` / `SMUGMUG_ACCESS_TOKEN_SECRET` | SmugMug OAuth |
+| `CRON_SECRET` | Scheduled sync + triage crons |
+
+If **Sync now** returns 500 or 503 with `server_config_incomplete`, one or more of the rows above is missing on the deployment.
+
 ## Scripts
 
 | Command | Purpose |

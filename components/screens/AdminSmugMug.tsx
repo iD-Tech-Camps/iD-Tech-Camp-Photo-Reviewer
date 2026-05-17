@@ -327,8 +327,19 @@ function ActionsRow({
       const res = await fetch("/api/smugmug/sync-now", { method: "POST" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok || body?.ok === false) {
-        const msg = body?.message ?? body?.error ?? `sync-now failed (${res.status})`;
-        throw new Error(msg);
+        const missing =
+          Array.isArray(body?.missing) && body.missing.length > 0
+            ? ` Missing on server: ${body.missing.join(", ")}.`
+            : "";
+        const msg =
+          body?.message ??
+          body?.errorSummary ??
+          body?.error ??
+          `sync-now failed (${res.status})`;
+        throw new Error(`${msg}${missing}`);
+      }
+      if (body?.status === "failed") {
+        throw new Error(body?.errorSummary ?? "Sync failed");
       }
       const summary = `+${body.photosAdded ?? 0} ~${body.photosUpdated ?? 0} -${body.photosRemoved ?? 0}`;
       toast?.show(`Sync complete · ${summary}`);

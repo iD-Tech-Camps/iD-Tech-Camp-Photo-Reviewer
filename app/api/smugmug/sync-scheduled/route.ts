@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { syncEnvMissing } from "@/lib/server-env";
 import { createServiceClient } from "@/lib/supabase/service";
 import { SmugMugApiError } from "@/lib/smugmug";
 import { runPhotoSync } from "@/lib/smugmug/sync/photos";
@@ -59,6 +60,19 @@ export async function GET(req: NextRequest) {
   const auth = req.headers.get("authorization");
   if (auth !== `Bearer ${expected}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const missing = syncEnvMissing();
+  if (missing.length > 0) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "server_config_incomplete",
+        message: "Scheduled sync is missing required environment variables.",
+        missing,
+      },
+      { status: 503 }
+    );
   }
 
   const service = createServiceClient();

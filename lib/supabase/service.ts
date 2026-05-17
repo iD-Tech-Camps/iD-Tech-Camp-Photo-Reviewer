@@ -18,9 +18,13 @@ export function createServiceClient(): SupabaseClient {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!url || !key) {
+    const missing = [
+      !url ? "NEXT_PUBLIC_SUPABASE_URL" : null,
+      !key ? "SUPABASE_SERVICE_ROLE_KEY" : null,
+    ].filter(Boolean);
     throw new Error(
-      "Service-role Supabase client missing config. " +
-        "Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local."
+      `Service-role Supabase client missing config: ${missing.join(", ")}. ` +
+        "Set these on Vercel (Project → Settings → Environment Variables) and in .env.local for local runs."
     );
   }
 

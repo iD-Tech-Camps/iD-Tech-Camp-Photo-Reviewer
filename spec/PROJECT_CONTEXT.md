@@ -41,7 +41,7 @@ Trigger functions that `UPDATE photos` must be `SECURITY DEFINER SET search_path
 
 - Next.js 15 (App Router) + React 19 + TypeScript
 - Supabase (Postgres + Google OAuth `@idtech.com`)
-- **Vercel** — team [`i-d-tech`](https://vercel.com/i-d-tech), project [`id-tech-camp-photo-reviewer`](https://vercel.com/i-d-tech/id-tech-camp-photo-reviewer); production at https://id-tech-camp-photo-reviewer.vercel.app; crons in [`vercel.json`](../vercel.json)
+- **Vercel** — team [`i-d-tech`](https://vercel.com/i-d-tech), project [`id-tech-camp-photo-reviewer`](https://vercel.com/i-d-tech/id-tech-camp-photo-reviewer); production at https://id-tech-camp-photo-reviewer.vercel.app; crons in [`vercel.json`](../vercel.json). After a project transfer, re-copy env vars (`SUPABASE_SERVICE_ROLE_KEY`, SmugMug creds, `CRON_SECRET`) — sync routes return **503** with `server_config_incomplete` when any are missing.
 
 ### Key paths
 

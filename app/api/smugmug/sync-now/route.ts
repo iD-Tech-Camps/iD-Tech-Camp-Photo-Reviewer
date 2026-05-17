@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { syncEnvMissing } from "@/lib/server-env";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { SmugMugApiError } from "@/lib/smugmug";
@@ -59,6 +60,20 @@ export async function POST() {
     .single();
   if (profile?.role !== "admin") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const missing = syncEnvMissing();
+  if (missing.length > 0) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "server_config_incomplete",
+        message:
+          "Photo sync is not configured on this deployment. Add the missing environment variables in Vercel and redeploy.",
+        missing,
+      },
+      { status: 503 }
+    );
   }
 
   const service = createServiceClient();
