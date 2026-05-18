@@ -47,6 +47,9 @@ export type PhotoImgProps = {
   // Background behind the `<img>` while it loads. Defaults to var(--paper-3)
   // so the skeleton state matches the parent card surface.
   background?: string;
+  // Render an animated spinner in the loading state instead of a silent
+  // skeleton. Used by the lightbox where a flat panel reads as broken.
+  showSpinner?: boolean;
 };
 
 export function PhotoImg({
@@ -57,14 +60,30 @@ export function PhotoImg({
   onClick,
   className,
   background = "var(--paper-3)",
+  showSpinner = false,
 }: PhotoImgProps) {
   // Tracks load state per src so swapping photos resets the skeleton.
   const [status, setStatus] = React.useState<"loading" | "loaded" | "error">(
     src ? "loading" : "error",
   );
+  const imgRef = React.useRef<HTMLImageElement | null>(null);
 
+  // Reset state when src changes — but reconcile against the DOM: if the
+  // image was preloaded (e.g. lightbox neighbor cache), onLoad may have
+  // fired before this effect runs, so the React event handler never sees
+  // it. Without this sync, the skeleton would sit forever on cached
+  // photos when arrowing back into them.
   React.useEffect(() => {
-    setStatus(src ? "loading" : "error");
+    if (!src) {
+      setStatus("error");
+      return;
+    }
+    const img = imgRef.current;
+    if (img && img.complete) {
+      setStatus(img.naturalWidth > 0 ? "loaded" : "error");
+    } else {
+      setStatus("loading");
+    }
   }, [src]);
 
   if (!src || status === "error") {
@@ -97,11 +116,16 @@ export function PhotoImg({
           style={{
             position: "absolute", inset: 0,
             background,
+            display: showSpinner ? "grid" : undefined,
+            placeItems: showSpinner ? "center" : undefined,
           }}
-        />
+        >
+          {showSpinner && <span className="photo-spinner" aria-hidden />}
+        </div>
       )}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
+        ref={imgRef}
         src={src}
         alt={alt}
         loading={loading}

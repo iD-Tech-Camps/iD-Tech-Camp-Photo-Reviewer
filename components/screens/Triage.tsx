@@ -594,6 +594,7 @@ function Lightbox({
             fit="contain"
             loading="eager"
             background="transparent"
+            showSpinner
           />
         </div>
 
