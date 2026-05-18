@@ -188,6 +188,11 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
 }
 
 type ReviewKind = "clean" | "flag";
+type ReviewSnapshot = {
+  kind: ReviewKind;
+  tagIds: string[];
+  quarantineIntent: boolean;
+};
 
 function ClaimGrid({
   toast,
@@ -209,7 +214,9 @@ function ClaimGrid({
   // Local-only review map. The DB trigger nulls triage_claim_id once an
   // event lands, so a re-fetch would drop the photo from the grid mid-
   // session; tracking decisions here keeps the grid stable until release.
-  const [reviewed, setReviewed] = React.useState<Record<string, ReviewKind>>({});
+  // Stores the full submission (kind + tags + quarantine) so re-opening a
+  // reviewed photo restores its prior state.
+  const [reviewed, setReviewed] = React.useState<Record<string, ReviewSnapshot>>({});
   const [lightboxIndex, setLightboxIndex] = React.useState<number | null>(null);
 
   React.useEffect(() => {
@@ -226,11 +233,34 @@ function ClaimGrid({
     return () => { cancelled = true; };
   }, [supabase, claimId, campWeekId]);
 
+  // Preload neighbors of the current lightbox photo so arrow nav lands on
+  // an already-cached image. SmugMug serves the full ArchivedUri as the
+  // hero src, which can be multi-MB; without this, each arrow press waits
+  // on a fresh round-trip.
+  React.useEffect(() => {
+    if (lightboxIndex === null) return;
+    const neighbors: string[] = [];
+    if (lightboxIndex - 1 >= 0) {
+      const p = photos[lightboxIndex - 1];
+      const url = p?.imageUrl ?? p?.thumbnailUrl;
+      if (url) neighbors.push(url);
+    }
+    if (lightboxIndex + 1 < photos.length) {
+      const p = photos[lightboxIndex + 1];
+      const url = p?.imageUrl ?? p?.thumbnailUrl;
+      if (url) neighbors.push(url);
+    }
+    for (const url of neighbors) {
+      const img = new window.Image();
+      img.src = url;
+    }
+  }, [lightboxIndex, photos]);
+
   const total = photos.length;
   const reviewedCount = photos.reduce((n, p) => n + (reviewed[p.id] ? 1 : 0), 0);
   const allDone = total > 0 && reviewedCount === total;
 
-  const findNextUnreviewed = (from: number, map: Record<string, ReviewKind>): number | null => {
+  const findNextUnreviewed = (from: number, map: Record<string, ReviewSnapshot>): number | null => {
     for (let i = from + 1; i < photos.length; i++) if (!map[photos[i].id]) return i;
     for (let i = 0; i < from; i++) if (!map[photos[i].id]) return i;
     return null;
@@ -238,14 +268,14 @@ function ClaimGrid({
 
   const submit = async (
     photoId: string,
-    kind: ReviewKind,
     tagIds: string[],
     quarantineIntent: boolean,
-  ): Promise<boolean> => {
-    if (kind === "flag" && tagIds.length === 0) {
-      toast.show("Pick at least one flag", "x");
-      return false;
-    }
+  ): Promise<ReviewSnapshot | null> => {
+    // Tags drive the decision: no tags = clean, any tags = flag. The DB
+    // check constraint forces quarantine_intent=false on clean events, so
+    // we send it that way explicitly.
+    const kind: ReviewKind = tagIds.length === 0 ? "clean" : "flag";
+    const effectiveQuarantine = kind === "flag" ? quarantineIntent : false;
     try {
       const res = await fetch("/api/triage/events", {
         method: "POST",
@@ -255,16 +285,17 @@ function ClaimGrid({
           claim_id: claimId,
           kind,
           tag_ids: tagIds,
-          quarantine_intent: kind === "flag" ? quarantineIntent : false,
+          quarantine_intent: effectiveQuarantine,
         }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Submit failed");
-      setReviewed((m) => ({ ...m, [photoId]: kind }));
-      return true;
+      const snapshot: ReviewSnapshot = { kind, tagIds, quarantineIntent: effectiveQuarantine };
+      setReviewed((m) => ({ ...m, [photoId]: snapshot }));
+      return snapshot;
     } catch (err: unknown) {
       toast.show(err instanceof Error ? err.message : "Submit failed", "x");
-      return false;
+      return null;
     }
   };
 
@@ -326,22 +357,23 @@ function ClaimGrid({
               }}
             >
               {photos.map((p, idx) => {
-                const decision = reviewed[p.id];
+                const snapshot = reviewed[p.id];
+                const kind = snapshot?.kind;
                 return (
                   <button
                     key={p.id}
                     type="button"
                     onClick={() => setLightboxIndex(idx)}
-                    aria-label={`Photo ${idx + 1} of ${total}${decision ? `, marked ${decision}` : ""}`}
+                    aria-label={`Photo ${idx + 1} of ${total}${kind ? `, marked ${kind}` : ""}`}
                     style={{
                       position: "relative",
                       aspectRatio: "4 / 3",
                       padding: 0,
                       borderRadius: 8,
                       overflow: "hidden",
-                      border: decision === "clean"
+                      border: kind === "clean"
                         ? "2px solid var(--moss)"
-                        : decision === "flag"
+                        : kind === "flag"
                         ? "2px solid var(--rose)"
                         : "1px solid var(--rule)",
                       background: "var(--paper-3)",
@@ -349,7 +381,7 @@ function ClaimGrid({
                     }}
                   >
                     <PhotoImg src={p.thumbnailUrl ?? p.imageUrl} alt="" fit="cover" />
-                    {decision && (
+                    {kind && (
                       <>
                         <div
                           aria-hidden
@@ -363,13 +395,13 @@ function ClaimGrid({
                           style={{
                             position: "absolute", top: 8, right: 8,
                             width: 28, height: 28, borderRadius: 999,
-                            background: decision === "clean" ? "var(--moss)" : "var(--rose)",
+                            background: kind === "clean" ? "var(--moss)" : "var(--rose)",
                             color: "white",
                             display: "grid", placeItems: "center",
                             boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
                           }}
                         >
-                          <Icon name={decision === "clean" ? "check" : "flag"} size={16} />
+                          <Icon name={kind === "clean" ? "check" : "flag"} size={16} />
                         </div>
                       </>
                     )}
@@ -386,16 +418,16 @@ function ClaimGrid({
           photo={lightboxPhoto}
           tags={tags}
           position={`${lightboxIndex + 1} / ${total}`}
-          existingDecision={reviewed[lightboxPhoto.id]}
+          snapshot={reviewed[lightboxPhoto.id]}
           hasPrev={lightboxIndex > 0}
           hasNext={lightboxIndex < total - 1}
           onClose={() => setLightboxIndex(null)}
           onPrev={() => setLightboxIndex((i) => (i === null || i <= 0 ? i : i - 1))}
           onNext={() => setLightboxIndex((i) => (i === null || i >= total - 1 ? i : i + 1))}
-          onSubmit={async (kind, tagIds, quarantineIntent) => {
-            const ok = await submit(lightboxPhoto.id, kind, tagIds, quarantineIntent);
-            if (!ok) return;
-            const nextMap = { ...reviewed, [lightboxPhoto.id]: kind };
+          onSubmit={async (tagIds, quarantineIntent) => {
+            const result = await submit(lightboxPhoto.id, tagIds, quarantineIntent);
+            if (!result) return;
+            const nextMap = { ...reviewed, [lightboxPhoto.id]: result };
             const next = findNextUnreviewed(lightboxIndex, nextMap);
             if (next !== null) setLightboxIndex(next);
           }}
@@ -409,7 +441,7 @@ function Lightbox({
   photo,
   tags,
   position,
-  existingDecision,
+  snapshot,
   hasPrev,
   hasNext,
   onClose,
@@ -420,22 +452,25 @@ function Lightbox({
   photo: ClaimPhoto;
   tags: Tag[];
   position: string;
-  existingDecision: ReviewKind | undefined;
+  snapshot: ReviewSnapshot | undefined;
   hasPrev: boolean;
   hasNext: boolean;
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
-  onSubmit: (kind: ReviewKind, tagIds: string[], quarantineIntent: boolean) => Promise<void>;
+  onSubmit: (tagIds: string[], quarantineIntent: boolean) => Promise<void>;
 }) {
-  const [selectedTags, setSelectedTags] = React.useState<string[]>([]);
-  const [quarantineIntent, setQuarantineIntent] = React.useState(false);
+  const [selectedTags, setSelectedTags] = React.useState<string[]>(snapshot?.tagIds ?? []);
+  const [quarantineIntent, setQuarantineIntent] = React.useState<boolean>(snapshot?.quarantineIntent ?? false);
   const [busy, setBusy] = React.useState(false);
 
+  // Re-seed state when the lightbox swaps photos: pre-fill if the user has
+  // already submitted this photo (so they can see and edit their prior
+  // tags / quarantine choice), otherwise reset to empty.
   React.useEffect(() => {
-    setSelectedTags([]);
-    setQuarantineIntent(false);
-  }, [photo.id]);
+    setSelectedTags(snapshot?.tagIds ?? []);
+    setQuarantineIntent(snapshot?.quarantineIntent ?? false);
+  }, [photo.id, snapshot]);
 
   React.useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -451,15 +486,18 @@ function Lightbox({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose, onPrev, onNext, hasPrev, hasNext]);
 
-  const handle = async (kind: ReviewKind) => {
+  const handle = async () => {
     if (busy) return;
     setBusy(true);
     try {
-      await onSubmit(kind, selectedTags, quarantineIntent);
+      await onSubmit(selectedTags, quarantineIntent);
     } finally {
       setBusy(false);
     }
   };
+
+  const willFlag = selectedTags.length > 0;
+  const submitLabel = snapshot ? "Update" : "Submit";
 
   return (
     <div
@@ -483,7 +521,7 @@ function Lightbox({
           textTransform: "uppercase",
         }}
       >
-        {position}{existingDecision ? ` · ${existingDecision}` : ""}
+        {position}{snapshot ? ` · ${snapshot.kind}` : ""}
       </div>
 
       <button
@@ -583,33 +621,34 @@ function Lightbox({
               </button>
             ))}
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13 }}>
+          <label
+            style={{
+              display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13,
+              opacity: willFlag ? 1 : 0.5,
+            }}
+          >
             <input
               type="checkbox"
               checked={quarantineIntent}
               onChange={(e) => setQuarantineIntent(e.target.checked)}
+              disabled={!willFlag}
             />
-            Quarantine intent (flag)
+            Quarantine intent (only applies when flagging)
           </label>
-          <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
+          <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center" }}>
             <button
               type="button"
-              className="btn btn-moss"
+              className="btn btn-primary"
               disabled={busy}
-              onClick={() => void handle("clean")}
+              onClick={() => void handle()}
             >
-              <Icon name="check" size={14} />
-              Clean
+              {submitLabel}
             </button>
-            <button
-              type="button"
-              className="btn btn-rose"
-              disabled={busy}
-              onClick={() => void handle("flag")}
-            >
-              <Icon name="flag" size={14} />
-              Flag
-            </button>
+            <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
+              {willFlag
+                ? `Flag with ${selectedTags.length} tag${selectedTags.length === 1 ? "" : "s"}`
+                : "No tags selected → clean"}
+            </span>
           </div>
         </div>
       </div>
