@@ -177,21 +177,20 @@ export function AdminTags() {
   return (
     <>
       <PageHeader
-        eyebrow="Admin · Tag library"
-        title="<em>Triage</em> flags."
+        eyebrow="Admin · Issue library"
+        title="<em>Review</em> issues."
         sub={tags === null
-          ? "Loading current tag library…"
-          : `${activeTags.length} active tag${activeTags.length === 1 ? "" : "s"}.${inactiveTags.length > 0 ? ` · ${inactiveTags.length} retired.` : ""}`}
+          ? "Loading current issue library…"
+          : `${activeTags.length} active issue${activeTags.length === 1 ? "" : "s"}.${inactiveTags.length > 0 ? ` · ${inactiveTags.length} retired.` : ""}`}
       />
 
       <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         <div className="card">
-          <h3 className="card-title" style={{ marginBottom: 4 }}>Active flags</h3>
+          <h3 className="card-title" style={{ marginBottom: 4 }}>Active issues</h3>
           <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
-            What reviewers can tag on a photo during triage. The seeded
-            ops-rubric set lands with the Step 3 schema migration; meanwhile
-            you can add custom flags here and they&apos;ll show up
-            automatically once the triage screens ship.
+            What reviewers can attach to a photo during review. Add custom
+            issues here and they&apos;ll show up automatically in the
+            reviewer UI.
           </div>
 
           {loadError && (
@@ -201,7 +200,7 @@ export function AdminTags() {
               background: "var(--rose-soft)", color: "var(--rose)",
               fontSize: 12,
             }}>
-              Couldn&apos;t load tags: {loadError}
+              Couldn&apos;t load issues: {loadError}
             </div>
           )}
 
@@ -253,7 +252,7 @@ export function AdminTags() {
           )}
           {tags !== null && activeTags.length === 0 && (
             <span style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
-              No active flags yet
+              No active issues yet
             </span>
           )}
 
@@ -310,7 +309,7 @@ export function AdminTags() {
               <div>
                 <label className="label" style={{ marginBottom: 4 }}>Preview</label>
                 <span style={chipStyle}>
-                  {newLabel.trim() || "Tag label"}
+                  {newLabel.trim() || "Issue label"}
                 </span>
               </div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 2 }}>
@@ -318,7 +317,7 @@ export function AdminTags() {
                 <button className="btn btn-primary" disabled={!canSave}
                   style={{ opacity: canSave ? 1 : 0.5, cursor: canSave ? "pointer" : "not-allowed" }}
                   onClick={save}>
-                  <Icon name="plus" size={12} /> Add tag
+                  <Icon name="plus" size={12} /> Add issue
                 </button>
               </div>
             </div>
@@ -346,11 +345,10 @@ export function AdminTags() {
 
         {inactiveTags.length > 0 && (
           <div className="card">
-            <h3 className="card-title" style={{ marginBottom: 4 }}>Retired flags</h3>
+            <h3 className="card-title" style={{ marginBottom: 4 }}>Retired issues</h3>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
-              Tags that were used by historical triage events but no longer
-              show up in the reviewer UI. Reactivate to put one back in
-              circulation.
+              Issues that were used in past reviews but no longer show up in
+              the reviewer UI. Reactivate to put one back in circulation.
             </div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {inactiveTags.map(t => (
@@ -661,8 +659,8 @@ function ReviewerEditModal({
         >
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
             {([
-              ["reviewer", ROLE_LABEL.reviewer, "Triages claimed weeks."],
-              ["senior",   ROLE_LABEL.senior,   "Plus reviews flagged photos."],
+              ["reviewer", ROLE_LABEL.reviewer, "Reviews batches of camp photos."],
+              ["senior",   ROLE_LABEL.senior,   "Plus approves weeks and acts on issues."],
               ["admin",    ROLE_LABEL.admin,    "Plus admin section."],
             ] as [Role, string, string][]).map(([id, label, hint]) => {
               const on = role === id;
@@ -817,7 +815,7 @@ export function AdminSettings() {
       })
       .catch((err) => {
         if (!cancelled) {
-          setTriageLoadError(err?.message ?? "Failed to load triage settings");
+          setTriageLoadError(err?.message ?? "Failed to load review settings");
         }
       });
     return () => { cancelled = true; };
@@ -880,7 +878,7 @@ export function AdminSettings() {
         eyebrow="Admin · Settings"
         title="App <em>settings.</em>"
         sub={hydrated
-          ? "Branding saves automatically. Season and triage settings use Save below."
+          ? "Branding saves automatically. Season and review settings use Save below."
           : "Loading current settings from the database…"}
       >
         {confirmReset ? (
@@ -1050,14 +1048,14 @@ export function AdminSettings() {
               background: "var(--rose-soft)", color: "var(--rose)",
               fontSize: 12,
             }}>
-              Couldn&apos;t load season / triage settings: {triageLoadError}
+              Couldn&apos;t load season / review settings: {triageLoadError}
             </div>
           )}
 
           <div className="card">
             <h3 className="card-title" style={{ marginBottom: 4 }}>The season</h3>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
-              Bounds which camp weeks count for triage and which weeks SmugMug sync pulls photos for.
+              Bounds which camp weeks count for review and which weeks SmugMug sync pulls photos for.
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
               <FieldRow
@@ -1088,9 +1086,9 @@ export function AdminSettings() {
           </div>
 
           <div className="card">
-            <h3 className="card-title" style={{ marginBottom: 4 }}>Triage</h3>
+            <h3 className="card-title" style={{ marginBottom: 4 }}>Review</h3>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
-              Sample burst schedule is fixed in cron (Tuesday 19:00 UTC). Reset samples and run burst live on Photo sync.
+              Weekly sample schedule is fixed in cron (Tuesday 19:00 UTC). Reset samples and run a sample pull live on Photo sync.
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
               <FieldRow label="Photos to sample each week">
@@ -1106,7 +1104,7 @@ export function AdminSettings() {
                   }))}
                 />
               </FieldRow>
-              <FieldRow label="Release abandoned claims after (minutes)">
+              <FieldRow label="Release abandoned batches after (minutes)">
                 <input
                   type="number"
                   min={1}
@@ -1141,7 +1139,7 @@ export function AdminSettings() {
               disabled={!triageDirty || triageBusy || triageConfig === null}
               style={{ opacity: triageDirty && !triageBusy ? 1 : 0.5 }}
             >
-              <Icon name="check" size={12} /> {triageBusy ? "Saving…" : "Save season & triage"}
+              <Icon name="check" size={12} /> {triageBusy ? "Saving…" : "Save season & review"}
             </button>
           </div>
 

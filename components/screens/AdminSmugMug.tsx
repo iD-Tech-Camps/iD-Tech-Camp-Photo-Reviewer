@@ -139,7 +139,7 @@ function ActionsCard({
 
   const onResetSamples = async () => {
     if (maintBusy) return;
-    if (!confirm("Reset sampled_for_burst on all pending/in-progress photos?")) return;
+    if (!confirm("Reset weekly sample flags on all pending/in-progress photos?")) return;
     setMaintBusy(true);
     try {
       const count = await resetAllSampleFlags(supabase);
@@ -158,13 +158,13 @@ function ActionsCard({
       const res = await fetch("/api/triage/sample-burst", { method: "POST" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(body?.message ?? body?.error ?? `sample-burst failed (${res.status})`);
+        throw new Error(body?.message ?? body?.error ?? `sample-pull failed (${res.status})`);
       }
       const n = body?.photosSampled ?? body?.photos_sampled ?? 0;
-      toast?.show(`Sample burst complete Â· ${n} photo(s) marked`);
+      toast?.show(`Sample pull complete · ${n} photo(s) marked`);
       onDone();
     } catch (err: unknown) {
-      toast?.show(err instanceof Error ? err.message : "Sample burst failed");
+      toast?.show(err instanceof Error ? err.message : "Sample pull failed");
     } finally {
       setMaintBusy(false);
     }
@@ -174,7 +174,7 @@ function ActionsCard({
     <div className="card">
       <h3 className="card-title" style={{ marginBottom: 4 }}>Actions</h3>
       <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
-        Manual sync and triage maintenance. Season cutoff comes from App settings.
+        Manual sync and review maintenance. Season cutoff comes from App settings.
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <button
@@ -197,7 +197,7 @@ function ActionsCard({
           onClick={onSampleBurst}
           disabled={syncing || maintBusy}
         >
-          Run sample burst now
+          Run sample pull now
         </button>
       </div>
       {syncError && (

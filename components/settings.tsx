@@ -33,7 +33,7 @@ export type AppSettings = {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   brandName: "Treeline",
-  brandTagline: "Camp Triage · iD Tech",
+  brandTagline: "Camp Quality Review · iD Tech",
   brandMark: "Ƭ",
 
   accent: "sun",

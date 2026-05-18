@@ -46,7 +46,7 @@ export function AdminLocationsNotes({ toast }: { toast: ToastApi }) {
           l.id === locationId ? { ...l, evergreenNotes: text.trim() || null } : l,
         ),
       );
-      toast.show("Notes saved", "check");
+      toast.show("Location notes saved", "check");
     } catch (err: unknown) {
       toast.show(err instanceof Error ? err.message : "Save failed", "x");
     } finally {
@@ -107,7 +107,7 @@ export function AdminLocationsNotes({ toast }: { toast: ToastApi }) {
         {isExpanded && (
           <>
             <label className="label" style={{ display: "block", marginBottom: 6 }}>
-              Evergreen notes (shown in triage grid sidebar)
+              Location notes (shown in review sidebar)
             </label>
             <textarea
               className="input"
@@ -135,7 +135,7 @@ export function AdminLocationsNotes({ toast }: { toast: ToastApi }) {
     <>
       <PageHeader
         eyebrow="Admin · Locations"
-        title="Evergreen <em>notes</em>"
+        title="Location <em>notes</em>"
         sub={
           config
             ? `Season: ${config.seasonFirstWeekStart} → ${config.seasonLastWeekStart}`

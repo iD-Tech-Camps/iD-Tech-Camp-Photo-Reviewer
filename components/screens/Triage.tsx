@@ -35,6 +35,29 @@ type View =
   | { kind: "claim"; claimId: string; campWeekId: string }
   | { kind: "senior"; campWeekId: string };
 
+// User-facing labels for the DB's triage_state / triage_role enums. The
+// raw enum values stay in code and queries; this is purely display.
+const WEEK_STATE_LABEL: Record<string, string> = {
+  not_required: "Not in season",
+  awaiting_photos: "Awaiting photos",
+  photos_in: "Not started",
+  triage_in_progress: "In review",
+  triage_done: "Ready for sign-off",
+  senior_review: "In sign-off",
+  complete: "Done",
+};
+
+const WEEK_ROLE_LABEL: Record<string, string> = {
+  none: "",
+  first_week: "First week",
+  second_week_recheck: "Follow-up review",
+};
+
+const REVIEW_KIND_LABEL: Record<string, string> = {
+  clean: "no issues",
+  flag: "flagged",
+};
+
 export function TriageApp({ toast }: { toast: ToastApi }) {
   const user = useCurrentUser();
   const userId = user.id;
@@ -62,7 +85,7 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
     let cancelled = false;
     reloadHub()
       .catch((err) => {
-        if (!cancelled) setLoadError(err?.message ?? "Failed to load triage hub");
+        if (!cancelled) setLoadError(err?.message ?? "Failed to load review hub");
       });
     return () => { cancelled = true; };
   }, [reloadHub]);
@@ -75,11 +98,11 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
         body: JSON.stringify({ camp_week_id: campWeekId, slice_size: sliceSize }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Claim failed");
+      if (!res.ok) throw new Error(json.error ?? "Couldn't start batch");
       setView({ kind: "claim", claimId: json.claim.id, campWeekId });
       await reloadHub();
     } catch (err: unknown) {
-      toast.show(err instanceof Error ? err.message : "Claim failed", "x");
+      toast.show(err instanceof Error ? err.message : "Couldn't start batch", "x");
     }
   };
 
@@ -113,16 +136,16 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
   return (
     <>
       <PageHeader
-        eyebrow="Triage"
-        title="Camp weeks <em>needing triage</em>"
-        sub={claims.length > 0 ? `${claims.length} active claim(s)` : "Pick a week to claim a slice"}
+        eyebrow="Camp Quality Review"
+        title="Camp weeks <em>needing review</em>"
+        sub={claims.length > 0 ? `${claims.length} active batch${claims.length === 1 ? "" : "es"}` : "Pick a week to start a batch"}
       />
       <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {loadError && <div className="card" style={{ color: "var(--rose)", fontSize: 12 }}>{loadError}</div>}
 
         {claims.length > 0 && (
           <div className="card">
-            <h3 className="card-title" style={{ marginBottom: 8 }}>Your active claims</h3>
+            <h3 className="card-title" style={{ marginBottom: 8 }}>Your active batches</h3>
             {claims.map((c) => (
               <button
                 key={c.id}
@@ -131,7 +154,7 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
                 style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 6 }}
                 onClick={() => setView({ kind: "claim", claimId: c.id, campWeekId: c.campWeekId })}
               >
-                Resume claim · {c.sliceSize} photos
+                Resume batch · {c.sliceSize} photos
               </button>
             ))}
           </div>
@@ -142,7 +165,11 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
             <div>
               <div style={{ fontWeight: 600 }}>{w.locationName} — {w.name}</div>
               <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                {w.triageRole} · {w.triageState} · {w.pendingCount} pending
+                {[
+                  WEEK_ROLE_LABEL[w.triageRole] || w.triageRole,
+                  WEEK_STATE_LABEL[w.triageState] || w.triageState,
+                  `${w.pendingCount} pending`,
+                ].filter(Boolean).join(" · ")}
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -152,7 +179,7 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
                 onClick={() => openClaim(w.id, Math.max(1, w.pendingCount))}
                 disabled={w.pendingCount === 0}
               >
-                Claim slice ({w.pendingCount || 0})
+                Start a batch ({w.pendingCount || 0})
               </button>
               <button
                 type="button"
@@ -172,7 +199,7 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
                   className="btn btn-ghost"
                   onClick={() => setView({ kind: "senior", campWeekId: w.id })}
                 >
-                  Senior review
+                  Lead review
                 </button>
               )}
             </div>
@@ -180,7 +207,7 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
         ))}
 
         {weeks !== null && weeks.length === 0 && (
-          <div className="card" style={{ color: "var(--ink-3)" }}>No camp weeks need triage right now.</div>
+          <div className="card" style={{ color: "var(--ink-3)" }}>No camp weeks need review right now.</div>
         )}
       </div>
     </>
@@ -306,27 +333,27 @@ function ClaimGrid({
 
   const finish = async () => {
     await fetch(`/api/triage/claims/${claimId}/release`, { method: "POST" });
-    toast.show("Claim complete", "check");
+    toast.show("Batch complete", "check");
     onBack();
   };
 
-  if (!ctx) return <div className="page-body">Loading claim…</div>;
+  if (!ctx) return <div className="page-body">Loading batch…</div>;
 
   const lightboxPhoto = lightboxIndex !== null ? photos[lightboxIndex] ?? null : null;
 
   return (
     <>
       <PageHeader
-        eyebrow="Triage · Claim"
+        eyebrow="Camp Quality Review · Batch"
         title={`${ctx.locationName} — ${ctx.weekName}`}
         sub={`${reviewedCount} of ${total} reviewed`}
       />
       <div className="page-body" style={{ display: "grid", gridTemplateColumns: "240px 1fr", gap: 20 }}>
         <aside className="card" style={{ fontSize: 13 }}>
-          <button type="button" className="btn btn-ghost" onClick={onBack} style={{ marginBottom: 12 }}>← Hub</button>
+          <button type="button" className="btn btn-ghost" onClick={onBack} style={{ marginBottom: 12 }}>← Back</button>
           {ctx.evergreenNotes && (
             <>
-              <div style={{ fontWeight: 600, marginBottom: 6 }}>Evergreen notes</div>
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>Location notes</div>
               <p style={{ color: "var(--ink-2)", lineHeight: 1.5 }}>{ctx.evergreenNotes}</p>
             </>
           )}
@@ -337,17 +364,17 @@ function ClaimGrid({
               disabled={!allDone}
               onClick={() => void finish()}
             >
-              Finish & release
+              Finish & drop batch
             </button>
             <button type="button" className="btn btn-ghost" onClick={() => void release()}>
-              Release claim
+              Drop batch
             </button>
           </div>
         </aside>
 
         <div>
           {photos.length === 0 ? (
-            <div className="card">No photos in this claim.</div>
+            <div className="card">No photos in this batch.</div>
           ) : (
             <div
               style={{
@@ -364,7 +391,7 @@ function ClaimGrid({
                     key={p.id}
                     type="button"
                     onClick={() => setLightboxIndex(idx)}
-                    aria-label={`Photo ${idx + 1} of ${total}${kind ? `, marked ${kind}` : ""}`}
+                    aria-label={`Photo ${idx + 1} of ${total}${kind ? `, marked ${REVIEW_KIND_LABEL[kind]}` : ""}`}
                     style={{
                       position: "relative",
                       aspectRatio: "4 / 3",
@@ -521,7 +548,7 @@ function Lightbox({
           textTransform: "uppercase",
         }}
       >
-        {position}{snapshot ? ` · ${snapshot.kind}` : ""}
+        {position}{snapshot ? ` · ${REVIEW_KIND_LABEL[snapshot.kind]}` : ""}
       </div>
 
       <button
@@ -634,7 +661,7 @@ function Lightbox({
               onChange={(e) => setQuarantineIntent(e.target.checked)}
               disabled={!willFlag}
             />
-            Quarantine intent (only applies when flagging)
+            Quarantine intent (only applies when an issue is selected)
           </label>
           <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center" }}>
             <button
@@ -647,8 +674,8 @@ function Lightbox({
             </button>
             <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
               {willFlag
-                ? `Flag with ${selectedTags.length} tag${selectedTags.length === 1 ? "" : "s"}`
-                : "No tags selected → clean"}
+                ? `Flag ${selectedTags.length} issue${selectedTags.length === 1 ? "" : "s"}`
+                : "No issues selected → no issues"}
             </span>
           </div>
         </div>
@@ -724,27 +751,27 @@ export function SeniorDashboard({
   const signoff = async () => {
     try {
       await signoffCampWeek(supabase, campWeekId, recheck && week?.triageRole === "first_week");
-      toast.show("Week signed off", "check");
+      toast.show("Week approved", "check");
       onBack();
     } catch (err: unknown) {
-      toast.show(err instanceof Error ? err.message : "Signoff failed", "x");
+      toast.show(err instanceof Error ? err.message : "Approval failed", "x");
     }
   };
 
-  if (!week || !rollup) return <div className="page-body">Loading senior dashboard…</div>;
+  if (!week || !rollup) return <div className="page-body">Loading review dashboard…</div>;
 
   return (
     <>
       <PageHeader
-        eyebrow="Senior · Camp week"
+        eyebrow="Lead review · Camp week"
         title={`${week.locationName} — ${week.name}`}
-        sub={week.triageState}
+        sub={WEEK_STATE_LABEL[week.triageState] ?? week.triageState}
       />
       <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <button type="button" className="btn btn-ghost" onClick={onBack}>← Hub</button>
+        <button type="button" className="btn btn-ghost" onClick={onBack}>← Back</button>
 
         <div className="card">
-          <h3 className="card-title">Positive assessments</h3>
+          <h3 className="card-title">Highlights</h3>
           {[
             ["Great Quality", "positiveGreatQuality", week.positiveGreatQuality],
             ["Great Variety", "positiveGreatVariety", week.positiveGreatVariety],
@@ -764,7 +791,7 @@ export function SeniorDashboard({
         </div>
 
         <div className="card">
-          <h3 className="card-title">Rollup by category</h3>
+          <h3 className="card-title">Summary by category</h3>
           <ul style={{ fontSize: 13, margin: 0, paddingLeft: 18 }}>
             {(Object.keys(TAG_CATEGORY_LABELS) as TagCategory[]).map((cat) => (
               <li key={cat}>{TAG_CATEGORY_LABELS[cat]}: {rollup[cat]}</li>
@@ -773,7 +800,7 @@ export function SeniorDashboard({
         </div>
 
         <div className="card">
-          <h3 className="card-title">Flagged photos ({flagged.length})</h3>
+          <h3 className="card-title">Issues ({flagged.length})</h3>
           {flagged.map((p) => (
             <div key={p.id} style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "flex-start" }}>
               <div style={{ position: "relative", width: 120, height: 80, flexShrink: 0, borderRadius: 6, overflow: "hidden" }}>
@@ -799,11 +826,11 @@ export function SeniorDashboard({
           {week.triageRole === "first_week" && (
             <label style={{ display: "block", marginBottom: 12, fontSize: 13 }}>
               <input type="checkbox" checked={recheck} onChange={(e) => setRecheck(e.target.checked)} />
-              {" "}Flag 2nd week for recheck on signoff
+              {" "}Flag 2nd week for follow-up review on approval
             </label>
           )}
           <button type="button" className="btn btn-primary" onClick={() => void signoff()}>
-            Sign off week
+            Approve week
           </button>
         </div>
       </div>

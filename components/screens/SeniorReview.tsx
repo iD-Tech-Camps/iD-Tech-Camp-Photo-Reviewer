@@ -12,10 +12,10 @@ type View =
   | { kind: "week"; campWeekId: string };
 
 const STATE_LABELS: Record<string, string> = {
-  photos_in: "Photos in",
-  triage_in_progress: "Triage in progress",
-  triage_done: "Ready for senior",
-  senior_review: "Senior review",
+  photos_in: "Not started",
+  triage_in_progress: "In review",
+  triage_done: "Ready for sign-off",
+  senior_review: "In sign-off",
 };
 
 const STATE_TONE: Record<string, string> = {
@@ -44,7 +44,7 @@ export function SeniorReviewApp({ toast }: { toast: ToastApi }) {
   React.useEffect(() => {
     let cancelled = false;
     reload().catch((err: unknown) => {
-      if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load rollup");
+      if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load review summary");
     });
     return () => { cancelled = true; };
   }, [reload]);
@@ -64,9 +64,9 @@ export function SeniorReviewApp({ toast }: { toast: ToastApi }) {
   return (
     <>
       <PageHeader
-        eyebrow="Senior review"
+        eyebrow="Lead review"
         title="Active weeks <em>across the pipeline</em>"
-        sub={weeks === null ? "Loading…" : `${weeks.length} week(s) in active triage`}
+        sub={weeks === null ? "Loading…" : `${weeks.length} week${weeks.length === 1 ? "" : "s"} in active review`}
       />
       <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {error && <div className="card" style={{ color: "var(--rose)", fontSize: 12 }}>{error}</div>}
@@ -108,7 +108,7 @@ function WeekRow({ week, onOpen }: { week: SeniorRollupWeek; onOpen: () => void 
           </div>
           <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
             {week.triageRole === "first_week" && "First week · "}
-            {week.triageRole === "second_week_recheck" && "Second-week recheck · "}
+            {week.triageRole === "second_week_recheck" && "Follow-up review · "}
             Starts {week.startsOn}
           </div>
         </div>
@@ -153,13 +153,13 @@ function WeekRow({ week, onOpen }: { week: SeniorRollupWeek; onOpen: () => void 
           }}
         >
           <span>
-            {triagedCount} of {week.totalPhotos} triaged ({pct}%)
+            {triagedCount} of {week.totalPhotos} reviewed ({pct}%)
           </span>
           <span style={{ display: "flex", gap: 12 }}>
             {week.pendingCount > 0 && <span>{week.pendingCount} pending</span>}
             {week.inProgressCount > 0 && <span>{week.inProgressCount} in progress</span>}
             <span style={{ color: week.flaggedCount > 0 ? "var(--rose)" : undefined }}>
-              {week.flaggedCount} flagged
+              {week.flaggedCount} {week.flaggedCount === 1 ? "issue" : "issues"}
             </span>
             {week.quarantinedCount > 0 && <span>{week.quarantinedCount} quarantined</span>}
           </span>
@@ -172,7 +172,7 @@ function WeekRow({ week, onOpen }: { week: SeniorRollupWeek; onOpen: () => void 
           className={"btn " + (canOpen ? "btn-primary" : "btn-ghost")}
           onClick={onOpen}
         >
-          {canOpen ? "Open senior view" : "View week"}
+          {canOpen ? "Open review" : "View week"}
         </button>
       </div>
     </div>

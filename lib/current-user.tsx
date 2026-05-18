@@ -11,7 +11,7 @@ export type Role = "reviewer" | "senior" | "admin";
 
 export const ROLE_LABEL: Record<Role, string> = {
   reviewer: "Staff Reviewer",
-  senior:   "Senior Reviewer",
+  senior:   "Lead Reviewer",
   admin:    "Admin",
 };
 

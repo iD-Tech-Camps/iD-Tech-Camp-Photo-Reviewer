@@ -38,9 +38,8 @@ export function Sidebar({
   const canSeeSenior = role === "senior" || role === "admin";
 
   const userItems: { id: string; label: string; icon: string }[] = [
-    // Placeholder slot — replaced by the real triage hub in Step 3.
-    { id: "triage", label: "Triage", icon: "review" },
-    ...(canSeeSenior ? [{ id: "senior-review", label: "Senior review", icon: "stars" }] : []),
+    { id: "triage", label: "Camp Quality Review", icon: "review" },
+    ...(canSeeSenior ? [{ id: "senior-review", label: "Lead review", icon: "stars" }] : []),
   ];
 
   // Admin entries the demolition pass leaves standing. The remaining
@@ -49,11 +48,11 @@ export function Sidebar({
   // own slot so admins can still manage the tag library while Step 3
   // builds out the triage surfaces.
   const adminItems = [
-    { id: "admin-overview",  label: "Overview",         icon: "users" },
-    { id: "admin-locations", label: "Locations notes", icon: "tag" },
-    { id: "admin-tags",      label: "Tag library",      icon: "tag" },
-    { id: "admin-smugmug",   label: "Photo sync",       icon: "download" },
-    { id: "admin-settings",  label: "App settings",     icon: "gear" },
+    { id: "admin-overview",  label: "Overview",        icon: "users" },
+    { id: "admin-locations", label: "Location notes",  icon: "tag" },
+    { id: "admin-tags",      label: "Issue library",   icon: "tag" },
+    { id: "admin-smugmug",   label: "Photo sync",      icon: "download" },
+    { id: "admin-settings",  label: "App settings",    icon: "gear" },
   ];
 
   const supabaseRef = React.useRef<ReturnType<typeof createClient> | null>(null);
