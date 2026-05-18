@@ -35,10 +35,12 @@ export function Sidebar({
   const avatarInitials = loading ? "··" : initials;
 
   const canSeeAdmin = role === "admin";
+  const canSeeSenior = role === "senior" || role === "admin";
 
   const userItems: { id: string; label: string; icon: string }[] = [
     // Placeholder slot — replaced by the real triage hub in Step 3.
     { id: "triage", label: "Triage", icon: "review" },
+    ...(canSeeSenior ? [{ id: "senior-review", label: "Senior review", icon: "stars" }] : []),
   ];
 
   // Admin entries the demolition pass leaves standing. The remaining

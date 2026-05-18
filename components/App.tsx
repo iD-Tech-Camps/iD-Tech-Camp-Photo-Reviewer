@@ -10,11 +10,13 @@ import {
 } from "@/components/screens/Admin";
 import { AdminLocationsNotes } from "@/components/screens/AdminLocations";
 import { TriageApp } from "@/components/screens/Triage";
+import { SeniorReviewApp } from "@/components/screens/SeniorReview";
 import { SettingsProvider, useSettings } from "@/components/settings";
 import { UserProvider, useCurrentUser, type Role } from "@/lib/current-user";
 
 const VALID_SCREENS = [
   "triage",
+  "senior-review",
   "admin-overview",
   "admin-locations",
   "admin-tags",
@@ -30,8 +32,11 @@ const ADMIN_SCREENS = new Set([
   "admin-settings",
 ]);
 
+const SENIOR_ONLY_SCREENS = new Set(["senior-review"]);
+
 function screenAllowedFor(screen: string, role: Role): boolean {
   if (ADMIN_SCREENS.has(screen)) return role === "admin";
+  if (SENIOR_ONLY_SCREENS.has(screen)) return role === "senior" || role === "admin";
   return true;
 }
 
@@ -95,6 +100,7 @@ function AppInner() {
       <Sidebar current={activeScreen} onNav={setScreen} />
       <main className="main">
         {activeScreen === "triage"           && <TriageApp toast={toast} />}
+        {activeScreen === "senior-review"   && <SeniorReviewApp toast={toast} />}
         {activeScreen === "admin-overview"  && <AdminOverview toast={toast} />}
         {activeScreen === "admin-locations" && <AdminLocationsNotes toast={toast} />}
         {activeScreen === "admin-tags"      && <AdminTags />}

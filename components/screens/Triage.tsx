@@ -617,7 +617,7 @@ function Lightbox({
   );
 }
 
-function SeniorDashboard({
+export function SeniorDashboard({
   toast,
   supabase,
   campWeekId,

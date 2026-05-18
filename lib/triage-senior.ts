@@ -21,6 +21,89 @@ export type SeniorFlaggedPhoto = {
   tagIds: string[];
 };
 
+export type SeniorRollupWeek = {
+  id: string;
+  name: string;
+  locationName: string;
+  triageRole: string;
+  triageState: string;
+  startsOn: string;
+  totalPhotos: number;
+  pendingCount: number;
+  inProgressCount: number;
+  cleanCount: number;
+  flaggedCount: number;
+  deletedCount: number;
+  quarantinedCount: number;
+};
+
+const ACTIVE_PIPELINE_STATES = [
+  "photos_in",
+  "triage_in_progress",
+  "triage_done",
+  "senior_review",
+] as const;
+
+export async function fetchSeniorRollupWeeks(
+  supabase: SupabaseClient,
+): Promise<SeniorRollupWeek[]> {
+  const { data, error } = await supabase
+    .from("camp_weeks")
+    .select(
+      "id, name, starts_on, triage_role, triage_state, " +
+        "locations!inner ( name ), photos ( triage_state, is_quarantined )",
+    )
+    .in("triage_state", ACTIVE_PIPELINE_STATES as unknown as string[])
+    .order("starts_on", { ascending: true });
+  if (error) throw error;
+
+  type Raw = {
+    id: string;
+    name: string;
+    starts_on: string;
+    triage_role: string;
+    triage_state: string;
+    locations: { name: string } | null;
+    photos: Array<{ triage_state: string; is_quarantined: boolean }>;
+  };
+
+  return ((data ?? []) as unknown as Raw[]).map((w) => {
+    const photos = w.photos ?? [];
+    let pending = 0;
+    let inProgress = 0;
+    let clean = 0;
+    let flagged = 0;
+    let deleted = 0;
+    let quarantined = 0;
+    for (const p of photos) {
+      switch (p.triage_state) {
+        case "pending": pending += 1; break;
+        case "in_progress": inProgress += 1; break;
+        case "clean": clean += 1; break;
+        case "flagged": flagged += 1; break;
+        case "deleted": deleted += 1; break;
+        default: break;
+      }
+      if (p.is_quarantined) quarantined += 1;
+    }
+    return {
+      id: w.id,
+      name: w.name,
+      locationName: w.locations?.name ?? "—",
+      triageRole: w.triage_role,
+      triageState: w.triage_state,
+      startsOn: w.starts_on,
+      totalPhotos: photos.length,
+      pendingCount: pending,
+      inProgressCount: inProgress,
+      cleanCount: clean,
+      flaggedCount: flagged,
+      deletedCount: deleted,
+      quarantinedCount: quarantined,
+    };
+  });
+}
+
 export async function fetchSeniorWeek(
   supabase: SupabaseClient,
   campWeekId: string,
