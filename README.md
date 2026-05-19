@@ -61,13 +61,29 @@ If **Sync now** returns 500 or 503 with `server_config_incomplete`, one or more 
 4. Tuesday sample pull prioritizes unsampled pending photos (`sampled_for_burst`).
 5. When a week is done, the **lead reviewer** reviews flagged photos, toggles positive rubric fields, signs off (optionally flags 2nd week for follow-up review).
 
-## Database tests (local)
+## Tests (local)
+
+Both suites run against the local Supabase stack (`npx supabase start` — needs Docker).
+
+**Database trigger tests** — `psql`-style SQL files that exercise schema + triggers directly:
 
 ```bash
 npx supabase db reset
 npx supabase db query --file supabase/tests/e2e_smugmug_sync_flow.sql
 npx supabase db query --file supabase/tests/e2e_triage_triggers.sql
+npx supabase db query --file supabase/tests/smoke_test.sql
 ```
+
+**API integration tests** — Vitest invokes each Next.js route handler with a fake `Request`, mocks `lib/api-auth.ts` for auth/role injection, and asserts both the HTTP response and the DB state after each call. Covers happy path + auth-rejection + input-validation path per route under `app/api/triage/*`.
+
+```bash
+cp .env.test.local.example .env.test.local
+# fill in the values shown by `npx supabase status` (URL + anon + service-role keys)
+
+npm run test:api
+```
+
+The harness refuses to run against a non-local Supabase URL — fixture seeding creates and deletes auth users, divisions, and camp weeks, which would be destructive against production.
 
 ## Crons (Vercel)
 
