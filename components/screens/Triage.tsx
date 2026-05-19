@@ -30,6 +30,7 @@ import {
   type TagCategory,
 } from "@/lib/tags";
 import { usePoints } from "@/lib/points-context";
+import { smugmugVariantUrl } from "@/lib/smugmug/url-variants";
 
 type View =
   | { kind: "hub" }
@@ -265,25 +266,23 @@ function ClaimGrid({
   }, [supabase, claimId, campWeekId]);
 
   // Preload neighbors of the current lightbox photo so arrow nav lands on
-  // an already-cached image. SmugMug serves the full ArchivedUri as the
-  // hero src, which can be multi-MB; without this, each arrow press waits
-  // on a fresh round-trip.
+  // an already-cached image. The lightbox renders the XL variant (rewritten
+  // from thumbnail_url), so that's what we prefetch — never the original
+  // ArchivedUri, which can be multi-MB and would make ±2 preloading worse
+  // than the bug we're fixing. If the rewrite fails for a given neighbor
+  // (URL doesn't match the SmugMug pattern), skip it.
   React.useEffect(() => {
     if (lightboxIndex === null) return;
-    const neighbors: string[] = [];
-    if (lightboxIndex - 1 >= 0) {
-      const p = photos[lightboxIndex - 1];
-      const url = p?.imageUrl ?? p?.thumbnailUrl;
-      if (url) neighbors.push(url);
-    }
-    if (lightboxIndex + 1 < photos.length) {
-      const p = photos[lightboxIndex + 1];
-      const url = p?.imageUrl ?? p?.thumbnailUrl;
-      if (url) neighbors.push(url);
-    }
-    for (const url of neighbors) {
+    const offsets = [-2, -1, 1, 2];
+    for (const off of offsets) {
+      const idx = lightboxIndex + off;
+      if (idx < 0 || idx >= photos.length) continue;
+      const p = photos[idx];
+      if (!p?.thumbnailUrl) continue;
+      const xl = smugmugVariantUrl(p.thumbnailUrl, "XL");
+      if (!xl) continue;
       const img = new window.Image();
-      img.src = url;
+      img.src = xl;
     }
   }, [lightboxIndex, photos]);
 
@@ -533,6 +532,14 @@ function Lightbox({
   const willFlag = selectedTags.length > 0;
   const submitLabel = snapshot ? "Update" : "Submit";
 
+  // Rewrite the cached thumbnail URL to the XL variant (~150-400 KB) for
+  // the hero. Fall back to the original archive (multi-MB) if the rewrite
+  // can't match the URL pattern, and to the thumbnail itself if there's
+  // no archive either. The thumbnail is already in the browser cache from
+  // the grid, so previewSrc paints instantly under the loading XL.
+  const xlUrl = photo.thumbnailUrl ? smugmugVariantUrl(photo.thumbnailUrl, "XL") : null;
+  const heroSrc = xlUrl ?? photo.imageUrl ?? photo.thumbnailUrl;
+
   return (
     <div
       role="dialog"
@@ -623,7 +630,8 @@ function Lightbox({
           }}
         >
           <PhotoImg
-            src={photo.imageUrl ?? photo.thumbnailUrl}
+            src={heroSrc}
+            previewSrc={photo.thumbnailUrl}
             alt={photo.caption ?? "Photo"}
             fit="contain"
             loading="eager"
