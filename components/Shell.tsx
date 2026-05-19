@@ -7,11 +7,8 @@ import { useSettings } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
 import { brandingAssetUrl } from "@/lib/app-settings";
 
-// Sidebar nav — pared back during the triage refactor's demolition pass.
-// The reviewer/senior surfaces (Review, Profile, Guide, Flag review) are
-// gone; the triage hub + senior dashboard land in Step 3 and slot in
-// here. Until then everyone sees a single "Triage" placeholder; admins
-// also see the Admin section.
+// Sidebar nav. Reviewers see Camp Quality Review (+ Lead review when
+// senior or admin); admins additionally see the Admin section.
 export function Sidebar({
   current,
   onNav,
@@ -42,11 +39,6 @@ export function Sidebar({
     ...(canSeeSenior ? [{ id: "senior-review", label: "Lead review", icon: "stars" }] : []),
   ];
 
-  // Admin entries the demolition pass leaves standing. The remaining
-  // pre-refactor admin screens (Points & rules, Example library) are
-  // gone; Tags is extracted from the old Points & rules card into its
-  // own slot so admins can still manage the tag library while Step 3
-  // builds out the triage surfaces.
   const adminItems = [
     { id: "admin-overview",  label: "Overview",        icon: "users" },
     { id: "admin-locations", label: "Location notes",  icon: "tag" },

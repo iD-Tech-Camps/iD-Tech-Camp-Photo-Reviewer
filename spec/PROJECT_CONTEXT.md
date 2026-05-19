@@ -37,6 +37,10 @@ The legacy marketing-review queue (approve/flag/points/leaderboard) was removed 
 
 Trigger functions that `UPDATE photos` must be `SECURITY DEFINER SET search_path = public`. Authenticated users have **select-only** on `photos`; the SmugMug sync job and triggers write under service role or definer context. Schema tests run as service role will not catch RLS gaps — use `e2e_*` tests that mirror client insert paths where relevant.
 
+### Known dead writes
+
+- **`profiles.status`** (`profile_status` enum: `active` / `idle` / `inactive`) — column and enum are kept but nothing currently writes to them; the original transition logic was tied to an obsoleted plan. `last_active_at` is the authoritative recency signal and *is* bumped by `tg_triage_events_after_insert_bump_last_active`. The `status` column is reserved for the upcoming rating-system rebuild — do not repurpose, and do not surface its value in the UI.
+
 ---
 
 ## Tech stack

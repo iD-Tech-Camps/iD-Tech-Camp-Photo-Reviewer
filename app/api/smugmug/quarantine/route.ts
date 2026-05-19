@@ -16,26 +16,22 @@ interface QuarantineBody {
 }
 
 /**
- * Step 8.7 — Quarantine endpoint (post-triage-refactor edit).
- *
- * Called by the triage flow (Step 3) after a reviewer quarantines a
- * photo or a senior releases one. The client doesn't tell the server
- * *what* to do — it just identifies the photo and the server reads
- * the photo's freshly-trigger-updated state to decide whether to
+ * Quarantine endpoint. Called by the triage flow after a reviewer
+ * quarantines a photo or a senior releases one. The client doesn't tell
+ * the server *what* to do — it just identifies the photo and the server
+ * reads the photo's freshly-trigger-updated state to decide whether to
  * PATCH `Image.Hidden=true` (quarantine) or `false` (release).
  *
- * Authentication: any authenticated user. Reviewers, seniors, and
- * admins all have legitimate paths to this endpoint, and the actual
- * "should I move this?" call is gated by `photos.is_quarantined`
- * (written by triggers under SECURITY DEFINER), not by the caller's
- * role. A malicious caller can only ever ask us to reconcile to
- * whatever state a real triage action has already established.
+ * Authentication: any authenticated user. The actual "should I move
+ * this?" call is gated by `photos.is_quarantined` (written by triggers
+ * under SECURITY DEFINER), not by the caller's role. A malicious caller
+ * can only ever ask us to reconcile to whatever state a real triage
+ * action has already established.
  *
- * The handler always returns 200, even when SmugMug fails. The
- * payload's `drift: true` flag lets the client log a console warning
- * but the user-facing flow (toast, queue advance) doesn't block on
- * any of this. Drift rows land in `sync_log` for the admin to see
- * on Admin → SmugMug → Sync log.
+ * The handler always returns 200, even when SmugMug fails. The payload's
+ * `drift: true` flag lets the client log a console warning while the
+ * user-facing flow (toast, queue advance) doesn't block. Drift rows land
+ * in `sync_log` for the admin to see on Photo sync → Sync log.
  */
 export async function POST(req: NextRequest) {
   const supabase = await createClient();

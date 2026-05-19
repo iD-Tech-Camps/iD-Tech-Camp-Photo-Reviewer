@@ -2,7 +2,7 @@
 
 ## 0. Framing
 
-This document is the full design for the triage-first refactor. It is the contract Step 3 implementation will follow.
+This document is the full design for the triage-first refactor and the contract the triage implementation follows.
 
 **Adopted decisions** (from `spec/archive/REFACTOR_INVENTORY.md` §6, signed off without override — listed here for visibility):
 
@@ -37,7 +37,7 @@ After `triage_events` / `triage_event_tags` and `photos.triage_state` exist, **`
 - `EXISTS (SELECT 1 FROM triage_events e WHERE e.photo_id = photos.id)`, **or**
 - `photos.triage_state IS DISTINCT FROM 'not_required'`.
 
-This restores the intent of the old `reviews`-based preservation guard **contemporaneously** with the data it protects — **not** as later polish. Lands in the **same Step 3 chunk** as migrations introducing those columns/tables (see §8).
+This restores the intent of the old `reviews`-based preservation guard contemporaneously with the data it protects. Shipped alongside the migrations that introduce those columns/tables (see §8).
 
 ---
 
@@ -501,7 +501,7 @@ Under `app/api/triage/` (and admin helpers). Mutations follow existing SmugMug p
 |---|---|---|
 | `/api/smugmug/sync-scheduled` | `0 8 * * *` | Existing photo sync. |
 | `/api/triage/sample-burst` | **`0 19 * * 2`** | Tuesday 19:00 UTC sample burst (Q7). |
-| `/api/triage/sweep-claims` | `*/5 * * * *` | Claim expiry sweep (adjust cadence in Step 3 if needed). |
+| `/api/triage/sweep-claims` | `*/5 * * * *` | Claim expiry sweep. |
 
 ---
 
@@ -509,7 +509,7 @@ Under `app/api/triage/` (and admin helpers). Mutations follow existing SmugMug p
 
 Sidebar: **Triage hub** for all roles; seniors use per-week dashboards from hub (no separate “Flag review” nav). Admin: Overview, **Triage settings**, Locations notes, Tag library, SmugMug import, App settings. Profile / Guide deferred.
 
-Screen matrix unchanged in intent from the Step 2 plan: hub, claim grid, senior dashboard, admin surfaces listed there.
+Screen matrix: hub, claim grid, senior dashboard, admin surfaces.
 
 ---
 
@@ -532,7 +532,7 @@ Screen matrix unchanged in intent from the Step 2 plan: hub, claim grid, senior 
 
 Attach §4 functions, enable RLS §3e, backfill roles/states per prior plan.
 
-**Application layer (same Step 3 chunk as 27/28 — required)**
+**Application layer (shipped with migrations 27/28)**
 
 1. **`lib/smugmug/sync/photos.ts`:** orphan deletion MUST preserve rows per §0 (**triage_events** existence OR **`triage_state <> not_required`**).
 2. **`supabase/tests/e2e_smugmug_sync_flow.sql`:** extend with a scenario that **asserts preservation** when `triage_events` exists for an orphan — **do not** reintroduce removed priority-queue or clear-pending scenarios under new names.
@@ -564,7 +564,7 @@ Attach §4 functions, enable RLS §3e, backfill roles/states per prior plan.
 
 **Migration constraint — avoid forcing a four-way pick on every insert.** Implement **`tags.category`** as **either**:
 
-- **`NULL` allowed** — unknown / legacy / deliberately uncategorized rows omit it; rollup treats NULL outside the four rubric buckets (show “Other” / omit — UI decision in Step 3), **or**
+- **`NULL` allowed** — unknown / legacy / deliberately uncategorized rows omit it; rollup treats NULL outside the four rubric buckets (show "Other" or omit, UI decision), **or**
 - **`NOT NULL DEFAULT 'general'`** — new rows land in **`general`** until an admin sets a rubric bucket.
 
 **Do not** add **`NOT NULL`** without **`DEFAULT`** — that makes every new tag a mandatory four-way decision.

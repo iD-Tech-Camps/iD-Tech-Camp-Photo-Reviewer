@@ -4,32 +4,25 @@ import { SmugMugApiError } from "../fetch";
 import { setImageHidden } from "../quarantine";
 
 /**
- * Step 8.7 — quarantine reconcile core (post-triage-refactor edit).
+ * Quarantine reconcile core. Single entry point used by the
+ * `/api/smugmug/quarantine` route. Reads the photo's current DB state,
+ * decides what the SmugMug-side picture should look like, and reconciles
+ * it via a single PATCH on `Image.Hidden`.
  *
- * Single entry point used by the `/api/smugmug/quarantine` route. Reads
- * the photo's current DB state, decides what the SmugMug-side picture
- * should look like, and reconciles it via a single PATCH on
- * `Image.Hidden`.
- *
- * Decision rule (post migration 26):
+ * Decision rule:
  *
  *   is_quarantined = true   → Hidden=true
  *   is_quarantined = false  → Hidden=false
  *
- * The "current_status=deleted → noop" branch came out with
- * `photos.current_status` in migration 26. The new senior delete
- * happens through the triage flow (Step 3) and doesn't touch
- * `is_quarantined`; quarantine + delete are now orthogonal axes.
+ * Senior delete happens through the triage flow and doesn't touch
+ * `is_quarantined`; quarantine + delete are orthogonal axes.
  *
- * Failure posture: never throw to the caller. Drift (SmugMug is down,
- * the image was deleted by hand on SmugMug, credentials are stale)
- * lands as a `sync_log` row with `kind='quarantine_move'` and
- * `status='failed'`, surfaced on the existing Admin → SmugMug → Sync
- * log card. The flag/quarantine submission has already succeeded by
- * the time we run; blocking the caller on a SmugMug round-trip would
- * be the wrong tradeoff.
- *
- * The `quarantine_move` sync_kind survives migration 26's enum swap.
+ * Failure posture: never throw to the caller. Drift (SmugMug down,
+ * image deleted by hand on SmugMug, stale credentials) lands as a
+ * `sync_log` row with `kind='quarantine_move'` and `status='failed'`,
+ * surfaced on Photo sync → Sync log. The flag/quarantine submission has
+ * already succeeded by the time we run; blocking the caller on a
+ * SmugMug round-trip would be the wrong tradeoff.
  */
 
 export type QuarantineAction = "quarantine" | "release" | "noop";

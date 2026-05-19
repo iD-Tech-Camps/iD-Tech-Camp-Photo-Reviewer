@@ -115,10 +115,8 @@ export function AdminTags() {
       await deleteTag(supabase, id);
       setTags((prev) => (prev ?? []).filter((t) => t.id !== id));
     } catch (err: any) {
-      // FK-restrict on triage_event_tags (once it lands in Step 3) → fall
-      // back to soft-delete. Pre-Step-3 there are no dependents, so this
-      // branch only fires after triage_events arrives — but we keep the
-      // guard wired now so the UX doesn't regress later.
+      // FK-restrict from triage_event_tags → fall back to soft-delete
+      // when a tag is referenced by historical triage events.
       const code = err?.code ?? "";
       const looksLikeFkViolation = code === "23503" ||
         /violates foreign key/i.test(err?.message ?? "");
@@ -1262,7 +1260,7 @@ function DebouncedTextInput({
 
 // Minimal modal chrome shared by the ReviewerEditModal. Mirrors the
 // shape AdminSmugMug.tsx uses internally so the two surfaces feel the
-// same; once a shared modal primitive lands in Step 3 these can collapse.
+// same; the two can collapse to one primitive when a third caller arrives.
 function ModalShell({
   title,
   eyebrow,
