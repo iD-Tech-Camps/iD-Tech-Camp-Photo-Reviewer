@@ -22,6 +22,7 @@ The legacy marketing-review queue (approve/flag/points/leaderboard) was removed 
 - **Sampler:** Tuesday UTC burst marks `photos.sampled_for_burst` (fair redistribution per spec §5).
 - **Quarantine:** `photos.is_quarantined` + `/api/smugmug/quarantine` (`Image.Hidden`) — unchanged from pre-refactor.
 - **Signoff:** `triage_signoff_camp_week` RPC (senior/admin); can flag sibling 2nd week for recheck.
+- **Gamification:** points layer on top of triage via a source-agnostic ledger — see [`GAMIFICATION_SPEC.md`](./GAMIFICATION_SPEC.md).
 
 ### Migrations
 
@@ -30,8 +31,9 @@ The legacy marketing-review queue (approve/flag/points/leaderboard) was removed 
 | `20260517000026` | Demolition — drops review tables, `photos.current_status`, etc. |
 | `20260517000027` | Triage schema — enums, columns, `triage_*` tables, 12-tag seed |
 | `20260517000028` | Triggers, RLS, backfill, signoff/reset RPCs |
+| `20260519000032` | Gamification V1 — points ledger + rules + trigger on triage_events |
 
-**Dead migration slots (do not reuse):** `20260505000010`, `20260505000011`, `20260505000012` — comment-only placeholders from an abandoned gamification plan.
+**Dead migration slots (do not reuse):** `20260505000010`, `20260505000011`, `20260505000012` — comment-only placeholders. Gamification was deferred during the triage refactor; V1 (points only) ships under migration 32 — see [`GAMIFICATION_SPEC.md`](./GAMIFICATION_SPEC.md). The slots stay dead — future gamification work (streaks, badges, etc.) uses new migration numbers.
 
 ### RLS gotcha
 

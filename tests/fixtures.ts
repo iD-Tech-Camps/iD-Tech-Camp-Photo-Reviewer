@@ -101,6 +101,14 @@ export async function seed(opts?: { photos?: number; tags?: number }): Promise<F
 
 export async function teardown(f: Fixture): Promise<void> {
   const supabase = service();
+  // points_ledger.user_id → profiles.id is ON DELETE RESTRICT (audit log),
+  // so ledger rows must be wiped before the auth-user delete cascades into
+  // profiles. Clean up by user_id since the trigger writes one ledger row
+  // per clean/flag triage_event.
+  await supabase
+    .from("points_ledger")
+    .delete()
+    .in("user_id", [f.reviewer.id, f.senior.id, f.admin.id]);
   await supabase.from("triage_events").delete().in("reviewer_id", [f.reviewer.id, f.senior.id, f.admin.id]);
   await supabase.from("triage_claims").delete().in("reviewer_id", [f.reviewer.id, f.senior.id, f.admin.id]);
   await supabase.from("photos").delete().eq("camp_week_id", f.campWeekId);

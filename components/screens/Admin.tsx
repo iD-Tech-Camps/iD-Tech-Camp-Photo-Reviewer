@@ -7,6 +7,11 @@ import {
   updateTriageConfig,
   type TriageConfig,
 } from "@/lib/triage-config";
+import {
+  fetchTriagePointsRule,
+  updateTriagePointsRule,
+  type PointsRule,
+} from "@/lib/points";
 import { BrandLogo, PageHeader, type ToastApi } from "@/components/Shell";
 import { useSettings, AppSettings } from "@/components/settings";
 import { useCurrentUser, ROLE_LABEL } from "@/lib/current-user";
@@ -381,6 +386,8 @@ export function AdminTags() {
 // rebuilt; until then this screen stays scoped to roster management.
 // ─────────────────────────────────────────────────────────────────────────────
 
+type RosterSort = "last_active" | "points";
+
 export function AdminOverview({ toast }: { toast: ToastApi }) {
   const supabase = React.useMemo(() => createClient(), []);
   const { id: currentUserId } = useCurrentUser();
@@ -388,6 +395,7 @@ export function AdminOverview({ toast }: { toast: ToastApi }) {
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState("");
   const [editing, setEditing] = React.useState<RosterRow | null>(null);
+  const [sortBy, setSortBy] = React.useState<RosterSort>("last_active");
 
   React.useEffect(() => {
     let cancelled = false;
@@ -445,13 +453,17 @@ export function AdminOverview({ toast }: { toast: ToastApi }) {
 
   // Case-insensitive match across name/email/team. Empty search = show all.
   const q = search.trim().toLowerCase();
-  const visible = q
+  const filtered = q
     ? all.filter((r) =>
         (r.fullName ?? "").toLowerCase().includes(q) ||
         r.email.toLowerCase().includes(q) ||
         (r.team ?? "").toLowerCase().includes(q),
       )
     : all;
+
+  const visible = sortBy === "points"
+    ? [...filtered].sort((a, b) => b.totalPoints - a.totalPoints)
+    : filtered;
 
   const subtitle = roster === null
     ? "Loading roster…"
@@ -496,6 +508,15 @@ export function AdminOverview({ toast }: { toast: ToastApi }) {
                 <th>Role</th>
                 <th>Team</th>
                 <th style={{ width: 130 }}>Last active</th>
+                <th style={{ width: 110 }}>
+                  <SortHeader
+                    label="Points"
+                    active={sortBy === "points"}
+                    onClick={() =>
+                      setSortBy((s) => (s === "points" ? "last_active" : "points"))
+                    }
+                  />
+                </th>
                 <th style={{ width: 50 }}></th>
               </tr>
             </thead>
@@ -503,7 +524,7 @@ export function AdminOverview({ toast }: { toast: ToastApi }) {
               {roster === null && <RosterSkeletonRows />}
               {roster !== null && visible.length === 0 && (
                 <tr>
-                  <td colSpan={5} style={{
+                  <td colSpan={6} style={{
                     textAlign: "center", padding: "24px 12px",
                     color: "var(--ink-3)", fontSize: 13,
                   }}>
@@ -575,6 +596,12 @@ function ReviewerRow({ user, onEdit }: { user: RosterRow; onEdit: () => void }) 
       <td style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-3)" }}>
         {formatLastActive(user.lastActiveAt)}
       </td>
+      <td
+        style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-2)" }}
+        title={`${user.eventCount} completed photo${user.eventCount === 1 ? "" : "s"}`}
+      >
+        {user.totalPoints} pts
+      </td>
       <td>
         <button
           className="btn btn-ghost"
@@ -587,6 +614,26 @@ function ReviewerRow({ user, onEdit }: { user: RosterRow; onEdit: () => void }) 
         </button>
       </td>
     </tr>
+  );
+}
+
+function SortHeader({
+  label, active, onClick,
+}: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        background: "transparent", border: "none", padding: 0,
+        font: "inherit", color: active ? "var(--ink)" : "inherit",
+        cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4,
+      }}
+      title={active ? `Sorted by ${label.toLowerCase()}` : `Sort by ${label.toLowerCase()}`}
+    >
+      {label}
+      {active && <span style={{ fontSize: 10 }}>↓</span>}
+    </button>
   );
 }
 
@@ -726,6 +773,7 @@ function RosterSkeletonRows() {
           <td><div style={{ height: 18, width: 80, background: "var(--paper-3)", borderRadius: 999 }} /></td>
           <td><div style={{ height: 12, width: 70, background: "var(--paper-3)", borderRadius: 4 }} /></td>
           <td><div style={{ height: 12, width: 60, background: "var(--paper-3)", borderRadius: 4 }} /></td>
+          <td><div style={{ height: 12, width: 50, background: "var(--paper-3)", borderRadius: 4 }} /></td>
           <td />
         </tr>
       ))}
@@ -787,6 +835,11 @@ export function AdminSettings() {
     maxForTriagePerBurst: 200,
     claimExpiryMinutes: 60,
   });
+  const [pointsRule, setPointsRule] = React.useState<PointsRule | null>(null);
+  const [pointsDraft, setPointsDraft] = React.useState<number>(1);
+  const [pointsBusy, setPointsBusy] = React.useState(false);
+  const [pointsLoadError, setPointsLoadError] = React.useState<string | null>(null);
+  const [pointsSaveError, setPointsSaveError] = React.useState<string | null>(null);
   const [confirmReset, setConfirmReset] = React.useState(false);
   const [faviconBusy, setFaviconBusy] = React.useState(false);
   const [faviconError, setFaviconError] = React.useState<string | null>(null);
@@ -812,6 +865,43 @@ export function AdminSettings() {
       });
     return () => { cancelled = true; };
   }, [supabase]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchTriagePointsRule(supabase)
+      .then((r) => {
+        if (cancelled) return;
+        setPointsRule(r);
+        setPointsDraft(r.points);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setPointsLoadError(err?.message ?? "Failed to load points rule");
+        }
+      });
+    return () => { cancelled = true; };
+  }, [supabase]);
+
+  const pointsDirty = pointsRule !== null && pointsDraft !== pointsRule.points;
+
+  const savePoints = async () => {
+    if (!pointsDirty || pointsBusy) return;
+    if (!Number.isInteger(pointsDraft) || pointsDraft < 0) {
+      setPointsSaveError("Points must be a whole number ≥ 0.");
+      return;
+    }
+    setPointsBusy(true);
+    setPointsSaveError(null);
+    try {
+      const next = await updateTriagePointsRule(pointsDraft);
+      setPointsRule(next);
+      setPointsDraft(next.points);
+    } catch (err: unknown) {
+      setPointsSaveError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setPointsBusy(false);
+    }
+  };
 
   const triageDirty = triageConfig !== null && (
     triageForm.seasonFirstWeekStart !== triageConfig.seasonFirstWeekStart ||
@@ -1133,6 +1223,62 @@ export function AdminSettings() {
             >
               <Icon name="check" size={12} /> {triageBusy ? "Saving…" : "Save season & review"}
             </button>
+          </div>
+
+          {pointsLoadError && (
+            <div style={{
+              padding: 10,
+              border: "1px solid var(--rose)", borderRadius: 6,
+              background: "var(--rose-soft)", color: "var(--rose)",
+              fontSize: 12,
+            }}>
+              Couldn&apos;t load points rule: {pointsLoadError}
+            </div>
+          )}
+
+          <div className="card">
+            <h3 className="card-title" style={{ marginBottom: 4 }}>Points</h3>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
+              Reviewers earn points for completing photo review. Changes apply
+              to future events only — past awards keep their original value.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <FieldRow
+                label="Points per completed photo"
+                hint="Awarded once per photo a reviewer marks clean or flags. Set to 0 to record activity without awarding points."
+              >
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  className="input"
+                  disabled={pointsRule === null || pointsBusy}
+                  value={Number.isFinite(pointsDraft) ? pointsDraft : 0}
+                  onChange={(e) => setPointsDraft(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                />
+              </FieldRow>
+            </div>
+            {pointsSaveError && (
+              <div style={{
+                marginTop: 10, padding: 10,
+                border: "1px solid var(--rose)", borderRadius: 6,
+                background: "var(--rose-soft)", color: "var(--rose)",
+                fontSize: 12,
+              }}>
+                {pointsSaveError}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={savePoints}
+                disabled={!pointsDirty || pointsBusy || pointsRule === null}
+                style={{ opacity: pointsDirty && !pointsBusy ? 1 : 0.5 }}
+              >
+                <Icon name="check" size={12} /> {pointsBusy ? "Saving…" : "Save points rule"}
+              </button>
+            </div>
           </div>
 
         </div>

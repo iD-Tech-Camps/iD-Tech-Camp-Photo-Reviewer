@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useSettings } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
 import { brandingAssetUrl } from "@/lib/app-settings";
+import { fetchSelfPointsTotal } from "@/lib/points";
 
 // Sidebar nav. Reviewers see Camp Quality Review (+ Lead review when
 // senior or admin); admins additionally see the Admin section.
@@ -17,8 +18,28 @@ export function Sidebar({
   onNav: (id: string) => void;
 }) {
   const { settings } = useSettings();
-  const { email, fullName, firstName, initials, loading, role } = useCurrentUser();
+  const { id: userId, email, fullName, firstName, initials, loading, role } = useCurrentUser();
   const [signingOut, setSigningOut] = React.useState(false);
+  const [points, setPoints] = React.useState<number | null>(null);
+
+  // Refetch on every nav so the chip catches new awards from the last
+  // screen the reviewer was on. No live subscription; per spec §5a.
+  const supabaseRef = React.useRef<ReturnType<typeof createClient> | null>(null);
+  if (!supabaseRef.current) supabaseRef.current = createClient();
+  React.useEffect(() => {
+    if (!userId) {
+      setPoints(null);
+      return;
+    }
+    let cancelled = false;
+    fetchSelfPointsTotal(supabaseRef.current!, userId)
+      .then((row) => { if (!cancelled) setPoints(row?.totalPoints ?? 0); })
+      .catch((err) => {
+        console.warn("[shell] points total fetch failed:", err?.message ?? err);
+        if (!cancelled) setPoints(null);
+      });
+    return () => { cancelled = true; };
+  }, [userId, current]);
 
   const handleSignOut = async () => {
     if (signingOut) return;
@@ -47,10 +68,8 @@ export function Sidebar({
     { id: "admin-settings",  label: "App settings",    icon: "gear" },
   ];
 
-  const supabaseRef = React.useRef<ReturnType<typeof createClient> | null>(null);
-  if (!supabaseRef.current) supabaseRef.current = createClient();
   const logoUrl = settings.faviconStoragePath
-    ? brandingAssetUrl(supabaseRef.current, settings.faviconStoragePath)
+    ? brandingAssetUrl(supabaseRef.current!, settings.faviconStoragePath)
     : null;
 
   return (
@@ -102,10 +121,30 @@ export function Sidebar({
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
               }}
               title={email ?? undefined}
             >
-              {displayName}
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{displayName}</span>
+              {points !== null && (
+                <span
+                  style={{
+                    flexShrink: 0,
+                    fontSize: 10,
+                    fontWeight: 500,
+                    padding: "2px 6px",
+                    borderRadius: 999,
+                    background: "var(--sun-soft)",
+                    color: "var(--sun)",
+                    fontFamily: "var(--font-mono)",
+                  }}
+                  title={`${points} point${points === 1 ? "" : "s"}`}
+                >
+                  {points} pts
+                </span>
+              )}
             </div>
             <div
               style={{
