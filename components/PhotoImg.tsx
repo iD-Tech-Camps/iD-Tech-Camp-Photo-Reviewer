@@ -25,6 +25,14 @@
 // and a fight with SmugMug's hotlink referer rules. The `loading="lazy"`
 // hint is enough for the grid views; the reviewer hero opts out via
 // `eager` since it's the only thing on screen.
+//
+// `previewSrc` (optional) lets a caller paint a low-fidelity preview (the
+// already-cached thumbnail) under the main image while the larger variant
+// downloads. The preview is rendered as a separate <img> layer with a
+// blur/scale filter so it reads as "loading hint, not final" — the main
+// image fades over it on load, and the preview stays visible if the main
+// image errors (blurry-but-present beats no-image). Without this prop the
+// renderer behaves exactly as it did before (skeleton + single image).
 
 import React from "react";
 
@@ -50,6 +58,10 @@ export type PhotoImgProps = {
   // Render an animated spinner in the loading state instead of a silent
   // skeleton. Used by the lightbox where a flat panel reads as broken.
   showSpinner?: boolean;
+  // Low-fidelity URL painted behind the main image as a progressive load
+  // hint. Used by the lightbox to render the cached thumbnail (instant)
+  // under the XL variant while the latter downloads.
+  previewSrc?: string | null;
 };
 
 export function PhotoImg({
@@ -61,6 +73,7 @@ export function PhotoImg({
   className,
   background = "var(--paper-3)",
   showSpinner = false,
+  previewSrc,
 }: PhotoImgProps) {
   // Tracks load state per src so swapping photos resets the skeleton.
   const [status, setStatus] = React.useState<"loading" | "loaded" | "error">(
@@ -86,7 +99,9 @@ export function PhotoImg({
     }
   }, [src]);
 
-  if (!src || status === "error") {
+  // "No image" fallback. With `previewSrc` the preview can still carry the
+  // load — blurry-but-present is a better degradation than a flat tile.
+  if ((!src || status === "error") && !previewSrc) {
     return (
       <div
         onClick={onClick}
@@ -110,7 +125,25 @@ export function PhotoImg({
 
   return (
     <>
-      {status === "loading" && (
+      {previewSrc && (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img
+          src={previewSrc}
+          alt=""
+          aria-hidden
+          decoding="async"
+          style={{
+            position: "absolute", inset: 0,
+            width: "100%", height: "100%",
+            objectFit: fit,
+            // Scale slightly so the blur doesn't reveal a hard edge inside
+            // the container; the blur reads as "still loading, not final".
+            filter: "blur(8px)",
+            transform: "scale(1.05)",
+          }}
+        />
+      )}
+      {!previewSrc && status === "loading" && (
         <div
           aria-hidden
           style={{
@@ -123,29 +156,31 @@ export function PhotoImg({
           {showSpinner && <span className="photo-spinner" aria-hidden />}
         </div>
       )}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        ref={imgRef}
-        src={src}
-        alt={alt}
-        loading={loading}
-        decoding="async"
-        onLoad={() => setStatus("loaded")}
-        onError={() => setStatus("error")}
-        onClick={onClick}
-        className={className}
-        style={{
-          position: "absolute", inset: 0,
-          width: "100%", height: "100%",
-          objectFit: fit,
-          // Hide the half-decoded image until the browser confirms load —
-          // SmugMug occasionally serves a partial response on referer
-          // rejection that flashes a broken icon otherwise.
-          opacity: status === "loaded" ? 1 : 0,
-          transition: "opacity 0.18s ease",
-          cursor: onClick ? "pointer" : "default",
-        }}
-      />
+      {src && status !== "error" && (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img
+          ref={imgRef}
+          src={src}
+          alt={alt}
+          loading={loading}
+          decoding="async"
+          onLoad={() => setStatus("loaded")}
+          onError={() => setStatus("error")}
+          onClick={onClick}
+          className={className}
+          style={{
+            position: "absolute", inset: 0,
+            width: "100%", height: "100%",
+            objectFit: fit,
+            // Hide the half-decoded image until the browser confirms load —
+            // SmugMug occasionally serves a partial response on referer
+            // rejection that flashes a broken icon otherwise.
+            opacity: status === "loaded" ? 1 : 0,
+            transition: "opacity 0.18s ease",
+            cursor: onClick ? "pointer" : "default",
+          }}
+        />
+      )}
     </>
   );
 }
