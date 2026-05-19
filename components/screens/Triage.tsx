@@ -661,7 +661,7 @@ function Lightbox({
               onChange={(e) => setQuarantineIntent(e.target.checked)}
               disabled={!willFlag}
             />
-            Quarantine intent (only applies when an issue is selected)
+            Hide from parent view (only applies when an issue is selected)
           </label>
           <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center" }}>
             <button
@@ -812,9 +812,9 @@ export function SeniorDashboard({
                 </div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <button type="button" className="btn btn-ghost" onClick={() => void seniorAction(p.id, "senior_delete")}>Delete</button>
-                  <button type="button" className="btn btn-ghost" onClick={() => void seniorAction(p.id, "senior_quarantine")}>Quarantine</button>
+                  <button type="button" className="btn btn-ghost" onClick={() => void seniorAction(p.id, "senior_quarantine")}>Hide from parent view</button>
                   {p.isQuarantined && (
-                    <button type="button" className="btn btn-ghost" onClick={() => void seniorAction(p.id, "senior_release_quarantine")}>Release quarantine</button>
+                    <button type="button" className="btn btn-ghost" onClick={() => void seniorAction(p.id, "senior_release_quarantine")}>Restore parent view</button>
                   )}
                 </div>
               </div>

@@ -161,7 +161,7 @@ function WeekRow({ week, onOpen }: { week: SeniorRollupWeek; onOpen: () => void 
             <span style={{ color: week.flaggedCount > 0 ? "var(--rose)" : undefined }}>
               {week.flaggedCount} {week.flaggedCount === 1 ? "issue" : "issues"}
             </span>
-            {week.quarantinedCount > 0 && <span>{week.quarantinedCount} quarantined</span>}
+            {week.quarantinedCount > 0 && <span>{week.quarantinedCount} hidden from parents</span>}
           </span>
         </div>
       </div>

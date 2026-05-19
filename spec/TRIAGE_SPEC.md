@@ -4,7 +4,7 @@
 
 This document is the full design for the triage-first refactor. It is the contract Step 3 implementation will follow.
 
-**Adopted decisions** (from `spec/REFACTOR_INVENTORY.md` §6, signed off without override — listed here for visibility):
+**Adopted decisions** (from `spec/archive/REFACTOR_INVENTORY.md` §6, signed off without override — listed here for visibility):
 
 | § | Decision adopted | Reasoning |
 |---|---|---|
@@ -539,9 +539,9 @@ Attach §4 functions, enable RLS §3e, backfill roles/states per prior plan.
 
 ---
 
-## 9. PROJECT_CONTEXT.md update outline
+## 9. PROJECT_CONTEXT.md
 
-Rewrite in Step 3 polish: triage-first purpose, new file tree, roadmap prune, decisions list (unified camp_week machine, `photos.triage_state` column, claims + sampler, no global queue, score-by-count, quarantine preserved, trigger pattern). Delete `spec/SCHEMA_SPEC.md` when triage docs supersede it. Note dead migration slots 10/11/12.
+`spec/PROJECT_CONTEXT.md` was rewritten alongside the triage refactor to cover the triage-first purpose, file tree, and decisions list. The old `spec/SCHEMA_SPEC.md` was removed (superseded by this document). Dead migration slots `…00010` / `…00011` / `…00012` are documented there as reserved-do-not-reuse.
 
 ---
 
@@ -575,4 +575,4 @@ Seed rows in §3f use **only** `quality` | `setup` | `brand` | `safety` (no seed
 
 ## 11. Execution note
 
-Step 3 implements this spec. **`spec/TRIAGE_SPEC.md`** is the source of truth; amend via PR if requirements change after implementation starts.
+This spec is the source of truth for the triage schema and behavior; amend via PR if requirements change.

@@ -414,68 +414,6 @@ button {
   100% { box-shadow: 0 0 0 14px color-mix(in oklch, var(--sun) 0%, transparent); }
 }
 
-/* Review action buttons */
-.review-action {
-  background: var(--paper-2);
-  border: 1px solid var(--rule-2);
-  border-radius: var(--radius);
-  padding: 14px 18px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  cursor: pointer;
-  transition: all 0.15s;
-  min-width: 120px;
-  text-align: left;
-}
-.review-action:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
-}
-.review-action.approve:hover { border-color: var(--moss); background: var(--moss-soft); }
-.review-action.reject:hover { border-color: var(--rose); background: var(--rose-soft); }
-.review-action.flag:hover { border-color: var(--sun); background: var(--sun-soft); }
-
-.review-action .ra-label {
-  font-family: var(--font-display);
-  font-size: 18px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-}
-.review-action .ra-key {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-}
-.kbd {
-  display: inline-grid;
-  place-items: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
-  border-radius: 4px;
-  background: var(--paper);
-  border: 1px solid var(--rule-2);
-  border-bottom-width: 2px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--ink-2);
-}
-
-/* Star rating */
-.stars { display: inline-flex; gap: 3px; }
-.star {
-  width: 22px; height: 22px;
-  cursor: pointer;
-  color: var(--rule-2);
-  transition: color 0.1s, transform 0.1s;
-}
-.star.on { color: var(--sun); }
-.star:hover { transform: scale(1.1); }
-
 /* Tags */
 .tag-chip {
   display: inline-flex;
@@ -523,21 +461,6 @@ button {
   letter-spacing: 0.1em;
   color: var(--ink-3);
   margin-bottom: 6px;
-}
-
-/* Ribbon / pennant badge */
-.pennant {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 10px 4px 12px;
-  background: var(--sun);
-  color: white;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  clip-path: polygon(0 0, 100% 0, calc(100% - 8px) 50%, 100% 100%, 0 100%);
-  padding-right: 18px;
 }
 
 /* Progress */

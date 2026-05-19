@@ -379,11 +379,8 @@ export function AdminTags() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AdminOverview — reviewer roster (identity + role + team + last active).
-// The pre-refactor reviewed_today / total_reviews / total_points columns
-// fed off the `reviewer_stats` view, which was dropped in migration 26.
-// Step 3 reintroduces triage-side counts (photos triaged, camp weeks
-// signed off) once triage_events lands; until then this screen stays
-// scoped to roster management.
+// Per-user triage activity counts will be added when the rating system is
+// rebuilt; until then this screen stays scoped to roster management.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function AdminOverview({ toast }: { toast: ToastApi }) {
@@ -438,12 +435,9 @@ export function AdminOverview({ toast }: { toast: ToastApi }) {
   const all = roster ?? [];
   const accountCount = all.length;
 
-  // "Active in last 24h" = touched profiles.last_active_at within 24h.
-  // Pre-refactor that column bumped on every review insert via the
-  // reviews_bump_last_active trigger (now dropped). Until Step 3 wires
-  // a triage-side activity bump, last_active_at is effectively frozen —
-  // the column survives in the DB but no app code updates it. The
-  // "active reviewers" stat below will read zero until that lands.
+  // "Active in last 24h" = touched profiles.last_active_at within 24h;
+  // bumped on every triage_events insert by
+  // tg_triage_events_after_insert_bump_last_active (migration 28).
   const dayMs = 24 * 60 * 60 * 1000;
   const now = Date.now();
   const activeLast24h = all.filter((r) => {

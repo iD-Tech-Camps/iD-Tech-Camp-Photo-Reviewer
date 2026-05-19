@@ -10,11 +10,8 @@ import {
   type DbAppSettings,
 } from "@/lib/app-settings";
 
-// Branding shape the app needs at runtime. Migration 26 dropped the five
-// reviewer-copy fields (home_greeting, home_subtitle, completion_*,
-// empty_queue_message) and the bonus_periods table — both belonged to
-// the marketing-review surface. Any triage-flow copy keys land here
-// when they're introduced.
+// Branding shape the app needs at runtime. Future triage-flow copy
+// keys land here when they're introduced.
 export type AppSettings = {
   brandName: string;
   brandTagline: string;

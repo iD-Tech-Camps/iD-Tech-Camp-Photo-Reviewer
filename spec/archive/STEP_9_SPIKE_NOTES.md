@@ -1,5 +1,7 @@
 # Step 9 — Throwaway-branch spike notes
 
+> Archived — Next 15 / React 19 upgrade is shipped. Preserved for archaeology only; do not treat as current.
+
 > Written from the `spike/step-9-react-19-and-next-15` branch (since deleted). The branch installed `next@15.5.18 + react@19 + react-dom@19 + eslint-config-next@15.5.18 + @types/react@19 + @types/react-dom@19`, applied the minimum `cookies()` async fix, and exercised lint / build / dev / route-handler smoke. Findings below.
 
 ## 1. dnd-kit v6 under React 19 — works

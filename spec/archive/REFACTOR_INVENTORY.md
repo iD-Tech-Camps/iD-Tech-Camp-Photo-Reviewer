@@ -1,5 +1,7 @@
 # Triage Refactor — Demolition Inventory
 
+> Archived — refactor complete. Preserved for archaeology only; do not treat as current.
+
 ## 0. Framing
 
 This document covers **only the demolition side** of the refactor. Tables, screens, and library code that the new triage app will *add* are listed here only by name where they replace something being deleted; their actual schema, transitions, and UI live in Step 2's `TRIAGE_SPEC.md`.

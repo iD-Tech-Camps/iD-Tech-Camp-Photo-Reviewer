@@ -332,7 +332,7 @@ function KindPill({ kind }: { kind: SyncKind }) {
   const label =
     kind === "scheduled"       ? "Scheduled"  :
     kind === "manual"          ? "Manual"     :
-    kind === "quarantine_move" ? "Quarantine" :
+    kind === "quarantine_move" ? "Hidden"     :
     kind === "triage_sample"   ? "Sample"     :
     "Other";
   const cls =

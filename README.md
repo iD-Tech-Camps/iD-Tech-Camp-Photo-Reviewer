@@ -1,6 +1,6 @@
 # iD Tech Camp Photo Reviewer
 
-Internal web app for **camp-week photo triage**: SmugMug sync, reviewer claims, ops-rubric flags, senior signoff. Next.js 15 + Supabase + Google OAuth (`@idtech.com`).
+Internal web app for **camp-week Camp Quality Review**: SmugMug sync, reviewer claim batches, ops-rubric flags, lead signoff. Next.js 15 + Supabase + Google OAuth (`@idtech.com`).
 
 Architecture and roadmap: [`spec/PROJECT_CONTEXT.md`](./spec/PROJECT_CONTEXT.md). Schema and behavior contract: [`spec/TRIAGE_SPEC.md`](./spec/TRIAGE_SPEC.md).
 
@@ -49,17 +49,17 @@ If **Sync now** returns 500 or 503 with `server_config_incomplete`, one or more 
 
 | Role | Access |
 |------|--------|
-| **Staff reviewer** | Triage hub — claim slices, clean/flag photos |
-| **Senior** | Triage hub + per-week senior dashboard, signoff, positive assessments |
-| **Admin** | All of the above + app settings (branding, season, triage knobs), locations notes, tag library, photo sync |
+| **Staff reviewer** | Camp Quality Review hub — claim batches, clean/flag photos |
+| **Lead reviewer** | Camp Quality Review hub + per-week lead dashboard, signoff, positive assessments |
+| **Admin** | All of the above + app settings (branding, season, review knobs), location notes, issue library, photo sync |
 
-## Triage flow (summary)
+## Camp Quality Review flow (summary)
 
 1. SmugMug sync populates `photos` under `camp_weeks`.
 2. **1st week** per location is derived from `triage_config` window (or admin override).
-3. Reviewers open **Triage**, claim a slice (max 3 active claims), triage photos clean or with flags.
-4. Tuesday sample burst prioritizes unsampled pending photos (`sampled_for_burst`).
-5. When a week is done, **senior** reviews flagged photos, toggles positive rubric fields, signs off (optionally flags 2nd week for recheck).
+3. Reviewers open **Camp Quality Review**, claim a batch (max 3 active claim batches), mark photos clean or flag with issues.
+4. Tuesday sample pull prioritizes unsampled pending photos (`sampled_for_burst`).
+5. When a week is done, the **lead reviewer** reviews flagged photos, toggles positive rubric fields, signs off (optionally flags 2nd week for follow-up review).
 
 ## Database tests (local)
 

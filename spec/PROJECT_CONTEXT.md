@@ -6,7 +6,9 @@
 
 ## What this app is
 
-An internal **camp-week triage** tool for iD Tech. SmugMug syncs divisions, locations, camp weeks, and photos. Reviewers claim slices of photos within eligible weeks, mark them clean or flag them with ops-rubric tags. Seniors review flagged work per camp week, record positive assessments, and sign off. Admins configure season bounds and triage knobs (App settings), tags, evergreen location notes, branding, and photo sync (Photo sync screen).
+An internal **Camp Quality Review** tool for iD Tech. SmugMug syncs divisions, locations, camp weeks, and photos. Reviewers claim batches of photos within eligible weeks, mark them clean or flag them with ops-rubric issues. Lead reviewers review flagged work per camp week, record positive assessments, and sign off. Admins configure season bounds and review knobs (App settings), the issue library, evergreen location notes, branding, and photo sync (Photo sync screen).
+
+> Internal naming note: code, DB columns, and migrations still use the legacy `triage_*` identifiers (table/column/route names are intentionally not renamed). User-visible copy uses **Camp Quality Review** (workflow), **Claim batch** (formerly slice), **Hide from parent view** (formerly quarantine), and **Lead reviewer** (formerly senior).
 
 The legacy marketing-review queue (approve/flag/points/leaderboard) was removed in migration 26. Git history preserves the old design.
 
@@ -74,4 +76,4 @@ npm run build
 
 ## Decisions (refactor)
 
-See [`TRIAGE_SPEC.md`](./TRIAGE_SPEC.md) §0 and [`REFACTOR_INVENTORY.md`](./REFACTOR_INVENTORY.md) §6. Highlights: no global photo queue; score-by-count (no leaderboard); `tags.category` for senior rollups; `triage_config` singleton separate from `app_settings` branding.
+See [`TRIAGE_SPEC.md`](./TRIAGE_SPEC.md) §0 and [`archive/REFACTOR_INVENTORY.md`](./archive/REFACTOR_INVENTORY.md) §6 (archived planning doc). Highlights: no global photo queue; score-by-count (no leaderboard); `tags.category` for senior rollups; `triage_config` singleton separate from `app_settings` branding.

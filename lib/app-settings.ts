@@ -1,10 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-// Persisted shape for the branding slice of `app_settings`. The five
-// reviewer-copy columns (home_greeting, home_subtitle, completion_*,
-// empty_queue_message) were dropped in migration 26 — they templated the
-// marketing-review batch UX, which no longer exists. New triage copy
-// fields (if any) get their own keys when they land.
+// Persisted shape for the branding slice of `app_settings`. New triage
+// copy fields (if any) get their own keys when they land.
 //
 // Keys mirror the camelCase the SettingsProvider uses; this file is the
 // single place that maps between snake_case columns and the runtime

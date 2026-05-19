@@ -1,12 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Role } from "@/lib/current-user";
 
-// Minimal roster + reviewer-edit helpers for Admin → Overview during the
-// triage refactor's demolition phase. Replaces the dropped `lib/profile.ts`
-// (whose `fetchMyStats` / `fetchReviewerRoster` were backed by the dropped
-// `reviewer_stats` view). Triage-side counts will land here in Step 3
-// alongside the new triage_events table; for now the roster is just
-// identity + role + team + last-active.
+// Minimal roster + reviewer-edit helpers for Admin → Overview:
+// identity + role + team + last-active. Per-user activity counts will
+// land here when the rating system is rebuilt.
 
 export type RosterRow = {
   id: string;
