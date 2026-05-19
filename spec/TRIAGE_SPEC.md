@@ -507,7 +507,7 @@ Under `app/api/triage/` (and admin helpers). Mutations follow existing SmugMug p
 
 ## 7. Screens
 
-Sidebar: **Triage hub** for all roles; seniors use per-week dashboards from hub (no separate “Flag review” nav). Admin: Overview, **Triage settings**, Locations notes, Tag library, SmugMug import, App settings. Profile / Guide deferred.
+Sidebar: **Triage hub + My stats** for all roles; seniors use per-week dashboards from hub (no separate “Flag review” nav). Admin: Overview, **Triage settings**, Locations notes, Tag library, SmugMug import, App settings. My Stats lands in gamification V1 — see [`GAMIFICATION_SPEC.md`](./GAMIFICATION_SPEC.md). Profile / Guide remain deferred.
 
 Screen matrix: hub, claim grid, senior dashboard, admin surfaces.
 

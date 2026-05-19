@@ -136,7 +136,7 @@ No reviewer-facing endpoint — the sidebar chip reads `user_points_totals` dire
 
 A small "N pts" chip in [`components/Shell.tsx`](../components/Shell.tsx) next to the avatar/name block. Reads `user_points_totals` for the current user. Refreshes on navigation; no live subscription. Hide (don't render the chip) when loading; show "0 pts" when the user has zero events.
 
-No new screen. Profile slot remains deferred per TRIAGE_SPEC §7.
+The chip is a clickable nav target into the **My Stats** screen (see §5d). Visually it stays a chip; behaviorally it's a button.
 
 ### 5b. Admin — Overview column
 
@@ -145,6 +145,27 @@ Add a Points column to the admin Overview roster (table in `components/screens/A
 ### 5c. Admin — App settings field
 
 One field on the App settings screen (also in `Admin.tsx` under `AdminSettings`): "Points per completed photo" — integer input, ≥ 0. Persists via the new PUT endpoint. Help text: *"Awarded once per photo a reviewer marks clean or flags. Set to 0 to record activity without awarding points."*
+
+### 5d. Reviewer — My Stats screen
+
+A new screen at sidebar entry "My stats", visible to all authenticated users. Owns the satisfying side of points. The §5a chip stays as a glance value but becomes a clickable nav target into this screen.
+
+**Layout:**
+
+- **Headline:** total points (large) + total photos reviewed (smaller). A toggle group switches the headline between **today / this week / all-time**. Bucketing is UTC-day against `points_ledger.occurred_at` — no per-user timezone in V1, consistent with the Tuesday UTC sample-burst convention.
+- **Below the headline:** a list of camp_weeks the reviewer has touched, most-recent first, each row showing the week's location + dates, total points earned in that week, and event count. No drill-in to individual photos in V1 — adding it later is a route, not a schema change.
+
+**Data:**
+
+- Headline: a windowed aggregate over `points_ledger` for the current user. On-demand query parameterized by date range; no RPC needed.
+- Per-week list: `points_ledger ⋈ triage_events ⋈ photos ⋈ camp_weeks` filtered by `user_id = auth.uid()`, grouped by `camp_week_id`, ordered by `max(occurred_at) desc`. Existing indexes carry this; no new index needed.
+
+**Liveness:**
+
+- **Optimistic update on submit.** When the reviewer submits a `clean` or `flag` triage event, the client increments the chip and the My Stats headline immediately. The client needs to know the current `points_rules.points` value for `'triage_event'` — fetch once on app load and cache. Reconcile against `user_points_totals` on next fetch.
+- **Refetch on focus / route entry.** No realtime subscription in V1.
+
+**Chip behavior change:** the §5a chip becomes a clickable element that navigates to My Stats.
 
 ---
 

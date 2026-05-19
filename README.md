@@ -61,6 +61,10 @@ If **Sync now** returns 500 or 503 with `server_config_incomplete`, one or more 
 4. Tuesday sample pull prioritizes unsampled pending photos (`sampled_for_burst`).
 5. When a week is done, the **lead reviewer** reviews flagged photos, toggles positive rubric fields, signs off (optionally flags 2nd week for follow-up review).
 
+## Points & My stats
+
+Reviewers earn points for every photo they clean or flag — both reviewer actions count, lead-only actions don&apos;t. The total appears as a chip next to the reviewer&apos;s name in the sidebar and as a today/this-week/all-time headline on the **My stats** screen, which also breaks down activity by camp week. Admins set the per-photo value on the App settings screen (integer, ≥ 0); zero records activity without awarding points. Awards accrue from migration 32 forward — earlier triage events have no ledger entries. See [`spec/GAMIFICATION_SPEC.md`](./spec/GAMIFICATION_SPEC.md) for the data model.
+
 ## Tests (local)
 
 Both suites run against the local Supabase stack (`npx supabase start` — needs Docker).

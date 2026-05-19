@@ -88,3 +88,139 @@ export async function fetchAllPointsTotals(
     totalPoints: r.total_points,
   }));
 }
+
+// ─── My Stats helpers ──────────────────────────────────────────────────────
+
+export type WindowedTotal = {
+  totalPoints: number;
+  eventCount: number;
+};
+
+// Sum + count of ledger rows for one user within an optional time window.
+// `sinceIso` filters `occurred_at >= sinceIso`; pass null for all-time.
+// Aggregated client-side — row count per user is bounded (one row per
+// completed photo), so a single fetch is fine for the foreseeable scale.
+export async function fetchSelfWindowedPoints(
+  supabase: SupabaseClient,
+  userId: string,
+  sinceIso: string | null,
+): Promise<WindowedTotal> {
+  let q = supabase
+    .from("points_ledger")
+    .select("points")
+    .eq("user_id", userId)
+    .eq("source_kind", "triage_event");
+  if (sinceIso !== null) q = q.gte("occurred_at", sinceIso);
+  const { data, error } = await q;
+  if (error) throw error;
+  const rows = (data ?? []) as unknown as { points: number }[];
+  let sum = 0;
+  for (const r of rows) sum += r.points;
+  return { totalPoints: sum, eventCount: rows.length };
+}
+
+export type WeeklyBreakdownRow = {
+  campWeekId: string;
+  weekName: string;
+  startsOn: string;
+  endsOn: string;
+  locationName: string;
+  totalPoints: number;
+  eventCount: number;
+  lastAt: string;
+};
+
+type RawLedgerEvent = { source_id: string; points: number; occurred_at: string };
+type RawEventEmbed = {
+  id: string;
+  photo: {
+    camp_week: {
+      id: string;
+      name: string;
+      starts_on: string;
+      ends_on: string;
+      location: { name: string } | null;
+    } | null;
+  } | null;
+};
+
+// Per-week aggregate over the reviewer's ledger entries. Joins
+// ledger → triage_events → photos → camp_weeks → locations client-side via
+// two PostgREST queries (the ledger.source_id link is polymorphic, so there
+// is no FK PostgREST can embed). Spec §5d.
+export async function fetchSelfWeeklyBreakdown(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<WeeklyBreakdownRow[]> {
+  const { data: ledgerRaw, error: ledgerErr } = await supabase
+    .from("points_ledger")
+    .select("source_id, points, occurred_at")
+    .eq("user_id", userId)
+    .eq("source_kind", "triage_event");
+  if (ledgerErr) throw ledgerErr;
+  const ledger = (ledgerRaw ?? []) as unknown as RawLedgerEvent[];
+  if (ledger.length === 0) return [];
+
+  const eventIds = ledger.map((r) => r.source_id);
+  const { data: eventsRaw, error: eventsErr } = await supabase
+    .from("triage_events")
+    .select(
+      "id, photo:photos(camp_week:camp_weeks(id, name, starts_on, ends_on, location:locations(name)))",
+    )
+    .in("id", eventIds);
+  if (eventsErr) throw eventsErr;
+  const events = (eventsRaw ?? []) as unknown as RawEventEmbed[];
+
+  // event_id → camp_week info
+  const eventToWeek = new Map<string, RawEventEmbed["photo"] extends { camp_week: infer W } ? W : never>();
+  for (const e of events) {
+    if (e.photo?.camp_week) eventToWeek.set(e.id, e.photo.camp_week as any);
+  }
+
+  type Agg = {
+    campWeekId: string;
+    weekName: string;
+    startsOn: string;
+    endsOn: string;
+    locationName: string;
+    totalPoints: number;
+    eventCount: number;
+    lastAtMs: number;
+  };
+  const weeks = new Map<string, Agg>();
+  for (const row of ledger) {
+    const week = eventToWeek.get(row.source_id);
+    if (!week) continue; // event likely cascade-deleted with its photo
+    const ts = Date.parse(row.occurred_at);
+    const existing = weeks.get(week.id);
+    if (existing) {
+      existing.totalPoints += row.points;
+      existing.eventCount += 1;
+      if (Number.isFinite(ts) && ts > existing.lastAtMs) existing.lastAtMs = ts;
+    } else {
+      weeks.set(week.id, {
+        campWeekId:   week.id,
+        weekName:     week.name,
+        startsOn:     week.starts_on,
+        endsOn:       week.ends_on,
+        locationName: week.location?.name ?? "Unknown location",
+        totalPoints:  row.points,
+        eventCount:   1,
+        lastAtMs:     Number.isFinite(ts) ? ts : 0,
+      });
+    }
+  }
+
+  return Array.from(weeks.values())
+    .sort((a, b) => b.lastAtMs - a.lastAtMs)
+    .map((a) => ({
+      campWeekId:   a.campWeekId,
+      weekName:     a.weekName,
+      startsOn:     a.startsOn,
+      endsOn:       a.endsOn,
+      locationName: a.locationName,
+      totalPoints:  a.totalPoints,
+      eventCount:   a.eventCount,
+      lastAt:       new Date(a.lastAtMs).toISOString(),
+    }));
+}

@@ -6,10 +6,10 @@ import { createClient } from "@/lib/supabase/client";
 import { useSettings } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
 import { brandingAssetUrl } from "@/lib/app-settings";
-import { fetchSelfPointsTotal } from "@/lib/points";
+import { usePoints } from "@/lib/points-context";
 
-// Sidebar nav. Reviewers see Camp Quality Review (+ Lead review when
-// senior or admin); admins additionally see the Admin section.
+// Sidebar nav. Reviewers see Camp Quality Review + My stats (+ Lead review
+// when senior or admin); admins additionally see the Admin section.
 export function Sidebar({
   current,
   onNav,
@@ -18,28 +18,21 @@ export function Sidebar({
   onNav: (id: string) => void;
 }) {
   const { settings } = useSettings();
-  const { id: userId, email, fullName, firstName, initials, loading, role } = useCurrentUser();
+  const { email, fullName, firstName, initials, loading, role } = useCurrentUser();
   const [signingOut, setSigningOut] = React.useState(false);
-  const [points, setPoints] = React.useState<number | null>(null);
+  const points = usePoints();
 
-  // Refetch on every nav so the chip catches new awards from the last
-  // screen the reviewer was on. No live subscription; per spec §5a.
+  // Per spec §5a/§5d, the chip is a glance value sourced from the shared
+  // points context. The context refreshes on focus and on optimistic bumps
+  // from Triage; we trigger an additional reconcile on every nav so a
+  // reviewer who navigates away mid-batch and back sees authoritative
+  // totals immediately.
   const supabaseRef = React.useRef<ReturnType<typeof createClient> | null>(null);
   if (!supabaseRef.current) supabaseRef.current = createClient();
   React.useEffect(() => {
-    if (!userId) {
-      setPoints(null);
-      return;
-    }
-    let cancelled = false;
-    fetchSelfPointsTotal(supabaseRef.current!, userId)
-      .then((row) => { if (!cancelled) setPoints(row?.totalPoints ?? 0); })
-      .catch((err) => {
-        console.warn("[shell] points total fetch failed:", err?.message ?? err);
-        if (!cancelled) setPoints(null);
-      });
-    return () => { cancelled = true; };
-  }, [userId, current]);
+    void points.refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current]);
 
   const handleSignOut = async () => {
     if (signingOut) return;
@@ -57,6 +50,7 @@ export function Sidebar({
 
   const userItems: { id: string; label: string; icon: string }[] = [
     { id: "triage", label: "Camp Quality Review", icon: "review" },
+    { id: "my-stats", label: "My stats", icon: "stars" },
     ...(canSeeSenior ? [{ id: "senior-review", label: "Lead review", icon: "stars" }] : []),
   ];
 
@@ -128,22 +122,28 @@ export function Sidebar({
               title={email ?? undefined}
             >
               <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{displayName}</span>
-              {points !== null && (
-                <span
+              {points.total !== null && (
+                <button
+                  type="button"
+                  onClick={() => onNav("my-stats")}
                   style={{
                     flexShrink: 0,
                     fontSize: 10,
                     fontWeight: 500,
-                    padding: "2px 6px",
+                    padding: "2px 8px",
                     borderRadius: 999,
-                    background: "var(--sun-soft)",
-                    color: "var(--sun)",
+                    background: current === "my-stats" ? "var(--sun)" : "var(--sun-soft)",
+                    color: current === "my-stats" ? "var(--paper)" : "var(--sun)",
                     fontFamily: "var(--font-mono)",
+                    border: "none",
+                    cursor: "pointer",
+                    transition: "background 120ms, color 120ms",
                   }}
-                  title={`${points} point${points === 1 ? "" : "s"}`}
+                  title={`${points.total} point${points.total === 1 ? "" : "s"} — view My stats`}
+                  aria-label={`${points.total} points. Open My stats.`}
                 >
-                  {points} pts
-                </span>
+                  {points.total} pts
+                </button>
               )}
             </div>
             <div

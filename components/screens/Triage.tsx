@@ -29,6 +29,7 @@ import {
   type Tag,
   type TagCategory,
 } from "@/lib/tags";
+import { usePoints } from "@/lib/points-context";
 
 type View =
   | { kind: "hub" }
@@ -245,6 +246,9 @@ function ClaimGrid({
   // reviewed photo restores its prior state.
   const [reviewed, setReviewed] = React.useState<Record<string, ReviewSnapshot>>({});
   const [lightboxIndex, setLightboxIndex] = React.useState<number | null>(null);
+  // Optimistic chip + My Stats headline bump on successful clean/flag.
+  // The points context owns reconciliation against user_points_totals.
+  const { bumpAfterTriageEvent } = usePoints();
 
   React.useEffect(() => {
     let cancelled = false;
@@ -319,6 +323,9 @@ function ClaimGrid({
       if (!res.ok) throw new Error(json.error ?? "Submit failed");
       const snapshot: ReviewSnapshot = { kind, tagIds, quarantineIntent: effectiveQuarantine };
       setReviewed((m) => ({ ...m, [photoId]: snapshot }));
+      // Both clean and flag award points (senior kinds don't — those go
+      // through /api/triage/events/senior, a different submit path).
+      bumpAfterTriageEvent();
       return snapshot;
     } catch (err: unknown) {
       toast.show(err instanceof Error ? err.message : "Submit failed", "x");
