@@ -1,44 +1,25 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "@/styles/legacy.css";
-import { createClient } from "@/lib/supabase/server";
-import { brandingAssetUrl, fetchAppSettings } from "@/lib/app-settings";
+import { fetchPublicBranding } from "@/lib/app-settings-server";
 
 const FALLBACK_TITLE = "iD Tech Photo Reviewer";
 
-// SSR title + favicon both come from `app_settings`. Title joins
-// brand_name + brand_tagline with the same logic the runtime override in
-// App.tsx uses, so admin renames take effect on the very first paint.
-// Favicon falls back to "no icon" when the admin hasn't uploaded one —
-// browsers show their generic icon rather than a hardcoded brand mark.
-//
-// The row is select-only-to-authenticated, so the unauthenticated /login
-// render hits the catch and uses the bare fallbacks.
+// SSR title + favicon from app_settings via service role so /login and
+// other pre-auth renders match admin branding on first paint.
 export async function generateMetadata(): Promise<Metadata> {
-  let title = FALLBACK_TITLE;
-  let iconUrl: string | null = null;
-  try {
-    const supabase = await createClient();
-    const settings = await fetchAppSettings(supabase);
-    if (settings) {
-      const name = settings.brandName.trim();
-      const tag = settings.brandTagline.trim();
-      title =
-        name && tag ? `${name} · ${tag}` :
-        name || tag || FALLBACK_TITLE;
-      if (settings.faviconStoragePath) {
-        iconUrl = brandingAssetUrl(supabase, settings.faviconStoragePath);
-      }
-    }
-  } catch {
-    // Pre-auth render or any other failure — keep both fallbacks.
-  }
+  const branding = await fetchPublicBranding();
+  const name = branding.brandName;
+  const tag = branding.brandTagline;
+  const title =
+    name && tag ? `${name} · ${tag}` :
+    name || tag || FALLBACK_TITLE;
   return {
     title,
     description: "iD Tech Camp photo review tool.",
-    // Only emit an icon link when the admin has uploaded one. Omitting
-    // the field tells Next.js not to render any <link rel="icon">.
-    ...(iconUrl ? { icons: { icon: [{ url: iconUrl, type: "image/png" }] } } : {}),
+    ...(branding.logoUrl
+      ? { icons: { icon: [{ url: branding.logoUrl, type: "image/png" }] } }
+      : {}),
   };
 }
 
