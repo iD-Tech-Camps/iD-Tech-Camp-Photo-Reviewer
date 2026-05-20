@@ -50,14 +50,15 @@ export function Sidebar({
 
   const userItems: { id: string; label: string; icon: string }[] = [
     { id: "triage", label: "Camp Quality Review", icon: "review" },
-    { id: "my-stats", label: "My stats", icon: "stars" },
+    { id: "photo-rating", label: "Camp Photo Review", icon: "stars" },
+    { id: "my-stats", label: "My stats", icon: "check" },
     ...(canSeeSenior ? [{ id: "senior-review", label: "Lead review", icon: "stars" }] : []),
   ];
 
   const adminItems = [
     { id: "admin-overview",  label: "Overview",        icon: "users" },
     { id: "admin-locations", label: "Location notes",  icon: "tag" },
-    { id: "admin-tags",      label: "Issue library",   icon: "tag" },
+    { id: "admin-tags",      label: "Tag libraries",   icon: "tag" },
     { id: "admin-smugmug",   label: "Photo sync",      icon: "download" },
     { id: "admin-settings",  label: "App settings",    icon: "gear" },
   ];

@@ -452,7 +452,7 @@ async function fetchExistingForWeek(
 const KEY_BATCH_SIZE = 200;
 const ORPHAN_BATCH_SIZE = 200;
 
-/** Orphans with triage_events or triage_state <> not_required must not be deleted. */
+/** Orphans with review history or non-default workflow state must not be deleted. */
 async function fetchProtectedOrphanIds(
   supabase: SupabaseClient,
   orphanIds: string[]
@@ -467,22 +467,33 @@ async function fetchProtectedOrphanIds(
       .from("photos")
       .select("id")
       .in("id", batch)
-      .neq("triage_state", "not_required");
+      .or("triage_state.neq.not_required,rating_state.neq.not_required");
     if (stateErr) {
-      throw new Error(`photos triage_state read failed: ${stateErr.message}`);
+      throw new Error(`photos workflow state read failed: ${stateErr.message}`);
     }
     for (const row of stateRows ?? []) {
       protectedIds.add((row as { id: string }).id);
     }
 
-    const { data: eventRows, error: eventErr } = await supabase
+    const { data: triageEventRows, error: triageEventErr } = await supabase
       .from("triage_events")
       .select("photo_id")
       .in("photo_id", batch);
-    if (eventErr) {
-      throw new Error(`triage_events read failed: ${eventErr.message}`);
+    if (triageEventErr) {
+      throw new Error(`triage_events read failed: ${triageEventErr.message}`);
     }
-    for (const row of eventRows ?? []) {
+    for (const row of triageEventRows ?? []) {
+      protectedIds.add((row as { photo_id: string }).photo_id);
+    }
+
+    const { data: ratingEventRows, error: ratingEventErr } = await supabase
+      .from("photo_rating_events")
+      .select("photo_id")
+      .in("photo_id", batch);
+    if (ratingEventErr) {
+      throw new Error(`photo_rating_events read failed: ${ratingEventErr.message}`);
+    }
+    for (const row of ratingEventRows ?? []) {
       protectedIds.add((row as { photo_id: string }).photo_id);
     }
   }

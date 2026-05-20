@@ -6,7 +6,12 @@
 
 ## What this app is
 
-An internal **Camp Quality Review** tool for iD Tech. SmugMug syncs divisions, locations, camp weeks, and photos. Reviewers claim batches of photos within eligible weeks, mark them clean or flag them with ops-rubric issues. Lead reviewers review flagged work per camp week, record positive assessments, and sign off. Admins configure season bounds and review knobs (App settings), the issue library, evergreen location notes, branding, and photo sync (Photo sync screen).
+An internal review tool for iD Tech with two reviewer workflows:
+
+- **Camp Quality Review** — flag ops issues on photos (triage).
+- **Camp Photo Review** — 1–5 star ratings with optional tags and quarantine.
+
+SmugMug syncs divisions, locations, camp weeks, and photos. Lead reviewers sign off quality review per camp week and apply week-level assessment tags. Admins configure season bounds, tag libraries, location notes, branding, and photo sync.
 
 > Internal naming note: code, DB columns, and migrations still use the legacy `triage_*` identifiers (table/column/route names are intentionally not renamed). User-visible copy uses **Camp Quality Review** (workflow), **Claim batch** (formerly slice), **Hide from parent view** (formerly quarantine), and **Lead reviewer** (formerly senior).
 
@@ -22,6 +27,7 @@ The legacy marketing-review queue (approve/flag/points/leaderboard) was removed 
 - **Sampler:** Tuesday UTC burst marks `photos.sampled_for_burst` (fair redistribution per spec §5).
 - **Quarantine:** `photos.is_quarantined` + `/api/smugmug/quarantine` (`Image.Hidden`) — unchanged from pre-refactor.
 - **Signoff:** `triage_signoff_camp_week` RPC (senior/admin); can flag sibling 2nd week for recheck.
+- **Photo rating:** `photos.rating_state` + `photo_rating_claims` / `photo_rating_events` — see [`PHOTO_RATING_SPEC.md`](./PHOTO_RATING_SPEC.md).
 - **Gamification:** points layer on top of triage via a source-agnostic ledger — see [`GAMIFICATION_SPEC.md`](./GAMIFICATION_SPEC.md).
 
 ### Migrations
@@ -32,6 +38,7 @@ The legacy marketing-review queue (approve/flag/points/leaderboard) was removed 
 | `20260517000027` | Triage schema — enums, columns, `triage_*` tables, 12-tag seed |
 | `20260517000028` | Triggers, RLS, backfill, signoff/reset RPCs |
 | `20260519000032` | Gamification V1 — points ledger + rules + trigger on triage_events |
+| `20260520000034` | Photo rating — parallel workflow + `tags.purposes` + week senior tags |
 
 **Dead migration slots (do not reuse):** `20260505000010`, `20260505000011`, `20260505000012` — comment-only placeholders. Gamification was deferred during the triage refactor; V1 (points only) ships under migration 32 — see [`GAMIFICATION_SPEC.md`](./GAMIFICATION_SPEC.md). The slots stay dead — future gamification work (streaks, badges, etc.) uses new migration numbers.
 
@@ -56,8 +63,10 @@ Trigger functions that `UPDATE photos` must be `SECURITY DEFINER SET search_path
 ```
 app/api/smugmug/     # ping, sync-folders, sync-now, sync-scheduled, quarantine
 app/api/triage/      # claims, events, signoff, sample-burst, sweep-claims
+app/api/photo-rating/  # claims, events, week-tags, sweep-claims
 components/screens/
-  Triage.tsx         # hub + claim grid + senior dashboard
+  Triage.tsx         # Camp Quality Review hub + claim grid + senior dashboard
+  PhotoRating.tsx    # Camp Photo Review hub + star-rating lightbox
   Admin.tsx          # App settings (branding + triage_config season/triage)
   AdminSmugMug.tsx   # Photo sync (log + sync / sample maintenance)
   AdminLocations.tsx # evergreen notes + 1st-week override
@@ -75,6 +84,7 @@ Requires Docker for `npx supabase db reset` (local stack only — **do not** `db
 npx supabase db reset
 npx supabase db query --file supabase/tests/e2e_smugmug_sync_flow.sql
 npx supabase db query --file supabase/tests/e2e_triage_triggers.sql
+npx supabase db query --file supabase/tests/e2e_photo_rating_triggers.sql
 npm run build
 ```
 

@@ -32,8 +32,11 @@ import {
   slugifyTagId,
   TAG_CATEGORY_LABELS,
   updateTagCategory,
+  updateTagPurposes,
+  TAG_PURPOSE_LABELS,
   type Tag,
   type TagCategory,
+  type TagPurpose,
 } from "@/lib/tags";
 
 // The real Admin → SmugMug screen lives in [./AdminSmugMug.tsx]; re-exported
@@ -48,8 +51,11 @@ export { SmugMugImport } from "./AdminSmugMug";
 // every tag is a single list now (no positive/negative split).
 // ─────────────────────────────────────────────────────────────────────────────
 
+const ADMIN_TAG_PURPOSES: TagPurpose[] = ["quality_flag", "photo_rating", "week_senior"];
+
 export function AdminTags() {
   const supabase = React.useMemo(() => createClient(), []);
+  const [purposeTab, setPurposeTab] = React.useState<TagPurpose>("quality_flag");
   const [tags, setTags] = React.useState<Tag[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [adding, setAdding] = React.useState(false);
@@ -61,7 +67,7 @@ export function AdminTags() {
 
   React.useEffect(() => {
     let cancelled = false;
-    fetchTags(supabase)
+    fetchTags(supabase, { activeOnly: false })
       .then((rows) => { if (!cancelled) setTags(rows); })
       .catch((err) => {
         console.error("[admin-tags] fetch failed:", err);
@@ -75,8 +81,9 @@ export function AdminTags() {
 
   React.useEffect(() => { if (adding && inputRef.current) inputRef.current.focus(); }, [adding]);
 
-  const activeTags = (tags ?? []).filter((t) => t.active);
-  const inactiveTags = (tags ?? []).filter((t) => !t.active);
+  const forTab = (tags ?? []).filter((t) => t.purposes.includes(purposeTab));
+  const activeTags = forTab.filter((t) => t.active);
+  const inactiveTags = forTab.filter((t) => !t.active);
 
   const canSave = newLabel.trim().length > 0 && !busy;
 
@@ -94,6 +101,7 @@ export function AdminTags() {
       const nextOrder = Math.max(0, ...activeTags.map((t) => t.displayOrder)) + 1;
       const created = await createTag(supabase, {
         id: slug, label, displayOrder: nextOrder, category: newCategory,
+        purposes: [purposeTab],
       });
       setTags((prev) => [...(prev ?? []), created]);
       setNewLabel("");
@@ -180,20 +188,39 @@ export function AdminTags() {
   return (
     <>
       <PageHeader
-        eyebrow="Admin · Issue library"
-        title="<em>Review</em> issues."
+        eyebrow="Admin · Tags"
+        title="<em>Tag</em> libraries."
         sub={tags === null
-          ? "Loading current issue library…"
-          : `${activeTags.length} active issue${activeTags.length === 1 ? "" : "s"}.${inactiveTags.length > 0 ? ` · ${inactiveTags.length} retired.` : ""}`}
+          ? "Loading tags…"
+          : `${activeTags.length} active in ${TAG_PURPOSE_LABELS[purposeTab]}.${inactiveTags.length > 0 ? ` · ${inactiveTags.length} retired.` : ""}`}
       />
 
       <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {ADMIN_TAG_PURPOSES.map((p) => (
+            <button
+              key={p}
+              type="button"
+              className={"btn " + (purposeTab === p ? "btn-primary" : "btn-ghost")}
+              onClick={() => { setPurposeTab(p); setAdding(false); setOpError(null); }}
+            >
+              {TAG_PURPOSE_LABELS[p]}
+            </button>
+          ))}
+        </div>
+
         <div className="card">
-          <h3 className="card-title" style={{ marginBottom: 4 }}>Active issues</h3>
+          <h3 className="card-title" style={{ marginBottom: 4 }}>Active tags</h3>
           <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
-            What reviewers can attach to a photo during review. Add custom
-            issues here and they&apos;ll show up automatically in the
-            reviewer UI.
+            {purposeTab === "quality_flag" && (
+              <>Issues reviewers attach during Camp Quality Review.</>
+            )}
+            {purposeTab === "photo_rating" && (
+              <>Optional tags on star ratings in Camp Photo Review.</>
+            )}
+            {purposeTab === "week_senior" && (
+              <>Week-level assessment tags on Lead review.</>
+            )}
           </div>
 
           {loadError && (
@@ -255,7 +282,7 @@ export function AdminTags() {
           )}
           {tags !== null && activeTags.length === 0 && (
             <span style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
-              No active issues yet
+              No active tags yet
             </span>
           )}
 

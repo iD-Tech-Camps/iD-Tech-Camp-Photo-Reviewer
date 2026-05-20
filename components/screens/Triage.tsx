@@ -23,6 +23,10 @@ import {
 } from "@/lib/triage-senior";
 import { signoffCampWeek, setPositiveAssessment } from "@/lib/triage-signoff";
 import {
+  fetchCampWeekSeniorTagIds,
+  setCampWeekSeniorTags,
+} from "@/lib/photo-rating-senior";
+import {
   buildTagLabelLookup,
   fetchTags,
   TAG_CATEGORY_LABELS,
@@ -70,6 +74,7 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
   const [weeks, setWeeks] = React.useState<TriageHubWeek[] | null>(null);
   const [claims, setClaims] = React.useState<ActiveClaim[]>([]);
   const [tags, setTags] = React.useState<Tag[]>([]);
+  const [weekSeniorTags, setWeekSeniorTags] = React.useState<Tag[]>([]);
   // Admin-controlled cap for the "Start a batch" path. Null until the
   // triage_config row loads; the button disables itself while loading so a
   // stale default never leaks into a claim's slice_size.
@@ -78,15 +83,17 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
 
   const reloadHub = React.useCallback(async () => {
     if (!userId) return;
-    const [w, c, t, cfg] = await Promise.all([
+    const [w, c, t, wt, cfg] = await Promise.all([
       fetchTriageHubWeeks(supabase),
       fetchActiveClaimsForReviewer(supabase, userId),
-      fetchTags(supabase),
+      fetchTags(supabase, { purpose: "quality_flag" }),
+      fetchTags(supabase, { purpose: "week_senior" }),
       fetchTriageConfig(supabase),
     ]);
     setWeeks(w);
     setClaims(c);
-    setTags(t.filter((x) => x.active));
+    setTags(t);
+    setWeekSeniorTags(wt);
     setBatchSize(cfg.batchSize);
   }, [supabase, userId]);
 
@@ -135,6 +142,7 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
         supabase={supabase}
         campWeekId={view.campWeekId}
         tags={tags}
+        weekSeniorTags={weekSeniorTags}
         onBack={() => { setView({ kind: "hub" }); void reloadHub(); }}
       />
     );
@@ -724,29 +732,35 @@ export function SeniorDashboard({
   supabase,
   campWeekId,
   tags,
+  weekSeniorTags,
   onBack,
 }: {
   toast: ToastApi;
   supabase: ReturnType<typeof createClient>;
   campWeekId: string;
   tags: Tag[];
+  weekSeniorTags: Tag[];
   onBack: () => void;
 }) {
   const [week, setWeek] = React.useState<SeniorWeekSummary | null>(null);
   const [flagged, setFlagged] = React.useState<SeniorFlaggedPhoto[]>([]);
   const [rollup, setRollup] = React.useState<Record<TagCategory, number> | null>(null);
   const [recheck, setRecheck] = React.useState(false);
+  const [selectedWeekTags, setSelectedWeekTags] = React.useState<string[]>([]);
+  const [weekTagsBusy, setWeekTagsBusy] = React.useState(false);
   const labelLookup = buildTagLabelLookup(tags);
 
   const reload = React.useCallback(async () => {
-    const [w, f, r] = await Promise.all([
+    const [w, f, r, weekTagIds] = await Promise.all([
       fetchSeniorWeek(supabase, campWeekId),
       fetchFlaggedPhotosForWeek(supabase, campWeekId),
       fetchCategoryRollup(supabase, campWeekId),
+      fetchCampWeekSeniorTagIds(supabase, campWeekId),
     ]);
     setWeek(w);
     setFlagged(f);
     setRollup(r);
+    setSelectedWeekTags(weekTagIds);
     setRecheck(false);
   }, [supabase, campWeekId]);
 
@@ -793,6 +807,21 @@ export function SeniorDashboard({
     }
   };
 
+  const toggleWeekTag = async (tagId: string) => {
+    const next = selectedWeekTags.includes(tagId)
+      ? selectedWeekTags.filter((id) => id !== tagId)
+      : [...selectedWeekTags, tagId];
+    setWeekTagsBusy(true);
+    try {
+      await setCampWeekSeniorTags(supabase, campWeekId, next);
+      setSelectedWeekTags(next);
+    } catch (err: unknown) {
+      toast.show(err instanceof Error ? err.message : "Couldn't update week tags", "x");
+    } finally {
+      setWeekTagsBusy(false);
+    }
+  };
+
   if (!week || !rollup) return <div className="page-body">Loading review dashboard…</div>;
 
   return (
@@ -824,6 +853,25 @@ export function SeniorDashboard({
             </label>
           ))}
         </div>
+
+        {weekSeniorTags.length > 0 && (
+          <div className="card">
+            <h3 className="card-title">Week assessment tags</h3>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {weekSeniorTags.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={"btn " + (selectedWeekTags.includes(t.id) ? "btn-primary" : "btn-ghost")}
+                  disabled={weekTagsBusy}
+                  onClick={() => void toggleWeekTag(t.id)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="card">
           <h3 className="card-title">Summary by category</h3>

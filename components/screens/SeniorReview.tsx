@@ -30,15 +30,18 @@ export function SeniorReviewApp({ toast }: { toast: ToastApi }) {
   const [view, setView] = React.useState<View>({ kind: "hub" });
   const [weeks, setWeeks] = React.useState<SeniorRollupWeek[] | null>(null);
   const [tags, setTags] = React.useState<Tag[]>([]);
+  const [weekSeniorTags, setWeekSeniorTags] = React.useState<Tag[]>([]);
   const [error, setError] = React.useState<string | null>(null);
 
   const reload = React.useCallback(async () => {
-    const [w, t] = await Promise.all([
+    const [w, t, wt] = await Promise.all([
       fetchSeniorRollupWeeks(supabase),
-      fetchTags(supabase),
+      fetchTags(supabase, { purpose: "quality_flag" }),
+      fetchTags(supabase, { purpose: "week_senior" }),
     ]);
     setWeeks(w);
-    setTags(t.filter((x) => x.active));
+    setTags(t);
+    setWeekSeniorTags(wt);
   }, [supabase]);
 
   React.useEffect(() => {
@@ -56,6 +59,7 @@ export function SeniorReviewApp({ toast }: { toast: ToastApi }) {
         supabase={supabase}
         campWeekId={view.campWeekId}
         tags={tags}
+        weekSeniorTags={weekSeniorTags}
         onBack={() => { setView({ kind: "hub" }); void reload(); }}
       />
     );

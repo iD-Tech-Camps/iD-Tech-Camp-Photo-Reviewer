@@ -91,6 +91,7 @@ export async function seed(opts?: { photos?: number; tags?: number }): Promise<F
       label: `${prefix} tag ${i}`,
       display_order: 900 + i,
       active: true,
+      purposes: ["quality_flag"],
     });
     if (error) throw new Error(`seed tags: ${error.message}`);
     tagIds.push(id);
@@ -111,6 +112,9 @@ export async function teardown(f: Fixture): Promise<void> {
     .in("user_id", [f.reviewer.id, f.senior.id, f.admin.id]);
   await supabase.from("triage_events").delete().in("reviewer_id", [f.reviewer.id, f.senior.id, f.admin.id]);
   await supabase.from("triage_claims").delete().in("reviewer_id", [f.reviewer.id, f.senior.id, f.admin.id]);
+  await supabase.from("photo_rating_events").delete().in("reviewer_id", [f.reviewer.id, f.senior.id, f.admin.id]);
+  await supabase.from("photo_rating_claims").delete().in("reviewer_id", [f.reviewer.id, f.senior.id, f.admin.id]);
+  await supabase.from("camp_week_senior_tags").delete().eq("camp_week_id", f.campWeekId);
   await supabase.from("photos").delete().eq("camp_week_id", f.campWeekId);
   await supabase.from("camp_weeks").delete().eq("id", f.campWeekId);
   await supabase.from("locations").delete().eq("id", f.locationId);

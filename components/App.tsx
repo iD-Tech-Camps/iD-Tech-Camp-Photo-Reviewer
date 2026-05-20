@@ -10,6 +10,7 @@ import {
 } from "@/components/screens/Admin";
 import { AdminLocationsNotes } from "@/components/screens/AdminLocations";
 import { TriageApp } from "@/components/screens/Triage";
+import { PhotoRatingApp } from "@/components/screens/PhotoRating";
 import { SeniorReviewApp } from "@/components/screens/SeniorReview";
 import { MyStatsApp } from "@/components/screens/MyStats";
 import { SettingsProvider, useSettings } from "@/components/settings";
@@ -18,6 +19,7 @@ import { PointsProvider } from "@/lib/points-context";
 
 const VALID_SCREENS = [
   "triage",
+  "photo-rating",
   "my-stats",
   "senior-review",
   "admin-overview",
@@ -105,6 +107,7 @@ function AppInner() {
       <Sidebar current={activeScreen} onNav={setScreen} />
       <main className="main">
         {activeScreen === "triage"           && <TriageApp toast={toast} />}
+        {activeScreen === "photo-rating"     && <PhotoRatingApp toast={toast} />}
         {activeScreen === "my-stats"         && <MyStatsApp />}
         {activeScreen === "senior-review"   && <SeniorReviewApp toast={toast} />}
         {activeScreen === "admin-overview"  && <AdminOverview toast={toast} />}
