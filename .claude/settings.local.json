@@ -9,7 +9,9 @@
       "Bash(npm run *)",
       "Bash(npx supabase *)",
       "Bash(git mv *)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(npx vitest *)",
+      "Bash(del \"c:\\\\laragon\\\\www\\\\iD Tech Camp Photo Reviewer\\\\tests\\\\unit\\\\sanity.test.ts\")"
     ]
   }
 }

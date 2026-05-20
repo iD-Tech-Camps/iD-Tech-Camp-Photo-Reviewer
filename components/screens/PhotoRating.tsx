@@ -278,14 +278,9 @@ function RatingClaimGrid({
     }
   };
 
-  const release = async () => {
+  const dropBatch = async () => {
     await fetch(`/api/photo-rating/claims/${claimId}/release`, { method: "POST" });
-    onBack();
-  };
-
-  const finish = async () => {
-    await fetch(`/api/photo-rating/claims/${claimId}/release`, { method: "POST" });
-    toast.show("Batch complete", "check");
+    if (allDone) toast.show("Batch complete", "check");
     onBack();
   };
 
@@ -309,16 +304,8 @@ function RatingClaimGrid({
               <p style={{ color: "var(--ink-2)", lineHeight: 1.5 }}>{ctx.evergreenNotes}</p>
             </>
           )}
-          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-            <button
-              type="button"
-              className={"btn " + (allDone ? "btn-moss" : "btn-ghost")}
-              disabled={!allDone}
-              onClick={() => void finish()}
-            >
-              Finish & drop batch
-            </button>
-            <button type="button" className="btn btn-ghost" onClick={() => void release()}>
+          <div style={{ marginTop: 16 }}>
+            <button type="button" className="btn btn-ghost" onClick={() => void dropBatch()}>
               Drop batch
             </button>
           </div>
