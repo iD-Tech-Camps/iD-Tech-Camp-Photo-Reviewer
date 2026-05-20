@@ -69,7 +69,7 @@ export function MyStatsApp() {
   const supabase = React.useMemo(() => createClient(), []);
   const { id: userId, fullName, firstName } = useCurrentUser();
   const points = usePoints();
-  const [window, setWindow] = React.useState<WindowKey>("today");
+  const [window, setWindow] = React.useState<WindowKey>("all");
   const [windowed, setWindowed] = React.useState<WindowedTotal | null>(null);
   const [windowedLoading, setWindowedLoading] = React.useState(false);
   const [windowedError, setWindowedError] = React.useState<string | null>(null);
@@ -122,17 +122,20 @@ export function MyStatsApp() {
   const firstShown = firstName || fullName?.split(/\s+/)[0] || "you";
   const headlinePoints = windowed?.totalPoints ?? 0;
   const headlineCount = windowed?.eventCount ?? 0;
+  const allTimePoints = points.total ?? 0;
+  const allTimeEvents = points.eventCount ?? 0;
   const showEmpty =
     !windowedLoading &&
-    (points.total ?? 0) === 0 &&
-    (points.eventCount ?? 0) === 0;
+    !points.loading &&
+    allTimePoints === 0 &&
+    allTimeEvents === 0;
 
   return (
     <>
       <PageHeader
         eyebrow="My stats"
         title={`Nice work${firstShown ? `, ${firstShown}` : ""}.`}
-        sub="Points and review activity from the photos you've cleaned or flagged."
+        sub="Points from Camp Quality Review and Camp Photo Review."
       />
 
       <div
@@ -231,6 +234,11 @@ export function MyStatsApp() {
               : window === "today"
               ? "Since 00:00 UTC today"
               : "Last 7 UTC days"}
+            {window !== "all" && allTimePoints > 0 && (
+              <span style={{ marginLeft: 8 }}>
+                · {allTimePoints.toLocaleString()} all-time
+              </span>
+            )}
           </div>
         </div>
 
@@ -292,7 +300,7 @@ export function MyStatsApp() {
                 No review activity yet
               </div>
               <div style={{ fontSize: 12, marginTop: 4 }}>
-                Claim a batch from Camp Quality Review to start earning points.
+                Claim a batch from Camp Quality Review or Camp Photo Review to start earning points.
               </div>
             </div>
           ) : weekly.length === 0 ? (

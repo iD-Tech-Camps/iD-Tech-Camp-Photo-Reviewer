@@ -91,6 +91,9 @@ export async function fetchAllPointsTotals(
 
 // ─── My Stats helpers ──────────────────────────────────────────────────────
 
+/** Ledger sources that represent a reviewer completing a photo review. */
+export const REVIEW_POINTS_SOURCES = ["triage_event", "photo_rating_event"] as const;
+
 export type WindowedTotal = {
   totalPoints: number;
   eventCount: number;
@@ -98,8 +101,6 @@ export type WindowedTotal = {
 
 // Sum + count of ledger rows for one user within an optional time window.
 // `sinceIso` filters `occurred_at >= sinceIso`; pass null for all-time.
-// Aggregated client-side — row count per user is bounded (one row per
-// completed photo), so a single fetch is fine for the foreseeable scale.
 export async function fetchSelfWindowedPoints(
   supabase: SupabaseClient,
   userId: string,
@@ -109,7 +110,7 @@ export async function fetchSelfWindowedPoints(
     .from("points_ledger")
     .select("points")
     .eq("user_id", userId)
-    .eq("source_kind", "triage_event");
+    .in("source_kind", [...REVIEW_POINTS_SOURCES]);
   if (sinceIso !== null) q = q.gte("occurred_at", sinceIso);
   const { data, error } = await q;
   if (error) throw error;
@@ -130,52 +131,81 @@ export type WeeklyBreakdownRow = {
   lastAt: string;
 };
 
-type RawLedgerEvent = { source_id: string; points: number; occurred_at: string };
-type RawEventEmbed = {
-  id: string;
-  photo: {
-    camp_week: {
-      id: string;
-      name: string;
-      starts_on: string;
-      ends_on: string;
-      location: { name: string } | null;
-    } | null;
-  } | null;
+type RawLedgerRow = {
+  source_id: string;
+  source_kind: string;
+  points: number;
+  occurred_at: string;
 };
 
-// Per-week aggregate over the reviewer's ledger entries. Joins
-// ledger → triage_events → photos → camp_weeks → locations client-side via
-// two PostgREST queries (the ledger.source_id link is polymorphic, so there
-// is no FK PostgREST can embed). Spec §5d.
+type CampWeekEmbed = {
+  id: string;
+  name: string;
+  starts_on: string;
+  ends_on: string;
+  location: { name: string } | null;
+};
+
+type RawEventEmbed = {
+  id: string;
+  photo: { camp_week: CampWeekEmbed | null } | null;
+};
+
+const WEEK_SELECT =
+  "id, photo:photos(camp_week:camp_weeks(id, name, starts_on, ends_on, location:locations(name)))";
+
+// Per-week aggregate over the reviewer's ledger entries. Joins ledger →
+// triage_events / photo_rating_events → photos → camp_weeks client-side.
 export async function fetchSelfWeeklyBreakdown(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<WeeklyBreakdownRow[]> {
   const { data: ledgerRaw, error: ledgerErr } = await supabase
     .from("points_ledger")
-    .select("source_id, points, occurred_at")
+    .select("source_id, source_kind, points, occurred_at")
     .eq("user_id", userId)
-    .eq("source_kind", "triage_event");
+    .in("source_kind", [...REVIEW_POINTS_SOURCES]);
   if (ledgerErr) throw ledgerErr;
-  const ledger = (ledgerRaw ?? []) as unknown as RawLedgerEvent[];
+  const ledger = (ledgerRaw ?? []) as unknown as RawLedgerRow[];
   if (ledger.length === 0) return [];
 
-  const eventIds = ledger.map((r) => r.source_id);
-  const { data: eventsRaw, error: eventsErr } = await supabase
-    .from("triage_events")
-    .select(
-      "id, photo:photos(camp_week:camp_weeks(id, name, starts_on, ends_on, location:locations(name)))",
-    )
-    .in("id", eventIds);
-  if (eventsErr) throw eventsErr;
-  const events = (eventsRaw ?? []) as unknown as RawEventEmbed[];
+  const triageIds = ledger
+    .filter((r) => r.source_kind === "triage_event")
+    .map((r) => r.source_id);
+  const ratingIds = ledger
+    .filter((r) => r.source_kind === "photo_rating_event")
+    .map((r) => r.source_id);
 
-  // event_id → camp_week info
-  const eventToWeek = new Map<string, RawEventEmbed["photo"] extends { camp_week: infer W } ? W : never>();
-  for (const e of events) {
-    if (e.photo?.camp_week) eventToWeek.set(e.id, e.photo.camp_week as any);
-  }
+  const eventToWeek = new Map<string, CampWeekEmbed>();
+
+  const embedWeeks = (events: RawEventEmbed[]) => {
+    for (const e of events) {
+      if (e.photo?.camp_week) eventToWeek.set(e.id, e.photo.camp_week);
+    }
+  };
+
+  const loadTriageWeeks = async () => {
+    const { data, error } = await supabase
+      .from("triage_events")
+      .select(WEEK_SELECT)
+      .in("id", triageIds);
+    if (error) throw error;
+    embedWeeks((data ?? []) as unknown as RawEventEmbed[]);
+  };
+
+  const loadRatingWeeks = async () => {
+    const { data, error } = await supabase
+      .from("photo_rating_events")
+      .select(WEEK_SELECT)
+      .in("id", ratingIds);
+    if (error) throw error;
+    embedWeeks((data ?? []) as unknown as RawEventEmbed[]);
+  };
+
+  await Promise.all([
+    triageIds.length > 0 ? loadTriageWeeks() : Promise.resolve(),
+    ratingIds.length > 0 ? loadRatingWeeks() : Promise.resolve(),
+  ]);
 
   type Agg = {
     campWeekId: string;
