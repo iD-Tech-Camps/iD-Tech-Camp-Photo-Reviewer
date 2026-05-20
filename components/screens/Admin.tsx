@@ -819,6 +819,7 @@ type TriageForm = {
   seasonFirstWeekStart: string;
   seasonLastWeekStart: string;
   maxForTriagePerBurst: number;
+  batchSize: number;
   claimExpiryMinutes: number;
 };
 
@@ -833,6 +834,7 @@ export function AdminSettings() {
     seasonFirstWeekStart: "",
     seasonLastWeekStart: "",
     maxForTriagePerBurst: 200,
+    batchSize: 50,
     claimExpiryMinutes: 60,
   });
   const [pointsRule, setPointsRule] = React.useState<PointsRule | null>(null);
@@ -855,6 +857,7 @@ export function AdminSettings() {
           seasonFirstWeekStart: c.seasonFirstWeekStart,
           seasonLastWeekStart: c.seasonLastWeekStart,
           maxForTriagePerBurst: c.maxForTriagePerBurst,
+          batchSize: c.batchSize,
           claimExpiryMinutes: c.claimExpiryMinutes,
         });
       })
@@ -907,6 +910,7 @@ export function AdminSettings() {
     triageForm.seasonFirstWeekStart !== triageConfig.seasonFirstWeekStart ||
     triageForm.seasonLastWeekStart !== triageConfig.seasonLastWeekStart ||
     triageForm.maxForTriagePerBurst !== triageConfig.maxForTriagePerBurst ||
+    triageForm.batchSize !== triageConfig.batchSize ||
     triageForm.claimExpiryMinutes !== triageConfig.claimExpiryMinutes
   );
 
@@ -1183,6 +1187,22 @@ export function AdminSettings() {
                   onChange={(e) => setTriageForm((f) => ({
                     ...f,
                     maxForTriagePerBurst: Number(e.target.value),
+                  }))}
+                />
+              </FieldRow>
+              <FieldRow
+                label="Batch size"
+                hint="How many photos a reviewer pulls when they click Start a batch. Whole week still pulls all pending."
+              >
+                <input
+                  type="number"
+                  min={1}
+                  className="input"
+                  disabled={triageConfig === null || triageBusy}
+                  value={triageForm.batchSize}
+                  onChange={(e) => setTriageForm((f) => ({
+                    ...f,
+                    batchSize: Number(e.target.value),
                   }))}
                 />
               </FieldRow>

@@ -31,6 +31,7 @@ import {
 } from "@/lib/tags";
 import { usePoints } from "@/lib/points-context";
 import { smugmugVariantUrl } from "@/lib/smugmug/url-variants";
+import { fetchTriageConfig } from "@/lib/triage-config";
 
 type View =
   | { kind: "hub" }
@@ -69,18 +70,24 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
   const [weeks, setWeeks] = React.useState<TriageHubWeek[] | null>(null);
   const [claims, setClaims] = React.useState<ActiveClaim[]>([]);
   const [tags, setTags] = React.useState<Tag[]>([]);
+  // Admin-controlled cap for the "Start a batch" path. Null until the
+  // triage_config row loads; the button disables itself while loading so a
+  // stale default never leaks into a claim's slice_size.
+  const [batchSize, setBatchSize] = React.useState<number | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
 
   const reloadHub = React.useCallback(async () => {
     if (!userId) return;
-    const [w, c, t] = await Promise.all([
+    const [w, c, t, cfg] = await Promise.all([
       fetchTriageHubWeeks(supabase),
       fetchActiveClaimsForReviewer(supabase, userId),
       fetchTags(supabase),
+      fetchTriageConfig(supabase),
     ]);
     setWeeks(w);
     setClaims(c);
     setTags(t.filter((x) => x.active));
+    setBatchSize(cfg.batchSize);
   }, [supabase, userId]);
 
   React.useEffect(() => {
@@ -175,14 +182,27 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
               </div>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => openClaim(w.id, Math.max(1, w.pendingCount))}
-                disabled={w.pendingCount === 0}
-              >
-                Start a batch ({w.pendingCount || 0})
-              </button>
+              {(() => {
+                // Clamp the batch size to what's actually pending, so the
+                // claim's recorded slice_size matches the photos it'll
+                // receive (the DB trigger does `limit slice_size` anyway,
+                // but recording the over-asked value would confuse later
+                // analytics). Falls back to pendingCount only while the
+                // config is still loading — the button is disabled then.
+                const startSize = batchSize === null
+                  ? Math.max(1, w.pendingCount)
+                  : Math.max(1, Math.min(batchSize, w.pendingCount));
+                return (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => openClaim(w.id, startSize)}
+                    disabled={w.pendingCount === 0 || batchSize === null}
+                  >
+                    Start a batch ({w.pendingCount === 0 ? 0 : startSize})
+                  </button>
+                );
+              })()}
               <button
                 type="button"
                 className="btn btn-ghost"
