@@ -33,6 +33,8 @@ import {
   type Tag,
   type TagCategory,
 } from "@/lib/tags";
+import { BatchPointsHud } from "@/components/BatchPointsHud";
+import { celebrateReviewBump } from "@/lib/review-points-celebration";
 import { usePoints } from "@/lib/points-context";
 import { smugmugVariantUrl } from "@/lib/smugmug/url-variants";
 import { fetchTriageConfig } from "@/lib/triage-config";
@@ -275,9 +277,9 @@ function ClaimGrid({
   // reviewed photo restores its prior state.
   const [reviewed, setReviewed] = React.useState<Record<string, ReviewSnapshot>>({});
   const [lightboxIndex, setLightboxIndex] = React.useState<number | null>(null);
-  // Optimistic chip + My Stats headline bump on successful clean/flag.
-  // The points context owns reconciliation against user_points_totals.
-  const { bumpAfterTriageEvent } = usePoints();
+  const [batchReviewCount, setBatchReviewCount] = React.useState(0);
+  const [lastEarned, setLastEarned] = React.useState<number | null>(null);
+  const { bumpAfterReviewEvent, eventCount } = usePoints();
 
   React.useEffect(() => {
     let cancelled = false;
@@ -350,9 +352,14 @@ function ClaimGrid({
       if (!res.ok) throw new Error(json.error ?? "Submit failed");
       const snapshot: ReviewSnapshot = { kind, tagIds, quarantineIntent: effectiveQuarantine };
       setReviewed((m) => ({ ...m, [photoId]: snapshot }));
-      // Both clean and flag award points (senior kinds don't — those go
-      // through /api/triage/events/senior, a different submit path).
-      bumpAfterTriageEvent();
+      const prevLifetime = eventCount ?? 0;
+      const bump = bumpAfterReviewEvent("triage_event");
+      const nextBatch = batchReviewCount + 1;
+      setBatchReviewCount(nextBatch);
+      if (bump) {
+        setLastEarned(bump.earned);
+        celebrateReviewBump(prevLifetime, bump, nextBatch, toast.show);
+      }
       return snapshot;
     } catch (err: unknown) {
       toast.show(err instanceof Error ? err.message : "Submit failed", "x");
@@ -385,6 +392,9 @@ function ClaimGrid({
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Location notes</div>
               <p style={{ color: "var(--ink-2)", lineHeight: 1.5 }}>{ctx.evergreenNotes}</p>
             </>
+          )}
+          {lightboxIndex === null && (
+            <BatchPointsHud variant="sidebar" lastEarned={lastEarned} />
           )}
           <div style={{ marginTop: 16 }}>
             <button type="button" className="btn btn-ghost" onClick={() => void dropBatch()}>
@@ -460,6 +470,10 @@ function ClaimGrid({
           )}
         </div>
       </div>
+
+      {lightboxIndex !== null && (
+        <BatchPointsHud variant="overlay" lastEarned={lastEarned} />
+      )}
 
       {lightboxPhoto && lightboxIndex !== null && (
         <Lightbox

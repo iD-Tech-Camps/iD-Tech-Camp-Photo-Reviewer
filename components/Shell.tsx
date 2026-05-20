@@ -6,8 +6,6 @@ import { createClient } from "@/lib/supabase/client";
 import { useSettings } from "@/components/settings";
 import { useCurrentUser } from "@/lib/current-user";
 import { brandingAssetUrl } from "@/lib/app-settings";
-import { usePoints } from "@/lib/points-context";
-
 // Sidebar nav. Reviewers see Camp Quality Review + My stats (+ Lead review
 // when senior or admin); admins additionally see the Admin section.
 export function Sidebar({
@@ -20,19 +18,9 @@ export function Sidebar({
   const { settings } = useSettings();
   const { email, fullName, firstName, initials, loading, role } = useCurrentUser();
   const [signingOut, setSigningOut] = React.useState(false);
-  const points = usePoints();
 
-  // Per spec §5a/§5d, the chip is a glance value sourced from the shared
-  // points context. The context refreshes on focus and on optimistic bumps
-  // from Triage; we trigger an additional reconcile on every nav so a
-  // reviewer who navigates away mid-batch and back sees authoritative
-  // totals immediately.
   const supabaseRef = React.useRef<ReturnType<typeof createClient> | null>(null);
   if (!supabaseRef.current) supabaseRef.current = createClient();
-  React.useEffect(() => {
-    void points.refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current]);
 
   const handleSignOut = async () => {
     if (signingOut) return;
@@ -116,36 +104,10 @@ export function Sidebar({
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
               }}
               title={email ?? undefined}
             >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{displayName}</span>
-              {points.total !== null && (
-                <button
-                  type="button"
-                  onClick={() => onNav("my-stats")}
-                  style={{
-                    flexShrink: 0,
-                    fontSize: 10,
-                    fontWeight: 500,
-                    padding: "2px 8px",
-                    borderRadius: 999,
-                    background: current === "my-stats" ? "var(--sun)" : "var(--sun-soft)",
-                    color: current === "my-stats" ? "var(--paper)" : "var(--sun)",
-                    fontFamily: "var(--font-mono)",
-                    border: "none",
-                    cursor: "pointer",
-                    transition: "background 120ms, color 120ms",
-                  }}
-                  title={`${points.total} point${points.total === 1 ? "" : "s"} — view My stats`}
-                  aria-label={`${points.total} points. Open My stats.`}
-                >
-                  {points.total} pts
-                </button>
-              )}
+              {displayName}
             </div>
             <div
               style={{

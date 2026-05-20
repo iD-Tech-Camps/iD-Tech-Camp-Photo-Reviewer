@@ -21,6 +21,9 @@ import {
 } from "@/lib/photo-rating-hub";
 import { buildTagLabelLookup, fetchTags, type Tag } from "@/lib/tags";
 import { smugmugVariantUrl } from "@/lib/smugmug/url-variants";
+import { BatchPointsHud } from "@/components/BatchPointsHud";
+import { celebrateReviewBump } from "@/lib/review-points-celebration";
+import { usePoints } from "@/lib/points-context";
 import { fetchTriageConfig } from "@/lib/triage-config";
 
 type View =
@@ -205,6 +208,9 @@ function RatingClaimGrid({
   const [ctx, setCtx] = React.useState<{ weekName: string; locationName: string; evergreenNotes: string | null } | null>(null);
   const [reviewed, setReviewed] = React.useState<Record<string, RatingEventSnapshot>>({});
   const [lightboxIndex, setLightboxIndex] = React.useState<number | null>(null);
+  const [batchReviewCount, setBatchReviewCount] = React.useState(0);
+  const [lastEarned, setLastEarned] = React.useState<number | null>(null);
+  const { bumpAfterReviewEvent, eventCount } = usePoints();
 
   React.useEffect(() => {
     let cancelled = false;
@@ -271,6 +277,14 @@ function RatingClaimGrid({
       if (!res.ok) throw new Error(json.error ?? "Submit failed");
       const snapshot: RatingEventSnapshot = { rating, tagIds, quarantineIntent };
       setReviewed((m) => ({ ...m, [photoId]: snapshot }));
+      const prevLifetime = eventCount ?? 0;
+      const bump = bumpAfterReviewEvent("photo_rating_event");
+      const nextBatch = batchReviewCount + 1;
+      setBatchReviewCount(nextBatch);
+      if (bump) {
+        setLastEarned(bump.earned);
+        celebrateReviewBump(prevLifetime, bump, nextBatch, toast.show);
+      }
       return snapshot;
     } catch (err: unknown) {
       toast.show(err instanceof Error ? err.message : "Submit failed", "x");
@@ -303,6 +317,9 @@ function RatingClaimGrid({
               <div style={{ fontWeight: 600, marginBottom: 6 }}>Location notes</div>
               <p style={{ color: "var(--ink-2)", lineHeight: 1.5 }}>{ctx.evergreenNotes}</p>
             </>
+          )}
+          {lightboxIndex === null && (
+            <BatchPointsHud variant="sidebar" lastEarned={lastEarned} />
           )}
           <div style={{ marginTop: 16 }}>
             <button type="button" className="btn btn-ghost" onClick={() => void dropBatch()}>
@@ -371,6 +388,10 @@ function RatingClaimGrid({
           )}
         </div>
       </div>
+
+      {lightboxIndex !== null && (
+        <BatchPointsHud variant="overlay" lastEarned={lastEarned} />
+      )}
 
       {lightboxPhoto && lightboxIndex !== null && (
         <RatingLightbox

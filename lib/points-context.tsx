@@ -3,10 +3,7 @@
 import React from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useCurrentUser } from "@/lib/current-user";
-import {
-  fetchSelfPointsTotal,
-  fetchTriagePointsRule,
-} from "@/lib/points";
+import { fetchSelfPointsTotal } from "@/lib/points";
 
 // Shared points cache. Hosts the reviewer's all-time total + event count and
 // the cached `points_rules.points` value for 'triage_event'. The submit path
@@ -15,34 +12,35 @@ import {
 // immediately. The next focus or route entry reconciles against the
 // server (`refresh()`).
 
+export type PointsSourceKind = "triage_event" | "photo_rating_event";
+
+export type ReviewBumpResult = {
+  earned: number;
+  newTotal: number;
+  newEventCount: number;
+};
+
 type PointsState = {
-  // null while loading the very first time; subsequently a number even when
-  // the user has zero events.
   total: number | null;
   eventCount: number | null;
-  // Cached rule.points for source_kind = 'triage_event'. Fetched once on
-  // mount; the admin can change it via the App settings screen, but we
-  // accept the (small) lag — a stale increment is corrected on next
-  // reconcile fetch.
-  rulePoints: number | null;
+  rulePointsBySource: Partial<Record<PointsSourceKind, number>>;
 };
 
 type PointsContextValue = PointsState & {
   loading: boolean;
-  // Re-fetch authoritative totals from user_points_totals. Cheap.
   refresh: () => Promise<void>;
-  // Optimistic increment after a successful clean/flag submit. Bumps total
-  // by the cached rule value (defaults to 0 when the rule hasn't loaded —
-  // the reconcile pass will fix it).
+  bumpAfterReviewEvent: (source?: PointsSourceKind) => ReviewBumpResult | null;
+  /** @deprecated Use bumpAfterReviewEvent */
   bumpAfterTriageEvent: () => void;
 };
 
 const FALLBACK: PointsContextValue = {
   total: null,
   eventCount: null,
-  rulePoints: null,
+  rulePointsBySource: {},
   loading: true,
   refresh: async () => {},
+  bumpAfterReviewEvent: () => null,
   bumpAfterTriageEvent: () => {},
 };
 
@@ -54,13 +52,13 @@ export function PointsProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = React.useState<PointsState>({
     total: null,
     eventCount: null,
-    rulePoints: null,
+    rulePointsBySource: {},
   });
   const [loading, setLoading] = React.useState(true);
 
   const refresh = React.useCallback(async () => {
     if (!userId) {
-      setState({ total: null, eventCount: null, rulePoints: null });
+      setState({ total: null, eventCount: null, rulePointsBySource: {} });
       setLoading(false);
       return;
     }
@@ -87,13 +85,30 @@ export function PointsProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     setLoading(true);
     (async () => {
-      const rulePromise = fetchTriagePointsRule(supabase).catch((err) => {
-        console.warn(
-          "[points] rule fetch failed:",
-          err instanceof Error ? err.message : err,
-        );
-        return null;
-      });
+      const rulePromise = (async (): Promise<Partial<Record<PointsSourceKind, number>> | null> => {
+        try {
+          const { data, error } = await supabase
+            .from("points_rules")
+            .select("source_kind, points")
+            .in("source_kind", ["triage_event", "photo_rating_event"]);
+          if (error) throw error;
+          const bySource: Partial<Record<PointsSourceKind, number>> = {};
+          for (const row of data ?? []) {
+            const kind = (row as { source_kind: string }).source_kind as PointsSourceKind;
+            bySource[kind] = (row as { points: number }).points;
+          }
+          if (bySource.triage_event != null && bySource.photo_rating_event == null) {
+            bySource.photo_rating_event = bySource.triage_event;
+          }
+          return bySource;
+        } catch (err: unknown) {
+          console.warn(
+            "[points] rules fetch failed:",
+            err instanceof Error ? err.message : err,
+          );
+          return null;
+        }
+      })();
       const totalsPromise = userId
         ? fetchSelfPointsTotal(supabase, userId).catch((err) => {
             console.warn(
@@ -106,7 +121,7 @@ export function PointsProvider({ children }: { children: React.ReactNode }) {
       const [rule, totals] = await Promise.all([rulePromise, totalsPromise]);
       if (cancelled) return;
       setState({
-        rulePoints: rule?.points ?? null,
+        rulePointsBySource: rule ?? {},
         total: userId ? totals?.totalPoints ?? 0 : null,
         eventCount: userId ? totals?.eventCount ?? 0 : null,
       });
@@ -124,17 +139,32 @@ export function PointsProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
 
+  const bumpAfterReviewEvent = React.useCallback(
+    (source: PointsSourceKind = "triage_event"): ReviewBumpResult | null => {
+      let result: ReviewBumpResult | null = null;
+      setState((s) => {
+        if (s.total === null || s.eventCount === null) return s;
+        const inc =
+          s.rulePointsBySource[source] ??
+          s.rulePointsBySource.triage_event ??
+          0;
+        const newTotal = s.total + inc;
+        const newEventCount = s.eventCount + 1;
+        result = { earned: inc, newTotal, newEventCount };
+        return { ...s, total: newTotal, eventCount: newEventCount };
+      });
+      return result;
+    },
+    [],
+  );
+
   const bumpAfterTriageEvent = React.useCallback(() => {
-    setState((s) => {
-      if (s.total === null || s.eventCount === null) return s;
-      const inc = s.rulePoints ?? 0;
-      return { ...s, total: s.total + inc, eventCount: s.eventCount + 1 };
-    });
-  }, []);
+    void bumpAfterReviewEvent("triage_event");
+  }, [bumpAfterReviewEvent]);
 
   const value = React.useMemo<PointsContextValue>(
-    () => ({ ...state, loading, refresh, bumpAfterTriageEvent }),
-    [state, loading, refresh, bumpAfterTriageEvent],
+    () => ({ ...state, loading, refresh, bumpAfterReviewEvent, bumpAfterTriageEvent }),
+    [state, loading, refresh, bumpAfterReviewEvent, bumpAfterTriageEvent],
   );
 
   return <PointsContext.Provider value={value}>{children}</PointsContext.Provider>;

@@ -584,6 +584,72 @@ button {
 ::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 999px; border: 2px solid var(--paper); }
 ::-webkit-scrollbar-thumb:hover { background: var(--ink-3); }
 
+/* In-batch points HUD (quality + photo review) */
+.batch-points-hud-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--sun-soft) 0%, var(--paper-2) 100%);
+  border: 1px solid color-mix(in oklch, var(--sun) 35%, var(--rule));
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  position: relative;
+}
+.batch-points-hud-inner--overlay {
+  background: rgba(20, 20, 22, 0.88);
+  border-color: color-mix(in oklch, var(--sun) 55%, transparent);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  color: var(--paper);
+}
+.batch-points-hud-inner--overlay .batch-points-hud-label {
+  color: color-mix(in oklch, var(--paper) 65%, transparent);
+}
+.batch-points-hud-inner--overlay .batch-points-hud-value {
+  color: var(--sun);
+}
+.batch-points-hud-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  line-height: 1.2;
+}
+.batch-points-hud-value {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--sun);
+  transition: transform 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.batch-points-hud--pulse .batch-points-hud-value {
+  animation: points-pop 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes points-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+.batch-points-float {
+  position: absolute;
+  right: 12px;
+  top: 4px;
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--sun);
+  animation: points-float-up 1s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes points-float-up {
+  0% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-22px); }
+}
+
 /* Confetti */
 .confetti-piece {
   position: fixed;
