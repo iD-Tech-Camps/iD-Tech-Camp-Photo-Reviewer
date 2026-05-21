@@ -22,6 +22,7 @@ import {
 import { buildTagLabelLookup, fetchTags, type Tag } from "@/lib/tags";
 import { smugmugVariantUrl } from "@/lib/smugmug/url-variants";
 import { BatchPointsHud } from "@/components/BatchPointsHud";
+import { useFinishBatchFlow } from "@/components/FinishBatchFlow";
 import { celebrateReviewBump } from "@/lib/review-points-celebration";
 import { usePoints } from "@/lib/points-context";
 import { fetchTriageConfig } from "@/lib/triage-config";
@@ -105,6 +106,20 @@ export function PhotoRatingApp({ toast }: { toast: ToastApi }) {
         campWeekId={view.campWeekId}
         tags={tags}
         onBack={() => { setView({ kind: "hub" }); void reloadHub(); }}
+        onStartAnotherBatch={async () => {
+          const n = await fetchRatingWeekPendingCount(supabase, view.campWeekId);
+          if (n === 0) {
+            setView({ kind: "hub" });
+            await reloadHub();
+            toast.show("No more photos pending for this week", "check");
+            return;
+          }
+          const size =
+            batchSize === null
+              ? Math.max(1, n)
+              : Math.max(1, Math.min(batchSize, n));
+          await openClaim(view.campWeekId, size);
+        }}
       />
     );
   }
@@ -195,6 +210,7 @@ function RatingClaimGrid({
   campWeekId,
   tags,
   onBack,
+  onStartAnotherBatch,
 }: {
   toast: ToastApi;
   supabase: ReturnType<typeof createClient>;
@@ -203,6 +219,7 @@ function RatingClaimGrid({
   campWeekId: string;
   tags: Tag[];
   onBack: () => void;
+  onStartAnotherBatch: () => Promise<void>;
 }) {
   const [photos, setPhotos] = React.useState<RatingClaimPhoto[]>([]);
   const [ctx, setCtx] = React.useState<{ weekName: string; locationName: string; evergreenNotes: string | null } | null>(null);
@@ -247,7 +264,16 @@ function RatingClaimGrid({
 
   const total = photos.length;
   const reviewedCount = photos.reduce((n, p) => n + (reviewed[p.id] ? 1 : 0), 0);
-  const allDone = total > 0 && reviewedCount === total;
+  const weekLabel = ctx ? `${ctx.locationName} — ${ctx.weekName}` : "";
+  const finishBatch = useFinishBatchFlow({
+    releaseUrl: `/api/photo-rating/claims/${claimId}/release`,
+    reviewedCount,
+    total,
+    weekLabel,
+    onBackToHub: onBack,
+    onStartAnotherBatch,
+    toast,
+  });
 
   const findNextUnreviewed = (from: number, map: Record<string, RatingEventSnapshot>): number | null => {
     for (let i = from + 1; i < photos.length; i++) if (!map[photos[i].id]) return i;
@@ -292,12 +318,6 @@ function RatingClaimGrid({
     }
   };
 
-  const dropBatch = async () => {
-    await fetch(`/api/photo-rating/claims/${claimId}/release`, { method: "POST" });
-    if (allDone) toast.show("Batch complete", "check");
-    onBack();
-  };
-
   if (!ctx) return <div className="page-body">Loading batch…</div>;
 
   const lightboxPhoto = lightboxIndex !== null ? photos[lightboxIndex] ?? null : null;
@@ -322,8 +342,13 @@ function RatingClaimGrid({
             <BatchPointsHud variant="sidebar" lastEarned={lastEarned} />
           )}
           <div style={{ marginTop: 16 }}>
-            <button type="button" className="btn btn-ghost" onClick={() => void dropBatch()}>
-              Drop batch
+            <button
+              type="button"
+              className={finishBatch.allDone ? "btn btn-primary" : "btn btn-ghost"}
+              onClick={() => finishBatch.clickFinish()}
+              disabled={finishBatch.busy}
+            >
+              {finishBatch.busy ? "Finishing…" : "Finish batch"}
             </button>
           </div>
         </aside>
@@ -392,6 +417,8 @@ function RatingClaimGrid({
       {lightboxIndex !== null && (
         <BatchPointsHud variant="overlay" lastEarned={lastEarned} />
       )}
+
+      {finishBatch.dialog}
 
       {lightboxPhoto && lightboxIndex !== null && (
         <RatingLightbox
