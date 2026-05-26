@@ -85,6 +85,7 @@ export function parseTriageViewFromUrl(): TriageView | null {
 
 export function writeTriageViewToUrl(view: TriageView) {
   replaceSearchParams((p) => {
+    p.set(SCREEN_PARAM, "triage");
     p.delete(SUBVIEW_PARAMS.claim);
     p.delete(SUBVIEW_PARAMS.week);
     p.delete(SUBVIEW_PARAMS.lead);
@@ -107,8 +108,10 @@ export function parsePhotoRatingViewFromUrl(): PhotoRatingView | null {
 
 export function writePhotoRatingViewToUrl(view: PhotoRatingView) {
   replaceSearchParams((p) => {
+    p.set(SCREEN_PARAM, "photo-rating");
     p.delete(SUBVIEW_PARAMS.claim);
     p.delete(SUBVIEW_PARAMS.week);
+    p.delete(SUBVIEW_PARAMS.lead);
     if (view.kind === "claim") {
       p.set(SUBVIEW_PARAMS.claim, view.claimId);
       p.set(SUBVIEW_PARAMS.week, view.campWeekId);
@@ -124,22 +127,41 @@ export function parseSeniorReviewViewFromUrl(): SeniorReviewView | null {
 
 export function writeSeniorReviewViewToUrl(view: SeniorReviewView) {
   replaceSearchParams((p) => {
+    p.set(SCREEN_PARAM, "senior-review");
+    p.delete(SUBVIEW_PARAMS.claim);
     p.delete(SUBVIEW_PARAMS.week);
+    p.delete(SUBVIEW_PARAMS.lead);
     if (view.kind === "week") p.set(SUBVIEW_PARAMS.week, view.campWeekId);
   });
 }
 
-function getInitialScreen(validScreens: readonly string[]): string {
-  if (typeof window === "undefined") return "triage";
-  const fromUrl = getScreenFromUrl();
+function inferScreenFromSubViewParams(params: URLSearchParams): string | null {
+  if (params.get(SUBVIEW_PARAMS.lead)) return "triage";
+  if (params.get(SUBVIEW_PARAMS.claim) && params.get(SUBVIEW_PARAMS.week)) return null;
+  if (params.get(SUBVIEW_PARAMS.week)) return "senior-review";
+  return null;
+}
+
+export function resolvePersistedScreen(
+  params: URLSearchParams,
+  validScreens: readonly string[],
+  savedScreen: string | null,
+): string {
+  const fromUrl = params.get(SCREEN_PARAM);
   if (fromUrl && validScreens.includes(fromUrl)) return fromUrl;
-  const saved = localStorage.getItem("screen");
-  if (saved && validScreens.includes(saved)) return saved;
+  const inferred = inferScreenFromSubViewParams(params);
+  if (inferred && validScreens.includes(inferred)) return inferred;
+  if (savedScreen && validScreens.includes(savedScreen)) return savedScreen;
   return "triage";
 }
 
-export function useInitialAppScreen(validScreens: readonly string[]) {
-  return React.useMemo(() => getInitialScreen(validScreens), [validScreens]);
+export function readPersistedScreen(validScreens: readonly string[]): string {
+  if (typeof window === "undefined") return "triage";
+  return resolvePersistedScreen(
+    readSearchParams(),
+    validScreens,
+    localStorage.getItem("screen"),
+  );
 }
 
 export function usePersistedView<T extends { kind: string }>(

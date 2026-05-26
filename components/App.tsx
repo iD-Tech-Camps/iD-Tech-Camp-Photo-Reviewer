@@ -18,8 +18,8 @@ import { UserProvider, useCurrentUser, type Role } from "@/lib/current-user";
 import { PointsProvider } from "@/lib/points-context";
 
 import {
+  readPersistedScreen,
   syncScreenToUrl,
-  useInitialAppScreen,
 } from "@/lib/app-route";
 
 const VALID_SCREENS = [
@@ -64,28 +64,26 @@ export default function App() {
 
 function AppInner() {
   const { settings } = useSettings();
-  const { role, theme } = useCurrentUser();
-  const initialScreen = useInitialAppScreen(VALID_SCREENS);
-  const [screen, setScreen] = React.useState<string>(initialScreen);
-  const skipScreenSync = React.useRef(true);
+  const { role, theme, loading: userLoading } = useCurrentUser();
+  const [screen, setScreenState] = React.useState<string | null>(null);
   const toast = useToast();
 
   React.useEffect(() => {
-    if (skipScreenSync.current) {
-      skipScreenSync.current = false;
-      syncScreenToUrl(screen);
-      localStorage.setItem("screen", screen);
-      return;
-    }
-    localStorage.setItem("screen", screen);
-    syncScreenToUrl(screen);
-  }, [screen]);
+    setScreenState(readPersistedScreen(VALID_SCREENS));
+  }, []);
+
+  const setScreen = React.useCallback((next: string) => {
+    setScreenState(next);
+    localStorage.setItem("screen", next);
+    syncScreenToUrl(next);
+  }, []);
 
   React.useEffect(() => {
+    if (screen === null || userLoading) return;
     if (!screenAllowedFor(screen, role)) {
       setScreen("triage");
     }
-  }, [screen, role]);
+  }, [screen, role, userLoading, setScreen]);
 
   React.useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -108,7 +106,22 @@ function AppInner() {
     document.title = name && tag ? `${name} · ${tag}` : name || tag || "iD Tech Camp Quality Review";
   }, [settings.brandName, settings.brandTagline]);
 
-  const activeScreen = screenAllowedFor(screen, role) ? screen : "triage";
+  const activeScreen =
+    screen === null
+      ? null
+      : userLoading || screenAllowedFor(screen, role)
+        ? screen
+        : "triage";
+
+  if (activeScreen === null) {
+    return (
+      <div className="app-shell" data-screen-label="loading">
+        <Sidebar current="triage" onNav={setScreen} />
+        <main className="main" />
+        {toast.node}
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell" data-screen-label={activeScreen}>
