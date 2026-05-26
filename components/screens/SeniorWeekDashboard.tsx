@@ -469,99 +469,168 @@ function SeniorPhotoLightbox({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose, onPrev, onNext, hasPrev, hasNext]);
 
-  const tagLabels = photo.tagIds.map((id) => labelLookup(id)).filter(Boolean);
+  const xlUrl = photo.thumbnailUrl ? smugmugVariantUrl(photo.thumbnailUrl, "XL") : null;
+  const heroSrc = xlUrl ?? photo.imageUrl ?? photo.thumbnailUrl;
 
   return (
     <div
       role="dialog"
       aria-modal="true"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
         position: "fixed", inset: 0, zIndex: 1000,
-        background: "rgba(0,0,0,0.85)",
-        display: "flex", flexDirection: "column",
+        background: "rgba(0,0,0,0.86)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 24,
       }}
     >
-      <div style={{
-        display: "flex", justifyContent: "space-between", alignItems: "center",
-        padding: "12px 16px", color: "white", flexShrink: 0,
-      }}>
-        <span style={{ fontSize: 13, fontFamily: "var(--font-mono)" }}>{position}</span>
-        <button type="button" className="btn btn-ghost" onClick={onClose} style={{ color: "white" }}>
-          Close
+      <div
+        style={{
+          position: "absolute", top: 20, left: 24,
+          color: "white",
+          fontFamily: "var(--font-mono)",
+          fontSize: 12,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+        }}
+      >
+        {position}
+      </div>
+
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close"
+        style={{
+          position: "absolute", top: 16, right: 16,
+          width: 40, height: 40, borderRadius: 999,
+          background: "rgba(255,255,255,0.12)", color: "white",
+          border: "none", cursor: "pointer",
+          display: "grid", placeItems: "center",
+        }}
+      >
+        <Icon name="x" size={20} />
+      </button>
+
+      {hasPrev && (
+        <button
+          type="button"
+          onClick={onPrev}
+          aria-label="Previous photo"
+          style={{
+            position: "absolute", top: "50%", left: 16, transform: "translateY(-50%)",
+            width: 48, height: 48, borderRadius: 999,
+            background: "rgba(255,255,255,0.12)", color: "white",
+            border: "none", cursor: "pointer",
+            display: "grid", placeItems: "center",
+          }}
+        >
+          <Icon name="arrow-l" size={22} />
         </button>
-      </div>
+      )}
+      {hasNext && (
+        <button
+          type="button"
+          onClick={onNext}
+          aria-label="Next photo"
+          style={{
+            position: "absolute", top: "50%", right: 16, transform: "translateY(-50%)",
+            width: 48, height: 48, borderRadius: 999,
+            background: "rgba(255,255,255,0.12)", color: "white",
+            border: "none", cursor: "pointer",
+            display: "grid", placeItems: "center",
+          }}
+        >
+          <Icon name="arrow-r" size={22} />
+        </button>
+      )}
 
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 0, padding: "0 48px" }}>
-        {hasPrev && (
-          <button type="button" className="btn btn-ghost" onClick={onPrev} style={{ color: "white", marginRight: 8 }} aria-label="Previous">
-            ‹
-          </button>
-        )}
-        <div style={{ flex: 1, maxHeight: "70vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <PhotoImg src={photo.imageUrl ?? photo.thumbnailUrl} alt="" fit="contain" loading="eager" />
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          display: "flex", flexDirection: "column", gap: 16,
+          maxWidth: 1100, width: "100%", maxHeight: "100%",
+        }}
+      >
+        <div
+          style={{
+            position: "relative",
+            width: "100%",
+            height: "62vh",
+            borderRadius: 8,
+            overflow: "hidden",
+          }}
+        >
+          <PhotoImg
+            src={heroSrc}
+            previewSrc={photo.thumbnailUrl}
+            alt={photo.caption ?? "Photo"}
+            fit="contain"
+            loading="eager"
+            background="transparent"
+            showSpinner
+          />
         </div>
-        {hasNext && (
-          <button type="button" className="btn btn-ghost" onClick={onNext} style={{ color: "white", marginLeft: 8 }} aria-label="Next">
-            ›
-          </button>
-        )}
-      </div>
 
-      <div style={{
-        padding: "16px 20px 24px",
-        background: "var(--paper)",
-        borderTop: "1px solid var(--rule)",
-        maxHeight: "40vh",
-        overflowY: "auto",
-      }}>
-        {photo.reviewerName && (
-          <div style={{ fontSize: 13, marginBottom: 8 }}>
-            Reviewed by <strong>{photo.reviewerName}</strong>
-            {photo.reviewedAt ? ` · ${formatReviewedAt(photo.reviewedAt)}` : ""}
-          </div>
-        )}
+        <div
+          style={{
+            background: "var(--paper-2)",
+            border: "1px solid var(--rule)",
+            borderRadius: 8,
+            padding: 16,
+          }}
+        >
+          {photo.reviewerName && (
+            <div style={{ fontSize: 13, marginBottom: 8 }}>
+              Reviewed by <strong>{photo.reviewerName}</strong>
+              {photo.reviewedAt ? ` · ${formatReviewedAt(photo.reviewedAt)}` : ""}
+            </div>
+          )}
 
-        {tagLabels.length > 0 && (
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-            {tagLabels.map((label) => (
-              <span key={label} className="pill pill-rose">{label}</span>
-            ))}
-          </div>
-        )}
+          {photo.tagIds.length > 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+              {photo.tagIds.map((id) => {
+                const label = labelLookup(id);
+                if (!label) return null;
+                return <span key={id} className="pill pill-rose">{label}</span>;
+              })}
+            </div>
+          )}
 
-        {photo.caption && (
-          <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 12 }}>{photo.caption}</div>
-        )}
+          {photo.caption && (
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 12 }}>{photo.caption}</div>
+          )}
 
-        {!readOnly && (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {photo.triageState === "flagged" && (
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={busy}
-                onClick={() => void onAction("senior_unflag")}
-              >
-                Unflag (approve)
-              </button>
-            )}
-            {photo.triageState !== "deleted" && (
-              <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void onAction("senior_delete")}>
-                Delete
-              </button>
-            )}
-            {!photo.isQuarantined && photo.triageState !== "deleted" && (
-              <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void onAction("senior_quarantine")}>
-                Hide from parent view
-              </button>
-            )}
-            {photo.isQuarantined && (
-              <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void onAction("senior_release_quarantine")}>
-                Restore parent view
-              </button>
-            )}
-          </div>
-        )}
+          {!readOnly && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {photo.triageState === "flagged" && (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={busy}
+                  onClick={() => void onAction("senior_unflag")}
+                >
+                  Unflag (approve)
+                </button>
+              )}
+              {photo.triageState !== "deleted" && (
+                <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void onAction("senior_delete")}>
+                  Delete
+                </button>
+              )}
+              {!photo.isQuarantined && photo.triageState !== "deleted" && (
+                <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void onAction("senior_quarantine")}>
+                  Hide from parent view
+                </button>
+              )}
+              {photo.isQuarantined && (
+                <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void onAction("senior_release_quarantine")}>
+                  Restore parent view
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
