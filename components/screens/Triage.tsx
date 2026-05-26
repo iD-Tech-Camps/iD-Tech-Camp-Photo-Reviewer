@@ -27,11 +27,14 @@ import { celebrateReviewBump } from "@/lib/review-points-celebration";
 import { usePoints } from "@/lib/points-context";
 import { smugmugVariantUrl } from "@/lib/smugmug/url-variants";
 import { fetchTriageConfig } from "@/lib/triage-config";
+import {
+  parseTriageViewFromUrl,
+  usePersistedView,
+  writeTriageViewToUrl,
+  type TriageView,
+} from "@/lib/app-route";
 
-type View =
-  | { kind: "hub" }
-  | { kind: "claim"; claimId: string; campWeekId: string }
-  | { kind: "senior"; campWeekId: string };
+type View = TriageView;
 
 // User-facing labels for the DB's triage_state / triage_role enums. The
 // raw enum values stay in code and queries; this is purely display.
@@ -61,7 +64,9 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
   const userId = user.id;
   const role = user.role;
   const supabase = React.useMemo(() => createClient(), []);
-  const [view, setView] = React.useState<View>({ kind: "hub" });
+  const parseView = React.useCallback(() => parseTriageViewFromUrl(), []);
+  const writeView = React.useCallback((v: View) => writeTriageViewToUrl(v), []);
+  const [view, setView] = usePersistedView(parseView, writeView, { kind: "hub" });
   const [weeks, setWeeks] = React.useState<TriageHubWeek[] | null>(null);
   const [claims, setClaims] = React.useState<ActiveClaim[]>([]);
   const [tags, setTags] = React.useState<Tag[]>([]);

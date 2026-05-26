@@ -7,10 +7,14 @@ import { fetchTags, type Tag } from "@/lib/tags";
 import { fetchSeniorRollupWeeks, type SeniorRollupWeek } from "@/lib/triage-senior";
 import { partitionSeniorHubWeeks, type SeniorHubSection } from "@/lib/senior-hub-sections";
 import { SeniorWeekDashboard } from "@/components/screens/SeniorWeekDashboard";
+import {
+  parseSeniorReviewViewFromUrl,
+  usePersistedView,
+  writeSeniorReviewViewToUrl,
+  type SeniorReviewView,
+} from "@/lib/app-route";
 
-type View =
-  | { kind: "hub" }
-  | { kind: "week"; campWeekId: string };
+type View = SeniorReviewView;
 
 const STATE_LABELS: Record<string, string> = {
   awaiting_photos: "Awaiting photos",
@@ -51,7 +55,9 @@ const SECTION_META: Record<SeniorHubSection, { title: string; empty: string }> =
 
 export function SeniorReviewApp({ toast }: { toast: ToastApi }) {
   const supabase = React.useMemo(() => createClient(), []);
-  const [view, setView] = React.useState<View>({ kind: "hub" });
+  const parseView = React.useCallback(() => parseSeniorReviewViewFromUrl(), []);
+  const writeView = React.useCallback((v: View) => writeSeniorReviewViewToUrl(v), []);
+  const [view, setView] = usePersistedView(parseView, writeView, { kind: "hub" });
   const [weeks, setWeeks] = React.useState<SeniorRollupWeek[] | null>(null);
   const [tags, setTags] = React.useState<Tag[]>([]);
   const [weekSeniorTags, setWeekSeniorTags] = React.useState<Tag[]>([]);

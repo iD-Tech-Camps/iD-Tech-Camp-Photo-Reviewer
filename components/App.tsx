@@ -17,6 +17,11 @@ import { SettingsProvider, useSettings } from "@/components/settings";
 import { UserProvider, useCurrentUser, type Role } from "@/lib/current-user";
 import { PointsProvider } from "@/lib/points-context";
 
+import {
+  syncScreenToUrl,
+  useInitialAppScreen,
+} from "@/lib/app-route";
+
 const VALID_SCREENS = [
   "triage",
   "photo-rating",
@@ -60,17 +65,20 @@ export default function App() {
 function AppInner() {
   const { settings } = useSettings();
   const { role, theme } = useCurrentUser();
-  const [screen, setScreen] = React.useState<string>("triage");
+  const initialScreen = useInitialAppScreen(VALID_SCREENS);
+  const [screen, setScreen] = React.useState<string>(initialScreen);
+  const skipScreenSync = React.useRef(true);
   const toast = useToast();
 
   React.useEffect(() => {
-    if (typeof window === "undefined") return;
-    const saved = localStorage.getItem("screen");
-    if (saved && VALID_SCREENS.includes(saved)) setScreen(saved);
-  }, []);
-
-  React.useEffect(() => {
-    if (typeof window !== "undefined") localStorage.setItem("screen", screen);
+    if (skipScreenSync.current) {
+      skipScreenSync.current = false;
+      syncScreenToUrl(screen);
+      localStorage.setItem("screen", screen);
+      return;
+    }
+    localStorage.setItem("screen", screen);
+    syncScreenToUrl(screen);
   }, [screen]);
 
   React.useEffect(() => {

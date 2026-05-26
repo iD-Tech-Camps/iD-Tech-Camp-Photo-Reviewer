@@ -27,10 +27,14 @@ import { useFinishBatchFlow } from "@/components/FinishBatchFlow";
 import { celebrateReviewBump } from "@/lib/review-points-celebration";
 import { usePoints } from "@/lib/points-context";
 import { fetchTriageConfig } from "@/lib/triage-config";
+import {
+  parsePhotoRatingViewFromUrl,
+  usePersistedView,
+  writePhotoRatingViewToUrl,
+  type PhotoRatingView,
+} from "@/lib/app-route";
 
-type View =
-  | { kind: "hub" }
-  | { kind: "claim"; claimId: string; campWeekId: string };
+type View = PhotoRatingView;
 
 const WEEK_STATE_LABEL: Record<string, string> = {
   not_required: "Not in season",
@@ -52,7 +56,9 @@ export function PhotoRatingApp({ toast }: { toast: ToastApi }) {
   const user = useCurrentUser();
   const userId = user.id;
   const supabase = React.useMemo(() => createClient(), []);
-  const [view, setView] = React.useState<View>({ kind: "hub" });
+  const parseView = React.useCallback(() => parsePhotoRatingViewFromUrl(), []);
+  const writeView = React.useCallback((v: View) => writePhotoRatingViewToUrl(v), []);
+  const [view, setView] = usePersistedView(parseView, writeView, { kind: "hub" });
   const [weeks, setWeeks] = React.useState<PhotoRatingHubWeek[] | null>(null);
   const [claims, setClaims] = React.useState<Awaited<ReturnType<typeof fetchActiveRatingClaimsForReviewer>>>([]);
   const [tags, setTags] = React.useState<Tag[]>([]);
