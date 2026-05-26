@@ -28,28 +28,18 @@ export function getScreenFromUrl(): string | null {
   return readSearchParams().get(SCREEN_PARAM);
 }
 
-/** Params each top-level screen may use for its sub-view. */
-export function subViewParamKeysForScreen(screen: string): string[] {
-  switch (screen) {
-    case "senior-review":
-      return [SUBVIEW_PARAMS.week];
-    case "triage":
-      return [SUBVIEW_PARAMS.claim, SUBVIEW_PARAMS.week, SUBVIEW_PARAMS.lead];
-    case "photo-rating":
-      return [SUBVIEW_PARAMS.claim, SUBVIEW_PARAMS.week];
-    default:
-      return [];
-  }
-}
-
 export function syncScreenToUrl(screen: string) {
   replaceSearchParams((p) => {
     p.set(SCREEN_PARAM, screen);
-    const keep = new Set(subViewParamKeysForScreen(screen));
     for (const key of Object.values(SUBVIEW_PARAMS)) {
-      if (!keep.has(key)) p.delete(key);
+      p.delete(key);
     }
   });
+}
+
+/** Sidebar navigation — always opens the section hub, not a remembered sub-view. */
+export function navigateToMainScreen(screen: string) {
+  syncScreenToUrl(screen);
 }
 
 export function clearSubViewParams() {

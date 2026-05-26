@@ -18,8 +18,8 @@ import { UserProvider, useCurrentUser, type Role } from "@/lib/current-user";
 import { PointsProvider } from "@/lib/points-context";
 
 import {
+  navigateToMainScreen,
   readPersistedScreen,
-  syncScreenToUrl,
 } from "@/lib/app-route";
 
 const VALID_SCREENS = [
@@ -66,6 +66,7 @@ function AppInner() {
   const { settings } = useSettings();
   const { role, theme, loading: userLoading } = useCurrentUser();
   const [screen, setScreenState] = React.useState<string | null>(null);
+  const [navEpoch, setNavEpoch] = React.useState(0);
   const toast = useToast();
 
   React.useEffect(() => {
@@ -74,8 +75,9 @@ function AppInner() {
 
   const setScreen = React.useCallback((next: string) => {
     setScreenState(next);
+    setNavEpoch((n) => n + 1);
     localStorage.setItem("screen", next);
-    syncScreenToUrl(next);
+    navigateToMainScreen(next);
   }, []);
 
   React.useEffect(() => {
@@ -127,10 +129,10 @@ function AppInner() {
     <div className="app-shell" data-screen-label={activeScreen}>
       <Sidebar current={activeScreen} onNav={setScreen} />
       <main className="main">
-        {activeScreen === "triage"           && <TriageApp toast={toast} />}
-        {activeScreen === "photo-rating"     && <PhotoRatingApp toast={toast} />}
+        {activeScreen === "triage"           && <TriageApp key={navEpoch} toast={toast} />}
+        {activeScreen === "photo-rating"     && <PhotoRatingApp key={navEpoch} toast={toast} />}
         {activeScreen === "my-stats"         && <MyStatsApp />}
-        {activeScreen === "senior-review"   && <SeniorReviewApp toast={toast} />}
+        {activeScreen === "senior-review"   && <SeniorReviewApp key={navEpoch} toast={toast} />}
         {activeScreen === "admin-overview"  && <AdminOverview toast={toast} />}
         {activeScreen === "admin-locations" && <AdminLocationsNotes toast={toast} />}
         {activeScreen === "admin-tags"      && <AdminTags />}
