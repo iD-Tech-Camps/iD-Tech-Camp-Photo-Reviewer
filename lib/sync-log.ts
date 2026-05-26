@@ -103,10 +103,9 @@ export async function fetchLatestSyncSummary(
   const row = rows[0];
   if (!row) return null;
 
-  const counts = formatSyncLogCounts(row);
   const summaryLine = row.finishedAt === null
-    ? "in flight"
-    : `${row.status} · ${counts}`;
+    ? "Sync in progress"
+    : formatSyncLogSummary(row);
 
   return {
     startedAt: row.startedAt,
@@ -117,18 +116,58 @@ export async function fetchLatestSyncSummary(
   };
 }
 
-export function formatSyncLogCounts(row: Pick<
+export type SyncLogCountFields = Pick<
   SyncLogRow,
   "kind" | "weeksInScope" | "imagesSeen" | "photosAdded" | "photosUpdated" | "photosRemoved"
->): string {
-  const delta = `+${row.photosAdded} ~${row.photosUpdated} -${row.photosRemoved}`;
-  if (row.kind !== "scheduled" && row.kind !== "manual") return delta;
-  if (row.weeksInScope == null && row.imagesSeen == null) return delta;
-  const scope =
-    row.weeksInScope != null && row.imagesSeen != null
-      ? `${row.weeksInScope} wk · ${row.imagesSeen} img`
-      : row.weeksInScope != null
-        ? `${row.weeksInScope} wk`
-        : `${row.imagesSeen} img`;
-  return `${scope} · ${delta}`;
+>;
+
+function plural(n: number, singular: string, pluralForm: string): string {
+  return `${n.toLocaleString()} ${n === 1 ? singular : pluralForm}`;
+}
+
+/** Photo add/update/remove phrase, e.g. "21 added, 3 updated, 1 removed" or "no photo changes". */
+export function formatSyncPhotoChanges(
+  row: Pick<SyncLogRow, "photosAdded" | "photosUpdated" | "photosRemoved">,
+): string {
+  const parts: string[] = [];
+  if (row.photosAdded > 0) parts.push(`${row.photosAdded.toLocaleString()} added`);
+  if (row.photosUpdated > 0) parts.push(`${row.photosUpdated.toLocaleString()} updated`);
+  if (row.photosRemoved > 0) parts.push(`${row.photosRemoved.toLocaleString()} removed`);
+  if (parts.length === 0) return "no photo changes";
+  return parts.join(", ");
+}
+
+/** Scope + photo deltas for tables and detail lines (no status prefix). */
+export function formatSyncLogCounts(row: SyncLogCountFields): string {
+  const segments: string[] = [];
+
+  if (row.kind === "scheduled" || row.kind === "manual") {
+    if (row.weeksInScope != null) {
+      segments.push(`Checked ${plural(row.weeksInScope, "camp week", "camp weeks")}`);
+    }
+    if (row.imagesSeen != null) {
+      segments.push(plural(row.imagesSeen, "image", "images"));
+    }
+  }
+
+  segments.push(formatSyncPhotoChanges(row));
+  return segments.join("; ");
+}
+
+const STATUS_LABEL: Record<SyncStatus, string> = {
+  success: "Success",
+  partial: "Partial success",
+  failed: "Failed",
+};
+
+/** Full sentence for last-sync header and toasts. */
+export function formatSyncLogSummary(
+  row: SyncLogCountFields & { status: SyncStatus },
+): string {
+  return `${STATUS_LABEL[row.status]}: ${formatSyncLogCounts(row)}`;
+}
+
+/** Toast after a manual sync completes. */
+export function formatSyncCompleteToast(row: SyncLogCountFields): string {
+  return `Sync complete. ${formatSyncLogCounts(row)}`;
 }

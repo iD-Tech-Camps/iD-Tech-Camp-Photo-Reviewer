@@ -7,6 +7,7 @@ import { resetAllSampleFlags } from "@/lib/triage-config";
 import {
   fetchLatestSyncSummary,
   fetchRecentSyncLog,
+  formatSyncCompleteToast,
   formatSyncLogCounts,
   type LatestSyncSummary,
   type SyncLogRow,
@@ -22,7 +23,7 @@ export function SmugMugImport({ toast }: { toast?: ToastApi }) {
   return (
     <>
       <PageHeader
-        eyebrow="Admin Â· Photo sync"
+        eyebrow="Admin · Photo sync"
         title="Photo <em>sync.</em>"
         sub="SmugMug ingestion log and maintenance actions. Season dates live in App settings."
       />
@@ -64,7 +65,7 @@ function LastSyncCard({ refreshTick }: { refreshTick: number }) {
       </div>
       {loadError && <ErrorBanner>{loadError}</ErrorBanner>}
       {summary === undefined && !loadError && (
-        <div style={{ fontSize: 13, color: "var(--ink-3)" }}>Loadingâ€¦</div>
+        <div style={{ fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
       )}
       {summary === null && !loadError && (
         <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No sync runs yet.</div>
@@ -117,18 +118,14 @@ function ActionsCard({
       if (body?.status === "failed") {
         throw new Error(body?.errorSummary ?? "Sync failed");
       }
-      const added = body.photosAdded ?? body.photos_added ?? 0;
-      const updated = body.photosUpdated ?? body.photos_updated ?? 0;
-      const removed = body.photosRemoved ?? body.photos_removed ?? 0;
-      const weeks = body.weeksInScope ?? body.scope?.weekCount;
-      const images = body.imagesSeen;
-      const scope =
-        weeks != null && images != null
-          ? `${weeks} wk Â· ${images} img Â· `
-          : weeks != null
-            ? `${weeks} wk Â· `
-            : "";
-      toast?.show(`Sync complete Â· ${scope}+${added} ~${updated} -${removed}`);
+      toast?.show(formatSyncCompleteToast({
+        kind: "manual",
+        weeksInScope: body.weeksInScope ?? body.scope?.weekCount ?? null,
+        imagesSeen: body.imagesSeen ?? null,
+        photosAdded: body.photosAdded ?? body.photos_added ?? 0,
+        photosUpdated: body.photosUpdated ?? body.photos_updated ?? 0,
+        photosRemoved: body.photosRemoved ?? body.photos_removed ?? 0,
+      }));
       onDone();
     } catch (err: unknown) {
       setSyncError(err instanceof Error ? err.message : String(err));
@@ -183,7 +180,7 @@ function ActionsCard({
           disabled={syncing || maintBusy}
           style={{ opacity: syncing ? 0.6 : 1 }}
         >
-          {syncing ? "Syncingâ€¦" : "Sync now"}
+          {syncing ? "Syncing…" : "Sync now"}
         </button>
         <button
           className="btn"
@@ -245,7 +242,7 @@ function SyncLogCard({ refreshTick }: { refreshTick: number }) {
       </div>
       {loadError && <ErrorBanner>{loadError}</ErrorBanner>}
       {rows === null ? (
-        <div style={{ fontSize: 13, color: "var(--ink-3)", padding: "8px 0" }}>Loadingâ€¦</div>
+        <div style={{ fontSize: 13, color: "var(--ink-3)", padding: "8px 0" }}>Loading…</div>
       ) : rows.length === 0 ? (
         <div style={{ fontSize: 13, color: "var(--ink-3)", padding: "8px 0" }}>No sync runs yet.</div>
       ) : (
@@ -282,7 +279,7 @@ function SyncLogCard({ refreshTick }: { refreshTick: number }) {
                       <td style={td}><KindPill kind={row.kind} /></td>
                       <td style={td}><SyncStatusPill status={row.status} finished={row.finishedAt !== null} /></td>
                       <td style={td}>
-                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                        <span style={{ fontSize: 12 }}>
                           {formatSyncLogCounts(row)}
                         </span>
                       </td>
@@ -366,7 +363,7 @@ function ErrorBanner({ children }: { children: React.ReactNode }) {
 }
 
 function formatDateTimeShort(iso: string | null): string {
-  if (!iso) return "â€”";
+  if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString(undefined, {
