@@ -15,22 +15,17 @@ export function todayYmdLocal(): string {
 
 export function partitionReviewHubWeeks<T extends ReviewHubWeekSlice>(
   weeks: T[],
-  today: string = todayYmdLocal(),
 ): { active: T[]; upcoming: T[] } {
   const active: T[] = [];
   const upcoming: T[] = [];
 
   for (const w of weeks) {
-    const started = w.startsOn <= today;
     const hasPhotos = w.photoCount > 0;
 
-    if (started && hasPhotos) {
-      active.push(w);
-    } else if (!started && !hasPhotos) {
+    if (!hasPhotos) {
+      // Includes started weeks with no photos yet (late uploads).
       upcoming.push(w);
-    }
-    // Future weeks that already have synced photos surface in Active.
-    else if (!started && hasPhotos) {
+    } else {
       active.push(w);
     }
   }

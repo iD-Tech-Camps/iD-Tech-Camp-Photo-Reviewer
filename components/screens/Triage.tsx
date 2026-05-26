@@ -14,6 +14,11 @@ import {
   type ClaimPhoto,
 } from "@/lib/triage-claims";
 import { fetchTriageHubWeeks, fetchWeekPendingCount, type TriageHubWeek } from "@/lib/triage-hub";
+import {
+  campQualityHubStatusLabel,
+  isCampQualityAwaitingLeadReview,
+} from "@/lib/triage-hub-display";
+import { todayYmdLocal } from "@/lib/review-hub-sections";
 import { ReviewHubWeekSections } from "@/components/ReviewHubWeekSections";
 import { SeniorWeekDashboard } from "@/components/screens/SeniorWeekDashboard";
 import {
@@ -36,18 +41,7 @@ import {
 
 type View = TriageView;
 
-// User-facing labels for the DB's triage_state / triage_role enums. The
-// raw enum values stay in code and queries; this is purely display.
-const WEEK_STATE_LABEL: Record<string, string> = {
-  not_required: "Not in season",
-  awaiting_photos: "Awaiting photos",
-  photos_in: "Not started",
-  triage_in_progress: "In review",
-  triage_done: "Ready for sign-off",
-  senior_review: "In sign-off",
-  complete: "Done",
-};
-
+// User-facing labels for the DB's triage_role enum.
 const WEEK_ROLE_LABEL: Record<string, string> = {
   none: "",
   first_week: "First week",
@@ -159,6 +153,7 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
   }
 
   const labelLookup = buildTagLabelLookup(tags);
+  const today = todayYmdLocal();
 
   return (
     <>
@@ -190,7 +185,11 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
         <ReviewHubWeekSections
           weeks={weeks}
           emptyMessage="No camp weeks need review right now."
-          renderWeek={(w, section) => (
+          renderWeek={(w, section) => {
+            const awaitingLead = isCampQualityAwaitingLeadReview(w.triageState);
+            const weekStarted = w.startsOn <= today;
+
+            return (
             <div className="card" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
               <div>
                 <div style={{ fontWeight: 600 }}>{w.locationName} — {w.name}</div>
@@ -198,18 +197,19 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
                   {section === "upcoming"
                     ? [
                         WEEK_ROLE_LABEL[w.triageRole] || w.triageRole,
-                        `Starts ${w.startsOn}`,
-                        "Awaiting photos",
+                        weekStarted ? "Awaiting photos" : `Starts ${w.startsOn}`,
                       ].filter(Boolean).join(" · ")
                     : [
                         WEEK_ROLE_LABEL[w.triageRole] || w.triageRole,
-                        WEEK_STATE_LABEL[w.triageState] || w.triageState,
-                        `${w.pendingCount} pending`,
+                        campQualityHubStatusLabel(w.triageState),
+                        awaitingLead ? null : `${w.pendingCount} pending`,
                       ].filter(Boolean).join(" · ")}
                 </div>
               </div>
               {section === "active" && (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {!awaitingLead && (
+                    <>
                   {(() => {
                     const startSize = batchSize === null
                       ? Math.max(1, w.pendingCount)
@@ -236,8 +236,10 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
                   >
                     Whole week
                   </button>
+                    </>
+                  )}
                   {(role === "senior" || role === "admin") &&
-                    ["triage_done", "senior_review"].includes(w.triageState) && (
+                    awaitingLead && (
                     <button
                       type="button"
                       className="btn btn-ghost"
@@ -249,7 +251,8 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
                 </div>
               )}
             </div>
-          )}
+            );
+          }}
         />
       </div>
     </>
