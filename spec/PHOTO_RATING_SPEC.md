@@ -6,7 +6,8 @@ Parallel workflow to Camp Quality Review (triage). Reviewers rate photos 1–5 s
 
 ### Camp week (`camp_weeks.rating_state`)
 
-- `not_required` — same eligibility as triage (`rating_role` synced from `triage_role`)
+- `not_required` — week not in photo review (`rating_role = none`)
+- `rating_role`: `first_week` and `second_week_recheck` mirror triage; `later_week` is week 3+ at the location (photo review only, no camp quality review)
 - `awaiting_photos` / `photos_in` / `rating_in_progress` / `rating_done` / `complete`
 
 ### Photo (`photos.rating_state`)

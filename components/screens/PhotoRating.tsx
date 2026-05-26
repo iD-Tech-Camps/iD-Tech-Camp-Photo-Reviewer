@@ -44,6 +44,7 @@ const WEEK_ROLE_LABEL: Record<string, string> = {
   none: "",
   first_week: "First week",
   second_week_recheck: "Follow-up review",
+  later_week: "Week 3+",
 };
 
 export function PhotoRatingApp({ toast }: { toast: ToastApi }) {

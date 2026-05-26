@@ -82,4 +82,63 @@ begin
 end;
 $$;
 
+-- Week 3+ gets photo review only (later_week), not camp quality review.
+insert into public.locations (id, division_id, name, smugmug_folder_id) values
+  ('ffffffff-2222-2222-2222-222222222203',
+   'ffffffff-2222-2222-2222-222222222201',
+   'E2E Ordinal Location', 'e2e-ordinal-loc')
+on conflict (id) do nothing;
+
+do $$
+declare
+  v_loc uuid := 'ffffffff-2222-2222-2222-222222222203';
+  v_w1 uuid;
+  v_w2 uuid;
+  v_w3 uuid;
+  v_rating_role public.camp_week_triage_role;
+  v_triage_role public.camp_week_triage_role;
+  v_rating_state public.camp_week_rating_state;
+begin
+  insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
+  values (v_loc, 'Ord W1', 'e2e-ord-w1', date '2026-07-06', date '2026-07-10')
+  returning id into v_w1;
+
+  insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
+  values (v_loc, 'Ord W2', 'e2e-ord-w2', date '2026-07-13', date '2026-07-17')
+  returning id into v_w2;
+
+  insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
+  values (v_loc, 'Ord W3', 'e2e-ord-w3', date '2026-07-20', date '2026-07-24')
+  returning id into v_w3;
+
+  select triage_role, rating_role into v_triage_role, v_rating_role
+    from public.camp_weeks where id = v_w1;
+  if v_triage_role <> 'first_week' or v_rating_role <> 'first_week' then
+    raise exception 'w1: expected first_week for both, got triage=% rating=%', v_triage_role, v_rating_role;
+  end if;
+
+  select triage_role, rating_role into v_triage_role, v_rating_role
+    from public.camp_weeks where id = v_w2;
+  if v_triage_role <> 'none' or v_rating_role <> 'none' then
+    raise exception 'w2: expected none for both, got triage=% rating=%', v_triage_role, v_rating_role;
+  end if;
+
+  select triage_role, rating_role into v_triage_role, v_rating_role
+    from public.camp_weeks where id = v_w3;
+  if v_triage_role <> 'none' or v_rating_role <> 'later_week' then
+    raise exception 'w3: expected triage none + rating later_week, got triage=% rating=%', v_triage_role, v_rating_role;
+  end if;
+
+  insert into public.photos (camp_week_id, smugmug_image_id)
+  values (v_w3, 'e2e-ord-w3-photo');
+
+  select rating_state into v_rating_state from public.camp_weeks where id = v_w3;
+  if v_rating_state <> 'photos_in' then
+    raise exception 'w3 after photo: expected photos_in, got %', v_rating_state;
+  end if;
+
+  raise notice 'e2e later_week ordinal OK';
+end;
+$$;
+
 rollback;
