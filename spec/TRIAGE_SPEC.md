@@ -158,7 +158,7 @@ create type photo_triage_state     as enum (
 );
 create type triage_event_kind      as enum (
   'clean', 'flag',
-  'senior_delete', 'senior_quarantine', 'senior_release_quarantine'
+  'senior_delete', 'senior_quarantine', 'senior_release_quarantine', 'senior_unflag'
 );
 create type claim_release_reason   as enum ('explicit', 'auto_expired', 'week_complete', 'admin_force');
 create type tag_category           as enum ('quality', 'setup', 'brand', 'safety', 'general');
@@ -407,6 +407,7 @@ NEW.triage_role := role;
 | `senior_delete` | `triage_state := 'deleted'`. |
 | `senior_quarantine` | `is_quarantined := true`. |
 | `senior_release_quarantine` | `is_quarantined := false`. |
+| `senior_unflag` | `triage_state := 'clean'`, `is_quarantined := false`; clears active flag (historical flag events/tags remain for audit). Same end state as reviewer `clean`. |
 
 **`tg_triage_events_after_insert_bump_claim_activity`** — bump `last_activity_at` on claim when `claim_id` set.
 
@@ -510,6 +511,17 @@ Under `app/api/triage/` (and admin helpers). Mutations follow existing SmugMug p
 Sidebar: **Triage hub + My stats** for all roles; seniors use per-week dashboards from hub (no separate “Flag review” nav). Admin: Overview, **Triage settings**, Locations notes, Tag library, SmugMug import, App settings. My Stats lands in gamification V1 — see [`GAMIFICATION_SPEC.md`](./GAMIFICATION_SPEC.md). Profile / Guide remain deferred.
 
 Screen matrix: hub, claim grid, senior dashboard, admin surfaces.
+
+**Lead review hub** (`senior-review` screen) partitions eligible camp weeks (`triage_role` in `first_week`, `second_week_recheck`) into four sections:
+
+| Section | `triage_state` rule |
+|---|---|
+| Need review | `triage_done`, `senior_review`, or any week with `flaggedCount > 0` |
+| In progress | `photos_in` or `triage_in_progress` with no open flags |
+| Upcoming | `awaiting_photos` |
+| Finished | `complete` |
+
+Week detail (`SeniorWeekDashboard`): consolidated **Week report** (highlights, assessment tags, issue rollup, approval); photo grid with lightbox and senior actions including **Unflag** (`senior_unflag`).
 
 ---
 

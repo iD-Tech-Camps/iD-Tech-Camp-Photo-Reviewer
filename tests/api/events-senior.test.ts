@@ -108,4 +108,18 @@ describe("POST /api/triage/events/senior", () => {
       .single();
     expect(data?.is_quarantined).toBe(false);
   });
+
+  it("senior_unflag marks the photo clean and clears quarantine", async () => {
+    setMockAuth({ kind: "user", userId: fixture.senior.id, role: "senior" });
+    const res = await postSenior({ photo_id: fixture.photoIds[0], kind: "senior_unflag" });
+    expect(res.status).toBe(200);
+
+    const { data } = await service()
+      .from("photos")
+      .select("triage_state, is_quarantined")
+      .eq("id", fixture.photoIds[0])
+      .single();
+    expect(data?.triage_state).toBe("clean");
+    expect(data?.is_quarantined).toBe(false);
+  });
 });

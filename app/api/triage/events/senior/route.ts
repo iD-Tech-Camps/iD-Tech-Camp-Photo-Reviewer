@@ -16,6 +16,7 @@ export async function POST(request: Request) {
     | "senior_delete"
     | "senior_quarantine"
     | "senior_release_quarantine"
+    | "senior_unflag"
     | undefined;
 
   if (!photoId || !kind) {

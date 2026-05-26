@@ -10,16 +10,27 @@ export type SeniorWeekSummary = {
   positiveGreatQuality: boolean;
   positiveGreatVariety: boolean;
   positiveShininessGreat: boolean;
+  evergreenNotes: string | null;
+  signoffAt: string | null;
+  signoffByName: string | null;
 };
 
-export type SeniorFlaggedPhoto = {
+export type SeniorWeekPhoto = {
   id: string;
+  triageState: string;
   thumbnailUrl: string | null;
   imageUrl: string | null;
   caption: string | null;
   isQuarantined: boolean;
+  reviewerName: string | null;
+  reviewerEmail: string | null;
+  reviewedAt: string | null;
   tagIds: string[];
+  quarantineIntent: boolean;
 };
+
+/** @deprecated Use SeniorWeekPhoto */
+export type SeniorFlaggedPhoto = SeniorWeekPhoto;
 
 export type SeniorRollupWeek = {
   id: string;
@@ -28,6 +39,7 @@ export type SeniorRollupWeek = {
   triageRole: string;
   triageState: string;
   startsOn: string;
+  endsOn: string;
   totalPhotos: number;
   pendingCount: number;
   inProgressCount: number;
@@ -35,14 +47,11 @@ export type SeniorRollupWeek = {
   flaggedCount: number;
   deletedCount: number;
   quarantinedCount: number;
+  signoffAt: string | null;
+  signoffByName: string | null;
 };
 
-const ACTIVE_PIPELINE_STATES = [
-  "photos_in",
-  "triage_in_progress",
-  "triage_done",
-  "senior_review",
-] as const;
+const LEAD_ELIGIBLE_ROLES = ["first_week", "second_week_recheck"] as const;
 
 export async function fetchSeniorRollupWeeks(
   supabase: SupabaseClient,
@@ -50,10 +59,13 @@ export async function fetchSeniorRollupWeeks(
   const { data, error } = await supabase
     .from("camp_weeks")
     .select(
-      "id, name, starts_on, triage_role, triage_state, " +
-        "locations!inner ( name ), photos ( triage_state, is_quarantined )",
+      "id, name, starts_on, ends_on, triage_role, triage_state, signoff_at, " +
+        "locations!inner ( name ), " +
+        "signoff_profile:profiles!camp_weeks_signoff_by_fkey ( full_name ), " +
+        "photos ( triage_state, is_quarantined )",
     )
-    .in("triage_state", ACTIVE_PIPELINE_STATES as unknown as string[])
+    .in("triage_role", LEAD_ELIGIBLE_ROLES as unknown as string[])
+    .neq("triage_state", "not_required")
     .order("starts_on", { ascending: true });
   if (error) throw error;
 
@@ -61,9 +73,12 @@ export async function fetchSeniorRollupWeeks(
     id: string;
     name: string;
     starts_on: string;
+    ends_on: string;
     triage_role: string;
     triage_state: string;
+    signoff_at: string | null;
     locations: { name: string } | null;
+    signoff_profile: { full_name: string | null } | null;
     photos: Array<{ triage_state: string; is_quarantined: boolean }>;
   };
 
@@ -93,6 +108,7 @@ export async function fetchSeniorRollupWeeks(
       triageRole: w.triage_role,
       triageState: w.triage_state,
       startsOn: w.starts_on,
+      endsOn: w.ends_on,
       totalPhotos: photos.length,
       pendingCount: pending,
       inProgressCount: inProgress,
@@ -100,6 +116,8 @@ export async function fetchSeniorRollupWeeks(
       flaggedCount: flagged,
       deletedCount: deleted,
       quarantinedCount: quarantined,
+      signoffAt: w.signoff_at,
+      signoffByName: w.signoff_profile?.full_name ?? null,
     };
   });
 }
@@ -111,9 +129,10 @@ export async function fetchSeniorWeek(
   const { data, error } = await supabase
     .from("camp_weeks")
     .select(
-      "id, name, triage_role, triage_state, " +
+      "id, name, triage_role, triage_state, signoff_at, " +
         "positive_great_quality, positive_great_variety, positive_shininess_great, " +
-        "locations!inner ( name )",
+        "locations!inner ( name, evergreen_notes ), " +
+        "signoff_profile:profiles!camp_weeks_signoff_by_fkey ( full_name )",
     )
     .eq("id", campWeekId)
     .single();
@@ -123,10 +142,12 @@ export async function fetchSeniorWeek(
     name: string;
     triage_role: string;
     triage_state: string;
+    signoff_at: string | null;
     positive_great_quality: boolean;
     positive_great_variety: boolean;
     positive_shininess_great: boolean;
-    locations: { name: string } | null;
+    locations: { name: string; evergreen_notes: string | null } | null;
+    signoff_profile: { full_name: string | null } | null;
   };
   return {
     id: raw.id,
@@ -137,60 +158,96 @@ export async function fetchSeniorWeek(
     positiveGreatQuality: raw.positive_great_quality,
     positiveGreatVariety: raw.positive_great_variety,
     positiveShininessGreat: raw.positive_shininess_great,
+    evergreenNotes: raw.locations?.evergreen_notes ?? null,
+    signoffAt: raw.signoff_at,
+    signoffByName: raw.signoff_profile?.full_name ?? null,
   };
+}
+
+type ReviewEventRow = {
+  photo_id: string;
+  kind: string;
+  created_at: string;
+  quarantine_intent: boolean;
+  profiles: { full_name: string | null; email: string | null } | null;
+  triage_event_tags: Array<{ tag_id: string }>;
+};
+
+function mapReviewEvent(e: ReviewEventRow) {
+  return {
+    reviewerName: e.profiles?.full_name ?? e.profiles?.email ?? null,
+    reviewerEmail: e.profiles?.email ?? null,
+    reviewedAt: e.created_at,
+    tagIds: (e.triage_event_tags ?? []).map((t) => t.tag_id),
+    quarantineIntent: e.quarantine_intent,
+  };
+}
+
+export async function fetchWeekPhotosForSenior(
+  supabase: SupabaseClient,
+  campWeekId: string,
+): Promise<SeniorWeekPhoto[]> {
+  const { data: photos, error } = await supabase
+    .from("photos")
+    .select("id, triage_state, thumbnail_url, image_url, caption, is_quarantined")
+    .eq("camp_week_id", campWeekId)
+    .in("triage_state", ["pending", "in_progress", "clean", "flagged", "deleted"])
+    .order("captured_at", { ascending: true });
+  if (error) throw error;
+
+  const rows = (photos ?? []) as Array<{
+    id: string;
+    triage_state: string;
+    thumbnail_url: string | null;
+    image_url: string | null;
+    caption: string | null;
+    is_quarantined: boolean;
+  }>;
+  if (rows.length === 0) return [];
+
+  const ids = rows.map((p) => p.id);
+  const { data: events, error: evErr } = await supabase
+    .from("triage_events")
+    .select(
+      "photo_id, kind, created_at, quarantine_intent, " +
+        "profiles ( full_name, email ), triage_event_tags ( tag_id )",
+    )
+    .in("photo_id", ids)
+    .in("kind", ["clean", "flag"])
+    .order("created_at", { ascending: false });
+  if (evErr) throw evErr;
+
+  const eventByPhoto = new Map<string, ReturnType<typeof mapReviewEvent>>();
+  for (const ev of (events ?? []) as unknown as ReviewEventRow[]) {
+    if (!eventByPhoto.has(ev.photo_id)) {
+      eventByPhoto.set(ev.photo_id, mapReviewEvent(ev));
+    }
+  }
+
+  return rows.map((p) => {
+    const review = eventByPhoto.get(p.id);
+    return {
+      id: p.id,
+      triageState: p.triage_state,
+      thumbnailUrl: p.thumbnail_url,
+      imageUrl: p.image_url,
+      caption: p.caption,
+      isQuarantined: p.is_quarantined,
+      reviewerName: review?.reviewerName ?? null,
+      reviewerEmail: review?.reviewerEmail ?? null,
+      reviewedAt: review?.reviewedAt ?? null,
+      tagIds: review?.tagIds ?? [],
+      quarantineIntent: review?.quarantineIntent ?? false,
+    };
+  });
 }
 
 export async function fetchFlaggedPhotosForWeek(
   supabase: SupabaseClient,
   campWeekId: string,
-): Promise<SeniorFlaggedPhoto[]> {
-  const { data: photos, error } = await supabase
-    .from("photos")
-    .select("id, thumbnail_url, image_url, caption, is_quarantined")
-    .eq("camp_week_id", campWeekId)
-    .eq("triage_state", "flagged")
-    .order("captured_at", { ascending: true });
-  if (error) throw error;
-
-  const ids = (photos ?? []).map((p) => (p as { id: string }).id);
-  if (ids.length === 0) return [];
-
-  const { data: events, error: evErr } = await supabase
-    .from("triage_events")
-    .select("id, photo_id, triage_event_tags ( tag_id )")
-    .in("photo_id", ids)
-    .eq("kind", "flag")
-    .order("created_at", { ascending: false });
-  if (evErr) throw evErr;
-
-  const tagsByPhoto = new Map<string, string[]>();
-  for (const ev of events ?? []) {
-    const e = ev as {
-      photo_id: string;
-      triage_event_tags: Array<{ tag_id: string }>;
-    };
-    if (!tagsByPhoto.has(e.photo_id)) {
-      tagsByPhoto.set(
-        e.photo_id,
-        (e.triage_event_tags ?? []).map((t) => t.tag_id),
-      );
-    }
-  }
-
-  return ((photos ?? []) as Array<{
-    id: string;
-    thumbnail_url: string | null;
-    image_url: string | null;
-    caption: string | null;
-    is_quarantined: boolean;
-  }>).map((p) => ({
-    id: p.id,
-    thumbnailUrl: p.thumbnail_url,
-    imageUrl: p.image_url,
-    caption: p.caption,
-    isQuarantined: p.is_quarantined,
-    tagIds: tagsByPhoto.get(p.id) ?? [],
-  }));
+): Promise<SeniorWeekPhoto[]> {
+  const all = await fetchWeekPhotosForSenior(supabase, campWeekId);
+  return all.filter((p) => p.triageState === "flagged");
 }
 
 export async function fetchCategoryRollup(

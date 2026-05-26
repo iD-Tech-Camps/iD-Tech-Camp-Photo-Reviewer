@@ -15,24 +15,11 @@ import {
 } from "@/lib/triage-claims";
 import { fetchTriageHubWeeks, fetchWeekPendingCount, type TriageHubWeek } from "@/lib/triage-hub";
 import { ReviewHubWeekSections } from "@/components/ReviewHubWeekSections";
-import {
-  fetchCategoryRollup,
-  fetchFlaggedPhotosForWeek,
-  fetchSeniorWeek,
-  type SeniorFlaggedPhoto,
-  type SeniorWeekSummary,
-} from "@/lib/triage-senior";
-import { signoffCampWeek, setPositiveAssessment } from "@/lib/triage-signoff";
-import {
-  fetchCampWeekSeniorTagIds,
-  setCampWeekSeniorTags,
-} from "@/lib/photo-rating-senior";
+import { SeniorWeekDashboard } from "@/components/screens/SeniorWeekDashboard";
 import {
   buildTagLabelLookup,
   fetchTags,
-  TAG_CATEGORY_LABELS,
   type Tag,
-  type TagCategory,
 } from "@/lib/tags";
 import { BatchPointsHud } from "@/components/BatchPointsHud";
 import { useFinishBatchFlow } from "@/components/FinishBatchFlow";
@@ -155,7 +142,7 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
 
   if (view.kind === "senior") {
     return (
-      <SeniorDashboard
+      <SeniorWeekDashboard
         toast={toast}
         supabase={supabase}
         campWeekId={view.campWeekId}
@@ -755,199 +742,5 @@ function Lightbox({
         </div>
       </div>
     </div>
-  );
-}
-
-export function SeniorDashboard({
-  toast,
-  supabase,
-  campWeekId,
-  tags,
-  weekSeniorTags,
-  onBack,
-}: {
-  toast: ToastApi;
-  supabase: ReturnType<typeof createClient>;
-  campWeekId: string;
-  tags: Tag[];
-  weekSeniorTags: Tag[];
-  onBack: () => void;
-}) {
-  const [week, setWeek] = React.useState<SeniorWeekSummary | null>(null);
-  const [flagged, setFlagged] = React.useState<SeniorFlaggedPhoto[]>([]);
-  const [rollup, setRollup] = React.useState<Record<TagCategory, number> | null>(null);
-  const [recheck, setRecheck] = React.useState(false);
-  const [selectedWeekTags, setSelectedWeekTags] = React.useState<string[]>([]);
-  const [weekTagsBusy, setWeekTagsBusy] = React.useState(false);
-  const labelLookup = buildTagLabelLookup(tags);
-
-  const reload = React.useCallback(async () => {
-    const [w, f, r, weekTagIds] = await Promise.all([
-      fetchSeniorWeek(supabase, campWeekId),
-      fetchFlaggedPhotosForWeek(supabase, campWeekId),
-      fetchCategoryRollup(supabase, campWeekId),
-      fetchCampWeekSeniorTagIds(supabase, campWeekId),
-    ]);
-    setWeek(w);
-    setFlagged(f);
-    setRollup(r);
-    setSelectedWeekTags(weekTagIds);
-    setRecheck(false);
-  }, [supabase, campWeekId]);
-
-  React.useEffect(() => { void reload(); }, [reload]);
-
-  const togglePositive = async (
-    field: "positiveGreatQuality" | "positiveGreatVariety" | "positiveShininessGreat",
-    value: boolean,
-  ) => {
-    if (!week) return;
-    const next = {
-      greatQuality: field === "positiveGreatQuality" ? value : week.positiveGreatQuality,
-      greatVariety: field === "positiveGreatVariety" ? value : week.positiveGreatVariety,
-      shininessGreat: field === "positiveShininessGreat" ? value : week.positiveShininessGreat,
-    };
-    try {
-      await setPositiveAssessment(
-        supabase, campWeekId, next.greatQuality, next.greatVariety, next.shininessGreat,
-      );
-      await reload();
-    } catch (err: unknown) {
-      toast.show(err instanceof Error ? err.message : "Update failed", "x");
-    }
-  };
-
-  const seniorAction = async (photoId: string, kind: string) => {
-    const res = await fetch("/api/triage/events/senior", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ photo_id: photoId, kind }),
-    });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error ?? "Action failed");
-    await reload();
-  };
-
-  const signoff = async () => {
-    try {
-      await signoffCampWeek(supabase, campWeekId, recheck && week?.triageRole === "first_week");
-      toast.show("Week approved", "check");
-      onBack();
-    } catch (err: unknown) {
-      toast.show(err instanceof Error ? err.message : "Approval failed", "x");
-    }
-  };
-
-  const toggleWeekTag = async (tagId: string) => {
-    const next = selectedWeekTags.includes(tagId)
-      ? selectedWeekTags.filter((id) => id !== tagId)
-      : [...selectedWeekTags, tagId];
-    setWeekTagsBusy(true);
-    try {
-      await setCampWeekSeniorTags(supabase, campWeekId, next);
-      setSelectedWeekTags(next);
-    } catch (err: unknown) {
-      toast.show(err instanceof Error ? err.message : "Couldn't update week tags", "x");
-    } finally {
-      setWeekTagsBusy(false);
-    }
-  };
-
-  if (!week || !rollup) return <div className="page-body">Loading review dashboard…</div>;
-
-  return (
-    <>
-      <PageHeader
-        eyebrow="Lead review · Camp week"
-        title={`${week.locationName} — ${week.name}`}
-        sub={WEEK_STATE_LABEL[week.triageState] ?? week.triageState}
-      />
-      <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <button type="button" className="btn btn-ghost" onClick={onBack}>← Back</button>
-
-        <div className="card">
-          <h3 className="card-title">Highlights</h3>
-          {[
-            ["Great Quality", "positiveGreatQuality", week.positiveGreatQuality],
-            ["Great Variety", "positiveGreatVariety", week.positiveGreatVariety],
-            ["Shininess Looks Great", "positiveShininessGreat", week.positiveShininessGreat],
-          ].map(([label, field, checked]) => (
-            <label key={field as string} style={{ display: "block", marginBottom: 8, fontSize: 13 }}>
-              <input
-                type="checkbox"
-                checked={checked as boolean}
-                onChange={(e) =>
-                  void togglePositive(field as "positiveGreatQuality", e.target.checked)
-                }
-              />{" "}
-              {label as string}
-            </label>
-          ))}
-        </div>
-
-        {weekSeniorTags.length > 0 && (
-          <div className="card">
-            <h3 className="card-title">Week assessment tags</h3>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {weekSeniorTags.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={"btn " + (selectedWeekTags.includes(t.id) ? "btn-primary" : "btn-ghost")}
-                  disabled={weekTagsBusy}
-                  onClick={() => void toggleWeekTag(t.id)}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="card">
-          <h3 className="card-title">Summary by category</h3>
-          <ul style={{ fontSize: 13, margin: 0, paddingLeft: 18 }}>
-            {(Object.keys(TAG_CATEGORY_LABELS) as TagCategory[]).map((cat) => (
-              <li key={cat}>{TAG_CATEGORY_LABELS[cat]}: {rollup[cat]}</li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="card">
-          <h3 className="card-title">Issues ({flagged.length})</h3>
-          {flagged.map((p) => (
-            <div key={p.id} style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "flex-start" }}>
-              <div style={{ position: "relative", width: 120, height: 80, flexShrink: 0, borderRadius: 6, overflow: "hidden" }}>
-                <PhotoImg src={p.thumbnailUrl ?? p.imageUrl} alt="" fit="cover" />
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 12, marginBottom: 6 }}>
-                  {(p.tagIds.map((id) => labelLookup(id))).join(", ") || "—"}
-                </div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <button type="button" className="btn btn-ghost" onClick={() => void seniorAction(p.id, "senior_delete")}>Delete</button>
-                  <button type="button" className="btn btn-ghost" onClick={() => void seniorAction(p.id, "senior_quarantine")}>Hide from parent view</button>
-                  {p.isQuarantined && (
-                    <button type="button" className="btn btn-ghost" onClick={() => void seniorAction(p.id, "senior_release_quarantine")}>Restore parent view</button>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="card">
-          {week.triageRole === "first_week" && (
-            <label style={{ display: "block", marginBottom: 12, fontSize: 13 }}>
-              <input type="checkbox" checked={recheck} onChange={(e) => setRecheck(e.target.checked)} />
-              {" "}Flag 2nd week for follow-up review on approval
-            </label>
-          )}
-          <button type="button" className="btn btn-primary" onClick={() => void signoff()}>
-            Approve week
-          </button>
-        </div>
-      </div>
-    </>
   );
 }
