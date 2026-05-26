@@ -19,6 +19,7 @@ import {
   fetchRatingWeekPendingCount,
   type PhotoRatingHubWeek,
 } from "@/lib/photo-rating-hub";
+import { ReviewHubWeekSections } from "@/components/ReviewHubWeekSections";
 import { buildTagLabelLookup, fetchTags, type Tag } from "@/lib/tags";
 import { smugmugVariantUrl } from "@/lib/smugmug/url-variants";
 import { BatchPointsHud } from "@/components/BatchPointsHud";
@@ -152,52 +153,60 @@ export function PhotoRatingApp({ toast }: { toast: ToastApi }) {
           </div>
         )}
 
-        {(weeks ?? []).map((w) => (
-          <div key={w.id} className="card" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontWeight: 600 }}>{w.locationName} — {w.name}</div>
-              <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                {[
-                  WEEK_ROLE_LABEL[w.ratingRole] || w.ratingRole,
-                  WEEK_STATE_LABEL[w.ratingState] || w.ratingState,
-                  `${w.pendingCount} pending`,
-                ].filter(Boolean).join(" · ")}
+        <ReviewHubWeekSections
+          weeks={weeks}
+          emptyMessage="No camp weeks need photo review right now."
+          renderWeek={(w, section) => (
+            <div className="card" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>{w.locationName} — {w.name}</div>
+                <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                  {section === "upcoming"
+                    ? [
+                        WEEK_ROLE_LABEL[w.ratingRole] || w.ratingRole,
+                        `Starts ${w.startsOn}`,
+                        "Awaiting photos",
+                      ].filter(Boolean).join(" · ")
+                    : [
+                        WEEK_ROLE_LABEL[w.ratingRole] || w.ratingRole,
+                        WEEK_STATE_LABEL[w.ratingState] || w.ratingState,
+                        `${w.pendingCount} pending`,
+                      ].filter(Boolean).join(" · ")}
+                </div>
               </div>
-            </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {(() => {
-                const startSize = batchSize === null
-                  ? Math.max(1, w.pendingCount)
-                  : Math.max(1, Math.min(batchSize, w.pendingCount));
-                return (
+              {section === "active" && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {(() => {
+                    const startSize = batchSize === null
+                      ? Math.max(1, w.pendingCount)
+                      : Math.max(1, Math.min(batchSize, w.pendingCount));
+                    return (
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => openClaim(w.id, startSize)}
+                        disabled={w.pendingCount === 0 || batchSize === null}
+                      >
+                        Start a batch ({w.pendingCount === 0 ? 0 : startSize})
+                      </button>
+                    );
+                  })()}
                   <button
                     type="button"
-                    className="btn btn-primary"
-                    onClick={() => openClaim(w.id, startSize)}
-                    disabled={w.pendingCount === 0 || batchSize === null}
+                    className="btn btn-ghost"
+                    onClick={async () => {
+                      const n = await fetchRatingWeekPendingCount(supabase, w.id);
+                      void openClaim(w.id, Math.max(1, n));
+                    }}
+                    disabled={w.pendingCount === 0}
                   >
-                    Start a batch ({w.pendingCount === 0 ? 0 : startSize})
+                    Whole week
                   </button>
-                );
-              })()}
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={async () => {
-                  const n = await fetchRatingWeekPendingCount(supabase, w.id);
-                  void openClaim(w.id, Math.max(1, n));
-                }}
-                disabled={w.pendingCount === 0}
-              >
-                Whole week
-              </button>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
-
-        {weeks !== null && weeks.length === 0 && (
-          <div className="card" style={{ color: "var(--ink-3)" }}>No camp weeks need photo review right now.</div>
-        )}
+          )}
+        />
       </div>
     </>
   );

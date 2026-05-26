@@ -14,6 +14,7 @@ import {
   type ClaimPhoto,
 } from "@/lib/triage-claims";
 import { fetchTriageHubWeeks, fetchWeekPendingCount, type TriageHubWeek } from "@/lib/triage-hub";
+import { ReviewHubWeekSections } from "@/components/ReviewHubWeekSections";
 import {
   fetchCategoryRollup,
   fetchFlaggedPhotosForWeek,
@@ -194,68 +195,70 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
           </div>
         )}
 
-        {(weeks ?? []).map((w) => (
-          <div key={w.id} className="card" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ fontWeight: 600 }}>{w.locationName} — {w.name}</div>
-              <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                {[
-                  WEEK_ROLE_LABEL[w.triageRole] || w.triageRole,
-                  WEEK_STATE_LABEL[w.triageState] || w.triageState,
-                  `${w.pendingCount} pending`,
-                ].filter(Boolean).join(" · ")}
+        <ReviewHubWeekSections
+          weeks={weeks}
+          emptyMessage="No camp weeks need review right now."
+          renderWeek={(w, section) => (
+            <div className="card" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>{w.locationName} — {w.name}</div>
+                <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                  {section === "upcoming"
+                    ? [
+                        WEEK_ROLE_LABEL[w.triageRole] || w.triageRole,
+                        `Starts ${w.startsOn}`,
+                        "Awaiting photos",
+                      ].filter(Boolean).join(" · ")
+                    : [
+                        WEEK_ROLE_LABEL[w.triageRole] || w.triageRole,
+                        WEEK_STATE_LABEL[w.triageState] || w.triageState,
+                        `${w.pendingCount} pending`,
+                      ].filter(Boolean).join(" · ")}
+                </div>
               </div>
-            </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {(() => {
-                // Clamp the batch size to what's actually pending, so the
-                // claim's recorded slice_size matches the photos it'll
-                // receive (the DB trigger does `limit slice_size` anyway,
-                // but recording the over-asked value would confuse later
-                // analytics). Falls back to pendingCount only while the
-                // config is still loading — the button is disabled then.
-                const startSize = batchSize === null
-                  ? Math.max(1, w.pendingCount)
-                  : Math.max(1, Math.min(batchSize, w.pendingCount));
-                return (
+              {section === "active" && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {(() => {
+                    const startSize = batchSize === null
+                      ? Math.max(1, w.pendingCount)
+                      : Math.max(1, Math.min(batchSize, w.pendingCount));
+                    return (
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => openClaim(w.id, startSize)}
+                        disabled={w.pendingCount === 0 || batchSize === null}
+                      >
+                        Start a batch ({w.pendingCount === 0 ? 0 : startSize})
+                      </button>
+                    );
+                  })()}
                   <button
                     type="button"
-                    className="btn btn-primary"
-                    onClick={() => openClaim(w.id, startSize)}
-                    disabled={w.pendingCount === 0 || batchSize === null}
+                    className="btn btn-ghost"
+                    onClick={async () => {
+                      const n = await fetchWeekPendingCount(supabase, w.id);
+                      void openClaim(w.id, Math.max(1, n));
+                    }}
+                    disabled={w.pendingCount === 0}
                   >
-                    Start a batch ({w.pendingCount === 0 ? 0 : startSize})
+                    Whole week
                   </button>
-                );
-              })()}
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={async () => {
-                  const n = await fetchWeekPendingCount(supabase, w.id);
-                  void openClaim(w.id, Math.max(1, n));
-                }}
-                disabled={w.pendingCount === 0}
-              >
-                Whole week
-              </button>
-              {(role === "senior" || role === "admin") &&
-                ["triage_done", "senior_review"].includes(w.triageState) && (
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => setView({ kind: "senior", campWeekId: w.id })}
-                >
-                  Lead review
-                </button>
+                  {(role === "senior" || role === "admin") &&
+                    ["triage_done", "senior_review"].includes(w.triageState) && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => setView({ kind: "senior", campWeekId: w.id })}
+                    >
+                      Lead review
+                    </button>
+                  )}
+                </div>
               )}
             </div>
-          </div>
-        ))}
-
-        {weeks !== null && weeks.length === 0 && (
-          <div className="card" style={{ color: "var(--ink-3)" }}>No camp weeks need review right now.</div>
-        )}
+          )}
+        />
       </div>
     </>
   );

@@ -7,6 +7,8 @@ export type PhotoRatingHubWeek = {
   ratingRole: string;
   ratingState: string;
   startsOn: string;
+  endsOn: string;
+  photoCount: number;
   pendingCount: number;
   inProgressCount: number;
 };
@@ -17,7 +19,7 @@ export async function fetchPhotoRatingHubWeeks(
   const { data, error } = await supabase
     .from("camp_weeks")
     .select(
-      "id, name, starts_on, rating_role, rating_state, " +
+      "id, name, starts_on, ends_on, rating_role, rating_state, " +
         "locations!inner ( name ), photos ( rating_state )",
     )
     .not("rating_state", "in", '("not_required","complete")')
@@ -28,6 +30,7 @@ export async function fetchPhotoRatingHubWeeks(
     id: string;
     name: string;
     starts_on: string;
+    ends_on: string;
     rating_role: string;
     rating_state: string;
     locations: { name: string } | null;
@@ -43,6 +46,8 @@ export async function fetchPhotoRatingHubWeeks(
       ratingRole: w.rating_role,
       ratingState: w.rating_state,
       startsOn: w.starts_on,
+      endsOn: w.ends_on,
+      photoCount: photos.length,
       pendingCount: photos.filter((p) => p.rating_state === "pending").length,
       inProgressCount: photos.filter((p) => p.rating_state === "in_progress").length,
     };

@@ -7,6 +7,8 @@ export type TriageHubWeek = {
   triageRole: string;
   triageState: string;
   startsOn: string;
+  endsOn: string;
+  photoCount: number;
   pendingCount: number;
   inProgressCount: number;
 };
@@ -17,7 +19,7 @@ export async function fetchTriageHubWeeks(
   const { data, error } = await supabase
     .from("camp_weeks")
     .select(
-      "id, name, starts_on, triage_role, triage_state, " +
+      "id, name, starts_on, ends_on, triage_role, triage_state, " +
         "locations!inner ( name ), photos ( triage_state )",
     )
     .not("triage_state", "in", '("not_required","complete")')
@@ -28,6 +30,7 @@ export async function fetchTriageHubWeeks(
     id: string;
     name: string;
     starts_on: string;
+    ends_on: string;
     triage_role: string;
     triage_state: string;
     locations: { name: string } | null;
@@ -43,6 +46,8 @@ export async function fetchTriageHubWeeks(
       triageRole: w.triage_role,
       triageState: w.triage_state,
       startsOn: w.starts_on,
+      endsOn: w.ends_on,
+      photoCount: photos.length,
       pendingCount: photos.filter((p) => p.triage_state === "pending").length,
       inProgressCount: photos.filter((p) => p.triage_state === "in_progress").length,
     };
