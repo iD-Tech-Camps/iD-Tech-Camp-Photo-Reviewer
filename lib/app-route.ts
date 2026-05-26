@@ -4,6 +4,26 @@ import React from "react";
 
 export const SCREEN_PARAM = "s";
 
+/** Internal screen id → URL slug (only where they differ). */
+const SCREEN_TO_URL_SLUG: Record<string, string> = {
+  triage: "camp-quality",
+};
+
+/** URL slug → internal screen id. Includes legacy aliases. */
+const URL_SLUG_TO_SCREEN: Record<string, string> = {
+  "camp-quality": "triage",
+  triage: "triage",
+};
+
+export function screenToUrlSlug(screen: string): string {
+  return SCREEN_TO_URL_SLUG[screen] ?? screen;
+}
+
+export function urlSlugToScreen(slug: string | null): string | null {
+  if (!slug) return null;
+  return URL_SLUG_TO_SCREEN[slug] ?? slug;
+}
+
 export const SUBVIEW_PARAMS = {
   week: "week",
   claim: "claim",
@@ -30,7 +50,7 @@ export function getScreenFromUrl(): string | null {
 
 export function syncScreenToUrl(screen: string) {
   replaceSearchParams((p) => {
-    p.set(SCREEN_PARAM, screen);
+    p.set(SCREEN_PARAM, screenToUrlSlug(screen));
     for (const key of Object.values(SUBVIEW_PARAMS)) {
       p.delete(key);
     }
@@ -75,7 +95,7 @@ export function parseTriageViewFromUrl(): TriageView | null {
 
 export function writeTriageViewToUrl(view: TriageView) {
   replaceSearchParams((p) => {
-    p.set(SCREEN_PARAM, "triage");
+    p.set(SCREEN_PARAM, screenToUrlSlug("triage"));
     p.delete(SUBVIEW_PARAMS.claim);
     p.delete(SUBVIEW_PARAMS.week);
     p.delete(SUBVIEW_PARAMS.lead);
@@ -137,7 +157,7 @@ export function resolvePersistedScreen(
   validScreens: readonly string[],
   savedScreen: string | null,
 ): string {
-  const fromUrl = params.get(SCREEN_PARAM);
+  const fromUrl = urlSlugToScreen(params.get(SCREEN_PARAM));
   if (fromUrl && validScreens.includes(fromUrl)) return fromUrl;
   const inferred = inferScreenFromSubViewParams(params);
   if (inferred && validScreens.includes(inferred)) return inferred;
