@@ -4,6 +4,7 @@ import { listAlbumImages } from "../albums";
 import { getAlbumKeyForNode } from "../nodes";
 import type { SmugMugImage } from "../types";
 import { mapWithConcurrency } from "./concurrency";
+import { runFolderSync, type FolderSyncResult } from "./folders";
 
 /**
  * Step 8.4 — photo enumeration + scheduled sync core.
@@ -11,7 +12,9 @@ import { mapWithConcurrency } from "./concurrency";
  * `runPhotoSync` is the single entry point used by both the manual
  * `/api/smugmug/sync-now` route (admin-gated) and the scheduled
  * `/api/smugmug/sync-scheduled` route (Vercel Cron + CRON_SECRET). It
- * walks every in-scope camp week under a `synced=true` division,
+ * runs in two stages: a folder-discovery pass (`runFolderSync`) that
+ * picks up new divisions/locations/weeks on SmugMug, then a photo pass
+ * that walks every in-scope camp week under a `synced=true` division,
  * enumerates each album's images via the SmugMug API, and reconciles
  * them into `public.photos` according to spec/TRIAGE_SPEC.md §0:
  *
@@ -59,6 +62,8 @@ export interface PhotoSyncResult {
   photosRemoved: number;
   errorSummary: string | null;
   perWeekErrors: Array<{ campWeekId: string; smugmugFolderId: string; message: string }>;
+  folderSync: FolderSyncResult | null;
+  folderSyncError: string | null;
 }
 
 interface TriageConfigRow {
@@ -124,19 +129,32 @@ export async function runPhotoSync(
   let photosAdded = 0;
   let photosUpdated = 0;
   let photosRemoved = 0;
-  let errorSummary: string | null = null;
   const perWeekErrors: PhotoSyncResult["perWeekErrors"] = [];
+  let folderSync: FolderSyncResult | null = null;
+  let folderSyncError: string | null = null;
+  let photoStageError: string | null = null;
+
+  // 2. Discover new divisions/locations/weeks on SmugMug before walking
+  //    photos, so this run picks up newly-added weeks instead of waiting
+  //    one cycle. Soft-failure: if folder discovery throws, log it and
+  //    still attempt the photo pass against whatever weeks exist in DB.
+  try {
+    folderSync = await runFolderSync(supabase);
+  } catch (err) {
+    folderSyncError = err instanceof Error ? err.message : String(err);
+    status = "partial";
+  }
 
   try {
-    // 2. Read config + compute the date cutoff.
+    // 3. Read config + compute the date cutoff.
     const cutoffDate = await fetchSyncCutoffDate(supabase);
 
-    // 3. Resolve in-scope weeks.
+    // 4. Resolve in-scope weeks.
     const weeks = await fetchInScopeWeeks(supabase, cutoffDate);
     weeksInScope = weeks.length;
     scope = { cutoffDate, weekCount: weeks.length };
 
-    // 4. Walk + reconcile each week, bounded in-flight.
+    // 5. Walk + reconcile each week, bounded in-flight.
     const perWeekResults = await mapWithConcurrency(
       weeks,
       WEEK_CONCURRENCY,
@@ -164,15 +182,20 @@ export async function runPhotoSync(
 
     if (perWeekErrors.length > 0) {
       status = "partial";
-      errorSummary =
+      photoStageError =
         `${perWeekErrors.length} week(s) failed; first error: ${perWeekErrors[0].message}`;
     }
   } catch (err) {
     status = "failed";
-    errorSummary = err instanceof Error ? err.message : String(err);
+    photoStageError = err instanceof Error ? err.message : String(err);
   }
 
-  // 5. Finalize sync_log with terminal state.
+  const summaryParts: string[] = [];
+  if (folderSyncError) summaryParts.push(`folder discovery: ${folderSyncError}`);
+  if (photoStageError) summaryParts.push(photoStageError);
+  const errorSummary: string | null = summaryParts.length > 0 ? summaryParts.join(" | ") : null;
+
+  // 6. Finalize sync_log with terminal state.
   await finalizeSyncLog(supabase, syncLogId, {
     status,
     weeks_in_scope: weeksInScope,
@@ -194,6 +217,8 @@ export async function runPhotoSync(
     photosRemoved,
     errorSummary,
     perWeekErrors,
+    folderSync,
+    folderSyncError,
   };
 }
 
