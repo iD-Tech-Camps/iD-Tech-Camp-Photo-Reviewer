@@ -114,9 +114,6 @@ export function SeniorWeekDashboard({
     [photos, photoFilter],
   );
 
-  const flaggedCount = photos.filter((p) => p.triageState === "flagged").length;
-  const canApprove = !readOnly && flaggedCount === 0;
-
   const togglePositive = async (
     field: "positiveGreatQuality" | "positiveGreatVariety" | "positiveShininessGreat",
     value: boolean,
@@ -157,13 +154,13 @@ export function SeniorWeekDashboard({
   };
 
   const signoff = async () => {
-    if (!canApprove) return;
+    if (readOnly) return;
     try {
       await signoffCampWeek(supabase, campWeekId, recheck && week?.triageRole === "first_week");
-      toast.show("Week approved", "check");
+      toast.show("Review finished", "check");
       onBack();
     } catch (err: unknown) {
-      toast.show(err instanceof Error ? err.message : "Approval failed", "x");
+      toast.show(err instanceof Error ? err.message : "Couldn't finish review", "x");
     }
   };
 
@@ -295,23 +292,16 @@ export function SeniorWeekDashboard({
               {week.triageRole === "first_week" && (
                 <label style={{ display: "block", marginBottom: 12, fontSize: 13 }}>
                   <input type="checkbox" checked={recheck} onChange={(e) => setRecheck(e.target.checked)} />
-                  {" "}Flag 2nd week for follow-up review on approval
+                  {" "}Flag 2nd week for follow-up review when finished
                 </label>
               )}
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={!canApprove}
                 onClick={() => void signoff()}
               >
-                Approve week
+                Finish Review
               </button>
-              {flaggedCount > 0 && (
-                <div style={{ fontSize: 12, color: "var(--rose)", marginTop: 8 }}>
-                  Resolve {flaggedCount} open issue{flaggedCount === 1 ? "" : "s"} before approving
-                  (unflag, delete, or hide each flagged photo).
-                </div>
-              )}
             </section>
           )}
         </div>
