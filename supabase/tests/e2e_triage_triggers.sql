@@ -121,30 +121,11 @@ begin
 
   raise notice 'scenario 3 OK: recompute';
 
-  -- ── 4. Signoff side effect → second_week_recheck ─────────────────────
-  update public.camp_weeks
-  set triage_role = 'none', triage_state = 'not_required',
-      signoff_at = null, recheck_flagged_at = null
-  where id in (v_week1, v_week2);
-
-  update public.camp_weeks set triage_role = 'first_week' where id = v_week1;
-  update public.camp_weeks set triage_state = 'triage_done' where id = v_week1;
-  update public.camp_weeks set triage_role = 'none', triage_state = 'not_required' where id = v_week2;
-
-  perform set_config('request.jwt.claim.sub', 'eeeeeeee-1111-1111-1111-111111111101', true);
-  perform public.triage_signoff_camp_week(v_week1, true);
-
-  select triage_role into v_role from public.camp_weeks where id = v_week2;
-  if v_role <> 'second_week_recheck' then
-    raise exception 'signoff: sibling should be second_week_recheck, got %', v_role;
-  end if;
-
-  select triage_state into v_state from public.camp_weeks where id = v_week1;
-  if v_state <> 'complete' then
-    raise exception 'signoff: week1 should be complete, got %', v_state;
-  end if;
-
-  raise notice 'scenario 4 OK: signoff side effect';
+  -- Scenario 4 (signoff side effect → second_week_recheck) intentionally
+  -- removed after the location-approval refactor. The per-camp-week signoff
+  -- flow no longer assigns 'complete' nor flips a sibling week to
+  -- second_week_recheck. Approval-level contract tests live in
+  -- supabase/tests/e2e_location_approval.sql.
 end;
 $$;
 

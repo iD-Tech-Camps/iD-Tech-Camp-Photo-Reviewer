@@ -1,5 +1,5 @@
 import "../auth-mock";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { setMockAuth } from "../auth-mock";
 import { seed, service, teardown, type Fixture } from "../fixtures";
 
@@ -100,5 +100,91 @@ describe("POST /api/triage/events", () => {
       .eq("id", fixture.photoIds[3])
       .single();
     expect(photo?.is_quarantined).toBe(true);
+  });
+});
+
+describe("POST /api/triage/events — location-approval grace window", () => {
+  let gracePhotoId: string;
+
+  beforeEach(async () => {
+    setMockAuth({ kind: "unauthenticated" });
+
+    const supabase = service();
+
+    // Clean approval rows + give the test a fresh pending photo each run.
+    await supabase
+      .from("location_approvals")
+      .delete()
+      .eq("location_id", fixture.locationId);
+
+    const { data: newPhoto, error } = await supabase
+      .from("photos")
+      .insert({
+        camp_week_id: fixture.campWeekId,
+        smugmug_image_id: `${fixture.prefix}-grace-${Date.now()}-${Math.random()}`,
+      })
+      .select("id")
+      .single();
+    if (error || !newPhoto) throw new Error(`grace photo seed: ${error?.message ?? "no row"}`);
+    gracePhotoId = newPhoto.id;
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    const supabase = service();
+    await supabase
+      .from("location_approvals")
+      .delete()
+      .eq("location_id", fixture.locationId);
+    await supabase.from("photos").delete().eq("id", gracePhotoId);
+  });
+
+  it("accepts an event inside the 60s window with location_approved_during_batch=true", async () => {
+    const supabase = service();
+    const { data: approval } = await supabase
+      .from("location_approvals")
+      .insert({
+        location_id: fixture.locationId,
+        season_start: "2026-05-24",
+        approved_by: fixture.senior.id,
+      })
+      .select("approved_at")
+      .single();
+    expect(approval?.approved_at).toBeTruthy();
+
+    // Pin "now" to 30s after the approval — well within the 60s window.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(new Date(approval!.approved_at).getTime() + 30_000));
+
+    setMockAuth({ kind: "user", userId: fixture.reviewer.id, role: "reviewer" });
+    const res = await postEvent({ photo_id: gracePhotoId, kind: "clean" });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.eventId).toBeTruthy();
+    expect(json.location_approved_during_batch).toBe(true);
+  });
+
+  it("rejects an event past the 60s window with 410", async () => {
+    const supabase = service();
+    const { data: approval } = await supabase
+      .from("location_approvals")
+      .insert({
+        location_id: fixture.locationId,
+        season_start: "2026-05-24",
+        approved_by: fixture.senior.id,
+      })
+      .select("approved_at")
+      .single();
+    expect(approval?.approved_at).toBeTruthy();
+
+    // 90s past approval — outside the grace window.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(new Date(approval!.approved_at).getTime() + 90_000));
+
+    setMockAuth({ kind: "user", userId: fixture.reviewer.id, role: "reviewer" });
+    const res = await postEvent({ photo_id: gracePhotoId, kind: "clean" });
+    expect(res.status).toBe(410);
+    const json = await res.json();
+    expect(json.error).toBe("location_approved");
   });
 });

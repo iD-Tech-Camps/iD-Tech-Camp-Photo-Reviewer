@@ -27,6 +27,27 @@ export async function POST(request: Request) {
     );
   }
 
+  // Reject claims at approved locations up front so reviewers don't end up
+  // with a zero-photo claim (the stamp trigger filters them out, but the
+  // empty result is confusing UX).
+  const { data: week } = await auth.supabase
+    .from("camp_weeks")
+    .select("location_id")
+    .eq("id", campWeekId)
+    .single<{ location_id: string }>();
+
+  if (week) {
+    const { data: approved } = await auth.supabase.rpc("is_location_approved", {
+      p_location_id: week.location_id,
+    });
+    if (approved === true) {
+      return NextResponse.json(
+        { error: "location_approved", message: "Location is approved; no triage needed." },
+        { status: 409 },
+      );
+    }
+  }
+
   const { data, error } = await auth.supabase
     .from("triage_claims")
     .insert({

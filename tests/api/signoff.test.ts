@@ -10,9 +10,11 @@ beforeAll(async () => {
 
   const supabase = service();
 
-  // Claim the batch first so the camp_week transitions photos_in →
-  // triage_in_progress. Without this the per-photo clean events leave the
-  // week stuck at photos_in and signoff's WHERE clause rejects it.
+  // Claim + clean every photo so the week recomputes to triage_done. The new
+  // shim doesn't require the week to be in triage_done (it writes the
+  // location-level approval regardless), but doing this keeps the signoff_at
+  // dual-write assertion meaningful since the legacy column write only
+  // succeeds when signoff_at is null.
   const { error: claimErr } = await supabase.from("triage_claims").insert({
     camp_week_id: fixture.campWeekId,
     reviewer_id: fixture.reviewer.id,
@@ -20,9 +22,6 @@ beforeAll(async () => {
   });
   if (claimErr) throw new Error(`seed triage_claim: ${claimErr.message}`);
 
-  // Mark every photo clean so the week recomputes to triage_done and is
-  // ready for signoff. The check constraint forbids quarantine_intent=true
-  // on clean events; leave it false.
   for (const photoId of fixture.photoIds) {
     await supabase.from("triage_events").insert({
       photo_id: photoId,
@@ -52,7 +51,7 @@ async function postSignoff(body: unknown): Promise<Response> {
   );
 }
 
-describe("POST /api/triage/signoff", () => {
+describe("POST /api/triage/signoff (dual-write shim)", () => {
   it("rejects unauthenticated callers with 401", async () => {
     const res = await postSignoff({ camp_week_id: fixture.campWeekId });
     expect(res.status).toBe(401);
@@ -70,29 +69,40 @@ describe("POST /api/triage/signoff", () => {
     expect(res.status).toBe(400);
   });
 
-  it("signoff sets the week to complete", async () => {
-    // Pass email so the mock returns a JWT-authed client — the
-    // triage_signoff_camp_week RPC's is_senior_or_admin() guard reads
-    // auth.uid(), which is null for service-role clients.
+  it("dual-writes location_approvals + legacy signoff columns", async () => {
     setMockAuth({
       kind: "user",
       userId: fixture.senior.id,
       role: "senior",
       email: fixture.senior.email,
     });
+
     const res = await postSignoff({
       camp_week_id: fixture.campWeekId,
       flag_second_week_recheck: false,
     });
     expect(res.status).toBe(200);
 
-    const { data } = await service()
+    const supabase = service();
+
+    // 1. Legacy: camp_weeks.signoff_at / signoff_by populated.
+    const { data: week } = await supabase
       .from("camp_weeks")
-      .select("triage_state, signoff_by, signoff_at")
+      .select("signoff_by, signoff_at")
       .eq("id", fixture.campWeekId)
       .single();
-    expect(data?.triage_state).toBe("complete");
-    expect(data?.signoff_by).toBe(fixture.senior.id);
-    expect(data?.signoff_at).toBeTruthy();
+    expect(week?.signoff_by).toBe(fixture.senior.id);
+    expect(week?.signoff_at).toBeTruthy();
+
+    // 2. New model: a location_approvals row exists for this location.
+    const { data: approval } = await supabase
+      .from("location_approvals")
+      .select("location_id, approved_by, revoked_at")
+      .eq("location_id", fixture.locationId)
+      .is("revoked_at", null)
+      .single();
+    expect(approval?.location_id).toBe(fixture.locationId);
+    expect(approval?.approved_by).toBe(fixture.senior.id);
+    expect(approval?.revoked_at).toBeNull();
   });
 });
