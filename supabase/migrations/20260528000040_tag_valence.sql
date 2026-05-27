@@ -41,7 +41,19 @@ update public.tags
    set category = null
  where not ('quality_flag' = any(purposes));
 
--- 3. Constraints couple valence to purpose:
+-- 3. One-time cleanup: prior seeds gave some tags both 'quality_flag' and
+--    'photo_rating'. Under the new rules those purposes are mutually
+--    exclusive (one is negative-only, the other positive-only). Keep
+--    'quality_flag' since the affected tags ('blurry-photos', etc.) are
+--    negative issues, and drop 'photo_rating'. Historical
+--    photo_rating_event_tags rows are unaffected.
+
+update public.tags
+   set purposes = array_remove(purposes, 'photo_rating')
+ where 'quality_flag' = any(purposes)
+   and 'photo_rating' = any(purposes);
+
+-- 4. Constraints couple valence to purpose:
 --    - quality_flag in purposes  ⇒ valence must be 'negative'
 --    - photo_rating in purposes  ⇒ valence must be 'positive'
 --    - quality_flag and photo_rating can't both be in purposes (no valid valence)
