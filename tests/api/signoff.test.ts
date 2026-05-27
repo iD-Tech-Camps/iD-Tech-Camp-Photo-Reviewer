@@ -8,10 +8,21 @@ let fixture: Fixture;
 beforeAll(async () => {
   fixture = await seed({ photos: 2, tags: 1 });
 
-  // Mark every photo clean so the week is `triage_done` and ready for
-  // signoff. The check constraint forbids quarantine_intent=true on
-  // clean events; leave it false.
   const supabase = service();
+
+  // Claim the batch first so the camp_week transitions photos_in →
+  // triage_in_progress. Without this the per-photo clean events leave the
+  // week stuck at photos_in and signoff's WHERE clause rejects it.
+  const { error: claimErr } = await supabase.from("triage_claims").insert({
+    camp_week_id: fixture.campWeekId,
+    reviewer_id: fixture.reviewer.id,
+    slice_size: fixture.photoIds.length,
+  });
+  if (claimErr) throw new Error(`seed triage_claim: ${claimErr.message}`);
+
+  // Mark every photo clean so the week recomputes to triage_done and is
+  // ready for signoff. The check constraint forbids quarantine_intent=true
+  // on clean events; leave it false.
   for (const photoId of fixture.photoIds) {
     await supabase.from("triage_events").insert({
       photo_id: photoId,
@@ -60,7 +71,15 @@ describe("POST /api/triage/signoff", () => {
   });
 
   it("signoff sets the week to complete", async () => {
-    setMockAuth({ kind: "user", userId: fixture.senior.id, role: "senior" });
+    // Pass email so the mock returns a JWT-authed client — the
+    // triage_signoff_camp_week RPC's is_senior_or_admin() guard reads
+    // auth.uid(), which is null for service-role clients.
+    setMockAuth({
+      kind: "user",
+      userId: fixture.senior.id,
+      role: "senior",
+      email: fixture.senior.email,
+    });
     const res = await postSignoff({
       camp_week_id: fixture.campWeekId,
       flag_second_week_recheck: false,

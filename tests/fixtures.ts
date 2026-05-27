@@ -1,12 +1,33 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
 
+export const FIXTURE_USER_PASSWORD = "vitest-pw-vitest-pw";
+
 export function service(): SupabaseClient {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { persistSession: false, autoRefreshToken: false } },
   );
+}
+
+// Build a Supabase client signed in as the given fixture user, so RPCs that
+// check `auth.uid()` (e.g. is_senior_or_admin) see the right identity.
+// Cached per-email for the suite lifetime; safe because the email + password
+// are constants for the run.
+const authedClientCache = new Map<string, SupabaseClient>();
+export async function authedClientFor(email: string): Promise<SupabaseClient> {
+  const cached = authedClientCache.get(email);
+  if (cached) return cached;
+  const client = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  const { error } = await client.auth.signInWithPassword({ email, password: FIXTURE_USER_PASSWORD });
+  if (error) throw new Error(`authedClientFor(${email}): ${error.message}`);
+  authedClientCache.set(email, client);
+  return client;
 }
 
 export type FixtureUser = { id: string; email: string; role: "reviewer" | "senior" | "admin" };
@@ -132,7 +153,7 @@ async function ensureUser(
 ): Promise<FixtureUser> {
   const { data, error } = await supabase.auth.admin.createUser({
     email,
-    password: "vitest-pw-vitest-pw",
+    password: FIXTURE_USER_PASSWORD,
     email_confirm: true,
   });
   if (error || !data.user) {

@@ -116,6 +116,16 @@ begin
 
   -- ── 3. Orphan delete with triage preservation filter ─────────────
   -- Mirrors fetchProtectedOrphanIds + delete in lib/smugmug/sync/photos.ts.
+  -- The BEFORE-INSERT trigger on public.photos forces triage_state='pending'
+  -- when the camp_week's triage_role is first_week/second_week_recheck, which
+  -- the test weeks above satisfy. The orphan-delete filter we're exercising
+  -- only fires on photos that *are* in the not_required state, so put them
+  -- there explicitly before testing the filter.
+  update public.photos
+     set triage_state = 'not_required'
+   where camp_week_id = v_week_a
+     and smugmug_image_id in ('e2e-sync-img-2', 'e2e-sync-img-3');
+
   with orphans as (
     select id, triage_state from public.photos
     where camp_week_id = v_week_a

@@ -12,9 +12,11 @@ declare
   v_events_after int;
   v_ledger_after int;
 begin
+  -- 12 quality_flag negatives + 2 week_senior positives (great-quality-week,
+  -- great-variety-week, added by migration 40).
   select count(*) into v_tag_count from public.tags where active = true;
-  if v_tag_count <> 12 then
-    raise exception 'expected 12 active tags, got %', v_tag_count;
+  if v_tag_count <> 14 then
+    raise exception 'expected 14 active tags, got %', v_tag_count;
   end if;
 
   select count(*) into v_cfg from public.triage_config where id = 1;
