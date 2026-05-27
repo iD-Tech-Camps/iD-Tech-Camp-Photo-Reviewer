@@ -261,7 +261,7 @@ export function AdminTags() {
   };
 
   const renderChipRow = (list: Tag[]) => (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
       {list.map((t) => {
         if (editingId === t.id) {
           return (
