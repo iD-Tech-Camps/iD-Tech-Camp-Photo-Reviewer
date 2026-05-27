@@ -1,5 +1,7 @@
 # Triage Spec — Schema, State Machines, Triggers, Surfaces
 
+> **Superseded in part by [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md) (2026-05).** The per-camp-week signoff flow described here (states `senior_review` / `complete`, the recheck-flagged sibling-week side effect, the Tuesday sample burst) is replaced by per-location, per-season approval. Sections affected are marked **DEPRECATED** inline; the original text is retained so git blame and onboarding readers can follow the evolution. Triage state machine up to and including `triage_done` is unchanged; everything after `triage_done` now lives in `LOCATION_APPROVAL_SPEC.md`.
+
 ## 0. Framing
 
 This document is the full design for the triage-first refactor and the contract the triage implementation follows.
@@ -67,15 +69,17 @@ flowchart LR
 
 ### 2a. Unified camp-week state machine
 
+> **DEPRECATED post location-approval refactor:** `senior_review` and `complete` are no longer assigned by triggers. The `triage_done → senior_review → complete` arc and the "late photo reopens" transitions out of those states are retired. Enum values are retained for historical rows. Approval lives on `locations`, not `camp_weeks` — see [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md) §2. The state machine below is the **pre-refactor** contract.
+
 Seven states on `camp_weeks.triage_state`:
 
 - **`not_required`** — default. Weeks 3+ at every location, and 2nd weeks that haven't been flagged for recheck. No surface in the triage hub.
 - **`awaiting_photos`** — 1st week or recheck-flagged 2nd week with no photos yet synced.
 - **`photos_in`** — same as above, with at least one photo present; no reviewer has claimed yet.
 - **`triage_in_progress`** — at least one active claim OR at least one photo in `pending`/`in_progress`.
-- **`triage_done`** — every photo in this week is in a terminal state (`clean`/`flagged`/`deleted`). Awaiting senior.
-- **`senior_review`** — senior has taken at least one action (per-photo action, positive assessment toggle) but has not yet signed off. Distinct from `triage_done` so the dashboard widget can split "X awaiting senior · Y already under senior review."
-- **`complete`** — senior signoff recorded. Terminal.
+- **`triage_done`** — every photo in this week is in a terminal state (`clean`/`flagged`/`deleted`). Awaiting senior. **(Post-refactor: terminal state in practice; approval gates further progression at the location level.)**
+- **`senior_review`** — senior has taken at least one action (per-photo action, positive assessment toggle) but has not yet signed off. Distinct from `triage_done` so the dashboard widget can split "X awaiting senior · Y already under senior review." **(Post-refactor: no longer assigned.)**
+- **`complete`** — senior signoff recorded. Terminal. **(Post-refactor: no longer assigned. Historical rows that hold this value are left intact.)**
 
 `camp_weeks.triage_role` is one of:
 
@@ -415,6 +419,8 @@ NEW.triage_role := role;
 
 ### 4f. `camp_weeks` signoff side effects
 
+> **DEPRECATED post location-approval refactor.** Both triggers below are dropped in migration 43. The `senior_review` state transition and the recheck-sibling side effect no longer exist; approval has no sibling-week side effects in the new model. See [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md) §4d. The original spec is preserved below.
+
 **`tg_camp_weeks_after_update_first_senior_touch`** — when week `triage_done` and first senior action (positive checkbox or senior event), → `senior_review`, stamp `senior_review_started_at`.
 
 **`tg_camp_weeks_after_update_signoff`** — when `signoff_at` NULL→set: `complete`. If recheck flagged on **first_week**: locate **2nd sibling** — same `location_id`, **`starts_on` = minimal value strictly greater than 1st week’s `starts_on`, tie-break `id ASC`** (Q2). Set sibling `triage_role = 'second_week_recheck'` if was `none`; fanout handles photos. Conflicting sibling state → raise exception.
@@ -435,6 +441,8 @@ Released rows trigger §4d revert automatically.
 ---
 
 ## 5. Sampler algorithm — Tuesday burst
+
+> **DEPRECATED post location-approval refactor.** In the new model there is no queue to sample — every photo at an unapproved location is in scope, every photo at an approved location is `not_required`. The route, the cron, the `sampled_for_burst` column, and the `triage_config.sample_burst_*` columns are dropped in phase 4 of the refactor. The section is preserved unchanged below for historical reference. See [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md) §5c for the replacement queue ordering.
 
 **Schedule:** [`vercel.json`](vercel.json) invokes **`/api/triage/sample-burst`** on **`0 19 * * 2`** (Tuesday 19:00 UTC). Defaults in **`triage_config`** (`sample_burst_dow = 2`, **`sample_burst_hour = 19`**) align with that cron.
 
@@ -485,13 +493,16 @@ Under `app/api/triage/` (and admin helpers). Mutations follow existing SmugMug p
 
 | Route | Method | Auth | Notes |
 |---|---|---|---|
-| `/api/triage/claims` | POST | authenticated | Body `{ camp_week_id, slice_size }`. Max **3** active claims per reviewer (Q5). |
+| `/api/triage/claims` | POST | authenticated | Body `{ camp_week_id, slice_size }`. Max **3** active claims per reviewer (Q5). **Post-refactor:** queue excludes photos at approved locations; see [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md) §5c. |
 | `/api/triage/claims/[id]/release` | POST | owner or admin | |
-| `/api/triage/events` | POST | authenticated | Reviewer `clean` / `flag` + tags + optional quarantine intent. |
+| `/api/triage/events` | POST | authenticated | Reviewer `clean` / `flag` + tags + optional quarantine intent. **Post-refactor:** 60-second grace window for events landing immediately after location approval; beyond that → **410 Gone**. See LOCATION_APPROVAL_SPEC §5b. |
 | `/api/triage/events/senior` | POST | senior or admin | Senior actions + quarantine reconcile hooks. |
-| `/api/triage/signoff` | POST | senior or admin | Prefer **`SECURITY DEFINER` RPC** for DB writes (Q3). |
-| `/api/triage/sample-burst` | GET / POST | `CRON_SECRET` or admin | Implements §5 gates + sampler. |
+| `/api/triage/signoff` | POST | senior or admin | Prefer **`SECURITY DEFINER` RPC` for DB writes (Q3). **DEPRECATED post location-approval refactor:** becomes a dual-write shim (inserts `location_approvals` row + writes legacy `camp_weeks.signoff_at`). Removed in phase 4. |
+| `/api/triage/sample-burst` | GET / POST | `CRON_SECRET` or admin | Implements §5 gates + sampler. **DEPRECATED post location-approval refactor:** removed in phase 4 along with the cron entry. |
 | `/api/triage/sweep-claims` | GET | `CRON_SECRET` | Runs §4g. |
+| `/api/locations/[id]/approve` | POST | senior or admin | **New post-refactor.** Inserts `location_approvals` row; drains in-flight triage at this location. |
+| `/api/locations/[id]/revoke` | POST | senior or admin | **New post-refactor.** Sets `revoked_at`/`revoked_by` on the active approval; reopens triage-eligible photos. |
+| `/api/locations/[id]/feedback` | GET / POST | senior or admin (write); authenticated (read) | **New post-refactor.** `location_feedback_events` CRUD. |
 | `/api/admin/locations/[id]/notes` | PUT | admin | Evergreen notes (optional vs direct Supabase). |
 | `/api/admin/camp-weeks/[id]/override` | PUT | admin | `is_first_week_override`. |
 | `/api/admin/camp-weeks/[id]/positive` | PUT | senior or admin | Positive assessment toggles. |
@@ -501,7 +512,7 @@ Under `app/api/triage/` (and admin helpers). Mutations follow existing SmugMug p
 | Path | Schedule | Purpose |
 |---|---|---|
 | `/api/smugmug/sync-scheduled` | `0 8 * * *` | Existing photo sync. |
-| `/api/triage/sample-burst` | **`0 19 * * 2`** | Tuesday 19:00 UTC sample burst (Q7). |
+| `/api/triage/sample-burst` | **`0 19 * * 2`** | Tuesday 19:00 UTC sample burst (Q7). **DEPRECATED post location-approval refactor — removed in phase 4.** |
 | `/api/triage/sweep-claims` | `*/5 * * * *` | Claim expiry sweep. |
 
 ---

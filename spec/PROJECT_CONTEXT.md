@@ -1,6 +1,6 @@
 # iD Tech Camp Photo Reviewer — Project Context
 
-> Hand-off doc for collaborators and fresh threads. User-facing overview: [`README.md`](../README.md). Triage schema and behavior: [`TRIAGE_SPEC.md`](./TRIAGE_SPEC.md).
+> Hand-off doc for collaborators and fresh threads. User-facing overview: [`README.md`](../README.md). Triage schema and behavior: [`TRIAGE_SPEC.md`](./TRIAGE_SPEC.md). Per-location approval (replaces per-week signoff): [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md).
 
 ---
 
@@ -21,13 +21,13 @@ The legacy marketing-review queue (approve/flag/points/leaderboard) was removed 
 
 ## Architecture (triage-first)
 
-- **Primary entity:** `camp_weeks` with unified `triage_role` + `triage_state`.
+- **Primary entity:** `camp_weeks` with unified `triage_role` + `triage_state`. `camp_weeks` carry triage state and photos; **approval lives on `locations`** (per season, see [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md)).
 - **Photo triage:** `photos.triage_state` column (not a join table). Mutations go through `SECURITY DEFINER` triggers on `triage_events` / `triage_claims` — not direct client `UPDATE` on `photos`.
 - **Claims:** `triage_claims` stamp pending photos `in_progress`; max **3** active claims per reviewer.
-- **Sampler:** Tuesday UTC burst marks `photos.sampled_for_burst` (fair redistribution per spec §5).
+- **Sampler:** Tuesday UTC burst marks `photos.sampled_for_burst` (fair redistribution per spec §5). **Deprecated in phase 4** of the location-approval refactor — the new model has no queue to sample.
 - **Quarantine:** `photos.is_quarantined` + `/api/smugmug/quarantine` (`Image.Hidden`) — unchanged from pre-refactor.
-- **Signoff:** `triage_signoff_camp_week` RPC (senior/admin); can flag sibling 2nd week for recheck.
-- **Photo rating:** `photos.rating_state` + `photo_rating_claims` / `photo_rating_events` — see [`PHOTO_RATING_SPEC.md`](./PHOTO_RATING_SPEC.md).
+- **Approval (post location-approval refactor):** `location_approvals` row per `(location_id, season_start)`; approve drains in-flight triage at that location, revoke reopens. Legacy `triage_signoff_camp_week` RPC becomes a shim that dual-writes for rollback safety; removed in phase 4. The `camp_weeks.triage_state` values `senior_review` and `complete` are no longer assigned by triggers (enum values retained for historical rows). See [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md).
+- **Photo rating:** `photos.rating_state` + `photo_rating_claims` / `photo_rating_events` — see [`PHOTO_RATING_SPEC.md`](./PHOTO_RATING_SPEC.md). Untouched by the location-approval refactor.
 - **Gamification:** points layer on top of triage via a source-agnostic ledger — see [`GAMIFICATION_SPEC.md`](./GAMIFICATION_SPEC.md).
 
 ### Migrations
@@ -39,6 +39,9 @@ The legacy marketing-review queue (approve/flag/points/leaderboard) was removed 
 | `20260517000028` | Triggers, RLS, backfill, signoff/reset RPCs |
 | `20260519000032` | Gamification V1 — points ledger + rules + trigger on triage_events |
 | `20260520000034` | Photo rating — parallel workflow + `tags.purposes` + week senior tags |
+| `20260527000041` | Location approval — schema (`location_approvals`, `location_feedback_events`, view, RPC, backfill). Non-breaking. |
+| `20260528000042` | Location approval — `claim_release_reason` enum value `'location_approved'`. Standalone so the value commits before the logic migration parses. |
+| `20260528000043` | Location approval — triggers swap: drain on approve, reopen on revoke, drop legacy signoff side-effects. |
 
 **Dead migration slots (do not reuse):** `20260505000010`, `20260505000011`, `20260505000012` — comment-only placeholders. Gamification was deferred during the triage refactor; V1 (points only) ships under migration 32 — see [`GAMIFICATION_SPEC.md`](./GAMIFICATION_SPEC.md). The slots stay dead — future gamification work (streaks, badges, etc.) uses new migration numbers.
 
@@ -62,7 +65,8 @@ Trigger functions that `UPDATE photos` must be `SECURITY DEFINER SET search_path
 
 ```
 app/api/smugmug/     # ping, sync-folders, sync-now, sync-scheduled, quarantine
-app/api/triage/      # claims, events, signoff, sample-burst, sweep-claims
+app/api/triage/      # claims, events (grace window post-refactor), signoff (shim post-refactor), sample-burst (deprecated phase 4), sweep-claims
+app/api/locations/[id]/  # approve, revoke, feedback — post location-approval refactor
 app/api/photo-rating/  # claims, events, week-tags, sweep-claims
 components/screens/
   Triage.tsx         # Camp Quality Review hub + claim grid + senior dashboard
@@ -72,6 +76,7 @@ components/screens/
   AdminLocations.tsx # evergreen notes + 1st-week override
 lib/smugmug/sync/photos.ts  # orphan delete preserves triage history (§0)
 spec/TRIAGE_SPEC.md  # contract for schema + triggers + UI
+spec/LOCATION_APPROVAL_SPEC.md  # per-location approval lifecycle + drain/reopen contract
 ```
 
 ---
