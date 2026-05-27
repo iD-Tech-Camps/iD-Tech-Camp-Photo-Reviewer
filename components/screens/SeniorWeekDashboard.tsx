@@ -19,9 +19,11 @@ import {
 } from "@/lib/photo-rating-senior";
 import {
   buildTagLabelLookup,
+  groupTagsByValence,
   TAG_CATEGORY_LABELS,
   type Tag,
   type TagCategory,
+  type TagValence,
 } from "@/lib/tags";
 import { smugmugVariantUrl } from "@/lib/smugmug/url-variants";
 
@@ -255,19 +257,37 @@ export function SeniorWeekDashboard({
           {weekSeniorTags.length > 0 && (
             <section>
               <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Week assessment tags</div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {weekSeniorTags.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    className={"btn " + (selectedWeekTags.includes(t.id) ? "btn-primary" : "btn-ghost")}
-                    disabled={weekTagsBusy || readOnly}
-                    onClick={() => void toggleWeekTag(t.id)}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
+              {(() => {
+                const grouped = groupTagsByValence(weekSeniorTags);
+                const groups: Array<{ valence: TagValence; heading: string }> = [
+                  { valence: "positive", heading: "Positive observations" },
+                  { valence: "negative", heading: "Concerns" },
+                ];
+                return groups.map(({ valence, heading }) => {
+                  const list = grouped.get(valence) ?? [];
+                  if (list.length === 0) return null;
+                  return (
+                    <div key={valence} style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        {heading}
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {list.map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            className={"btn " + (selectedWeekTags.includes(t.id) ? "btn-primary" : "btn-ghost")}
+                            disabled={weekTagsBusy || readOnly}
+                            onClick={() => void toggleWeekTag(t.id)}
+                          >
+                            {t.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
             </section>
           )}
 

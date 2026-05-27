@@ -267,7 +267,8 @@ export async function fetchCategoryRollup(
   if (error) throw error;
 
   const catById = new Map(
-    ((tags ?? []) as Array<{ id: string; category: TagCategory }>).map((t) => [t.id, t.category]),
+    ((tags ?? []) as Array<{ id: string; category: TagCategory | null }>)
+      .map((t) => [t.id, t.category ?? "general"] as const),
   );
 
   const rollup: Record<TagCategory, number> = {

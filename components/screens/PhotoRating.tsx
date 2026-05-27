@@ -11,6 +11,7 @@ import {
   fetchLatestRatingEventsForClaim,
   fetchRatingClaimPhotos,
   fetchRatingWeekContext,
+  type CampQualityTriageState,
   type RatingClaimPhoto,
   type RatingEventSnapshot,
 } from "@/lib/photo-rating-claims";
@@ -62,20 +63,23 @@ export function PhotoRatingApp({ toast }: { toast: ToastApi }) {
   const [weeks, setWeeks] = React.useState<PhotoRatingHubWeek[] | null>(null);
   const [claims, setClaims] = React.useState<Awaited<ReturnType<typeof fetchActiveRatingClaimsForReviewer>>>([]);
   const [tags, setTags] = React.useState<Tag[]>([]);
+  const [flagTags, setFlagTags] = React.useState<Tag[]>([]);
   const [batchSize, setBatchSize] = React.useState<number | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
 
   const reloadHub = React.useCallback(async () => {
     if (!userId) return;
-    const [w, c, t, cfg] = await Promise.all([
+    const [w, c, t, ft, cfg] = await Promise.all([
       fetchPhotoRatingHubWeeks(supabase),
       fetchActiveRatingClaimsForReviewer(supabase, userId),
       fetchTags(supabase, { purpose: "photo_rating" }),
+      fetchTags(supabase, { purpose: "quality_flag", activeOnly: false }),
       fetchTriageConfig(supabase),
     ]);
     setWeeks(w);
     setClaims(c);
     setTags(t);
+    setFlagTags(ft);
     setBatchSize(cfg.batchSize);
   }, [supabase, userId]);
 
@@ -113,6 +117,7 @@ export function PhotoRatingApp({ toast }: { toast: ToastApi }) {
         claimId={view.claimId}
         campWeekId={view.campWeekId}
         tags={tags}
+        flagTags={flagTags}
         onBack={() => { setView({ kind: "hub" }); void reloadHub(); }}
         onStartAnotherBatch={async () => {
           const n = await fetchRatingWeekPendingCount(supabase, view.campWeekId);
@@ -225,6 +230,7 @@ function RatingClaimGrid({
   claimId,
   campWeekId,
   tags,
+  flagTags,
   onBack,
   onStartAnotherBatch,
 }: {
@@ -234,9 +240,11 @@ function RatingClaimGrid({
   claimId: string;
   campWeekId: string;
   tags: Tag[];
+  flagTags: Tag[];
   onBack: () => void;
   onStartAnotherBatch: () => Promise<void>;
 }) {
+  const flagTagLabel = React.useMemo(() => buildTagLabelLookup(flagTags), [flagTags]);
   const [photos, setPhotos] = React.useState<RatingClaimPhoto[]>([]);
   const [ctx, setCtx] = React.useState<{ weekName: string; locationName: string; evergreenNotes: string | null } | null>(null);
   const [reviewed, setReviewed] = React.useState<Record<string, RatingEventSnapshot>>({});
@@ -422,6 +430,7 @@ function RatingClaimGrid({
                         </div>
                       </>
                     )}
+                    <CampQualityBadge triageState={p.triageState} flagCount={p.flagTagIds.length} />
                   </button>
                 );
               })}
@@ -440,6 +449,7 @@ function RatingClaimGrid({
         <RatingLightbox
           photo={lightboxPhoto}
           tags={tags}
+          flagTagLabel={flagTagLabel}
           position={`${lightboxIndex + 1} / ${total}`}
           snapshot={reviewed[lightboxPhoto.id]}
           hasPrev={lightboxIndex > 0}
@@ -463,6 +473,7 @@ function RatingClaimGrid({
 function RatingLightbox({
   photo,
   tags,
+  flagTagLabel,
   position,
   snapshot,
   hasPrev,
@@ -474,6 +485,7 @@ function RatingLightbox({
 }: {
   photo: RatingClaimPhoto;
   tags: Tag[];
+  flagTagLabel: (id: string) => string;
   position: string;
   snapshot: RatingEventSnapshot | undefined;
   hasPrev: boolean;
@@ -632,6 +644,11 @@ function RatingLightbox({
             padding: 16,
           }}
         >
+          <CampQualityBanner
+            triageState={photo.triageState}
+            flagTagIds={photo.flagTagIds}
+            flagTagLabel={flagTagLabel}
+          />
           <div style={{ marginBottom: 12, fontSize: 13, fontWeight: 600 }}>Rating (required)</div>
           <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
             {[1, 2, 3, 4, 5].map((n) => (
@@ -695,6 +712,95 @@ function RatingLightbox({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Camp Quality Review status surfacing ───────────────────────────────────
+// Photos in Camp Photo Review have usually been through Camp Quality Review
+// first (except later-week photos, which skip it). Showing the result on the
+// rating screen lets a rater see why a great photo might still have an
+// operational flag (e.g. peeling decals) without conflating the workflows.
+
+function CampQualityBadge({
+  triageState,
+  flagCount,
+}: {
+  triageState: CampQualityTriageState;
+  flagCount: number;
+}) {
+  if (triageState === "not_required") return null;
+  const visual = (() => {
+    switch (triageState) {
+      case "clean":
+        return { bg: "var(--moss)", icon: "check" as const, title: "Camp-clean" };
+      case "flagged":
+        return {
+          bg: "var(--rose)",
+          icon: "flag" as const,
+          title: flagCount > 0 ? `Flagged (${flagCount})` : "Flagged",
+        };
+      case "deleted":
+        return { bg: "var(--ink-3)", icon: "x" as const, title: "Deleted in quality review" };
+      default:
+        return { bg: "var(--ink-3)", icon: "review" as const, title: "Not yet camp-reviewed" };
+    }
+  })();
+  return (
+    <div
+      aria-hidden
+      title={visual.title}
+      style={{
+        position: "absolute", top: 8, left: 8,
+        width: 22, height: 22, borderRadius: 999,
+        background: visual.bg, color: "white",
+        display: "grid", placeItems: "center",
+        boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+      }}
+    >
+      <Icon name={visual.icon} size={12} />
+    </div>
+  );
+}
+
+function CampQualityBanner({
+  triageState,
+  flagTagIds,
+  flagTagLabel,
+}: {
+  triageState: CampQualityTriageState;
+  flagTagIds: string[];
+  flagTagLabel: (id: string) => string;
+}) {
+  if (triageState === "not_required") return null;
+  const tone =
+    triageState === "flagged" ? "var(--rose)"
+    : triageState === "clean" ? "var(--moss)"
+    : "var(--ink-3)";
+  const label = (() => {
+    switch (triageState) {
+      case "clean": return "Camp quality review: cleared.";
+      case "flagged":
+        return flagTagIds.length > 0
+          ? `Flagged in camp quality review: ${flagTagIds.map(flagTagLabel).join(", ")}`
+          : "Flagged in camp quality review.";
+      case "deleted": return "Removed in camp quality review.";
+      default: return "Not yet reviewed in camp quality review.";
+    }
+  })();
+  return (
+    <div
+      style={{
+        marginBottom: 12,
+        padding: "8px 10px",
+        border: `1px solid ${tone}`,
+        borderRadius: 6,
+        fontSize: 12,
+        color: tone,
+        background: "var(--paper-3)",
+      }}
+    >
+      {label}
     </div>
   );
 }

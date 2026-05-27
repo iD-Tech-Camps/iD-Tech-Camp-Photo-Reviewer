@@ -28,15 +28,19 @@ import {
   deleteTag,
   fetchTags,
   groupTagsByCategory,
+  groupTagsByValence,
+  lockedValenceFor,
+  purposeUsesCategory,
   setTagActive,
   slugifyTagId,
   TAG_CATEGORY_LABELS,
-  updateTagCategory,
-  updateTagPurposes,
   TAG_PURPOSE_LABELS,
+  TAG_VALENCE_LABELS,
+  updateTag,
   type Tag,
   type TagCategory,
   type TagPurpose,
+  type TagValence,
 } from "@/lib/tags";
 
 // The real Admin → SmugMug screen lives in [./AdminSmugMug.tsx]; re-exported
@@ -45,13 +49,39 @@ import {
 export { SmugMugImport } from "./AdminSmugMug";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AdminTags — extracted from the old AdminPoints' TagLibrary card so admins
-// can keep curating the ops-rubric flag catalog while the rest of the
-// triage UI is being built. Migration 26 dropped the `kind` discriminator;
-// every tag is a single list now (no positive/negative split).
+// AdminTags — three tag libraries, one per purpose.
+//
+// Each tab has its own grouping rule, matching what the tag actually does:
+//   - quality_flag (always negative)  → grouped by category (drives the
+//     senior dashboard rollup). New tags pick a category.
+//   - photo_rating (always positive)  → flat list. No category, no valence
+//     picker (locked positive).
+//   - week_senior (positive OR neg.)  → grouped by valence (Positive /
+//     Concerns). New tags pick a valence. No category.
+//
+// Tag chips no longer carry an inline category dropdown — that lived
+// awkwardly inside the chip. Editing is a pencil affordance that opens a
+// per-tag editor with the same picker(s) the new-tag form uses.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ADMIN_TAG_PURPOSES: TagPurpose[] = ["quality_flag", "photo_rating", "week_senior"];
+
+const PURPOSE_BLURB: Record<TagPurpose, string> = {
+  quality_flag: "Negative issues reviewers attach during Camp Quality Review. Grouped by category so the senior dashboard can roll up totals.",
+  photo_rating: "Positive highlights reviewers can attach to a star rating in Camp Photo Review.",
+  week_senior: "Week-level observations on Lead review. Mark each as positive or a concern.",
+};
+
+const PURPOSE_NOUN: Record<TagPurpose, string> = {
+  quality_flag: "issue",
+  photo_rating: "highlight",
+  week_senior: "observation",
+};
+
+const CHIP_TONE: Record<TagValence, { bg: string; fg: string }> = {
+  positive: { bg: "var(--moss-soft, var(--paper-2))", fg: "var(--moss)" },
+  negative: { bg: "var(--sun-soft)", fg: "var(--sun)" },
+};
 
 export function AdminTags() {
   const supabase = React.useMemo(() => createClient(), []);
@@ -59,8 +89,10 @@ export function AdminTags() {
   const [tags, setTags] = React.useState<Tag[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [adding, setAdding] = React.useState(false);
+  const [editingId, setEditingId] = React.useState<string | null>(null);
   const [newLabel, setNewLabel] = React.useState("");
   const [newCategory, setNewCategory] = React.useState<TagCategory>("general");
+  const [newValence, setNewValence] = React.useState<TagValence>("negative");
   const [busy, setBusy] = React.useState(false);
   const [opError, setOpError] = React.useState<string | null>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -81,6 +113,21 @@ export function AdminTags() {
 
   React.useEffect(() => { if (adding && inputRef.current) inputRef.current.focus(); }, [adding]);
 
+  // Reset new-tag form when switching tabs so locked valence and visible
+  // pickers track the tab.
+  React.useEffect(() => {
+    setAdding(false);
+    setEditingId(null);
+    setOpError(null);
+    setNewLabel("");
+    setNewCategory("general");
+    setNewValence(lockedValenceFor(purposeTab) ?? "negative");
+  }, [purposeTab]);
+
+  const showsCategory = purposeUsesCategory(purposeTab);
+  const lockedValence = lockedValenceFor(purposeTab);
+  const showsValencePicker = lockedValence === null;
+
   const forTab = (tags ?? []).filter((t) => t.purposes.includes(purposeTab));
   const activeTags = forTab.filter((t) => t.active);
   const inactiveTags = forTab.filter((t) => !t.active);
@@ -100,8 +147,12 @@ export function AdminTags() {
     try {
       const nextOrder = Math.max(0, ...activeTags.map((t) => t.displayOrder)) + 1;
       const created = await createTag(supabase, {
-        id: slug, label, displayOrder: nextOrder, category: newCategory,
+        id: slug,
+        label,
+        displayOrder: nextOrder,
+        category: showsCategory ? newCategory : null,
         purposes: [purposeTab],
+        valence: lockedValence ?? newValence,
       });
       setTags((prev) => [...(prev ?? []), created]);
       setNewLabel("");
@@ -169,20 +220,112 @@ export function AdminTags() {
     }
   };
 
-  const chipStyle: React.CSSProperties = {
-    display: "inline-flex", alignItems: "center", gap: 6,
-    padding: "5px 10px", borderRadius: 999,
-    fontSize: 12, fontWeight: 500,
-    background: "var(--sun-soft)",
-    color: "var(--sun)",
-    border: "1px solid transparent",
+  const applyEdit = async (
+    id: string,
+    patch: { label?: string; category?: TagCategory | null; valence?: TagValence },
+  ) => {
+    if (busy) return;
+    setBusy(true);
+    setOpError(null);
+    try {
+      await updateTag(supabase, id, patch);
+      setTags((prev) =>
+        (prev ?? []).map((t) =>
+          t.id === id
+            ? {
+                ...t,
+                ...(patch.label !== undefined ? { label: patch.label } : null),
+                ...(patch.category !== undefined ? { category: patch.category } : null),
+                ...(patch.valence !== undefined ? { valence: patch.valence } : null),
+              }
+            : t,
+        ),
+      );
+      setEditingId(null);
+    } catch (err: any) {
+      console.error("[admin-tags] update failed:", err);
+      setOpError(err?.message ?? "Couldn't save changes");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const inactiveChipStyle: React.CSSProperties = {
-    ...chipStyle,
+    display: "inline-flex", alignItems: "center", gap: 6,
+    padding: "5px 10px", borderRadius: 999,
+    fontSize: 12, fontWeight: 500,
     background: "var(--paper-2)",
     color: "var(--ink-3)",
     textDecoration: "line-through",
+    border: "1px solid transparent",
+  };
+
+  const renderChipRow = (list: Tag[]) => (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {list.map((t) => {
+        if (editingId === t.id) {
+          return (
+            <TagEditCard
+              key={t.id}
+              tag={t}
+              showCategory={showsCategory}
+              showValence={showsValencePicker}
+              busy={busy}
+              onCancel={() => setEditingId(null)}
+              onSave={(patch) => applyEdit(t.id, patch)}
+            />
+          );
+        }
+        return (
+          <TagChip
+            key={t.id}
+            tag={t}
+            busy={busy}
+            onEdit={() => { setEditingId(t.id); setAdding(false); }}
+            onRemove={() => remove(t.id)}
+          />
+        );
+      })}
+    </div>
+  );
+
+  const renderActiveBody = () => {
+    if (tags !== null && activeTags.length === 0) {
+      return (
+        <span style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
+          No active {PURPOSE_NOUN[purposeTab]}s yet
+        </span>
+      );
+    }
+    if (purposeTab === "quality_flag") {
+      return Array.from(groupTagsByCategory(activeTags).entries()).map(([cat, list]) =>
+        list.length === 0 ? null : (
+          <div key={cat} style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              {TAG_CATEGORY_LABELS[cat]}
+            </div>
+            {renderChipRow(list)}
+          </div>
+        ),
+      );
+    }
+    if (purposeTab === "week_senior") {
+      const grouped = groupTagsByValence(activeTags);
+      return (["positive", "negative"] as TagValence[]).map((v) => {
+        const list = grouped.get(v) ?? [];
+        if (list.length === 0) return null;
+        return (
+          <div key={v} style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              {v === "positive" ? "Positive observations" : "Concerns"}
+            </div>
+            {renderChipRow(list)}
+          </div>
+        );
+      });
+    }
+    // photo_rating: flat list
+    return renderChipRow(activeTags);
   };
 
   return (
@@ -202,7 +345,7 @@ export function AdminTags() {
               key={p}
               type="button"
               className={"btn " + (purposeTab === p ? "btn-primary" : "btn-ghost")}
-              onClick={() => { setPurposeTab(p); setAdding(false); setOpError(null); }}
+              onClick={() => setPurposeTab(p)}
             >
               {TAG_PURPOSE_LABELS[p]}
             </button>
@@ -212,15 +355,7 @@ export function AdminTags() {
         <div className="card">
           <h3 className="card-title" style={{ marginBottom: 4 }}>Active tags</h3>
           <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
-            {purposeTab === "quality_flag" && (
-              <>Issues reviewers attach during Camp Quality Review.</>
-            )}
-            {purposeTab === "photo_rating" && (
-              <>Optional tags on star ratings in Camp Photo Review.</>
-            )}
-            {purposeTab === "week_senior" && (
-              <>Week-level assessment tags on Lead review.</>
-            )}
+            {PURPOSE_BLURB[purposeTab]}
           </div>
 
           {loadError && (
@@ -230,65 +365,15 @@ export function AdminTags() {
               background: "var(--rose-soft)", color: "var(--rose)",
               fontSize: 12,
             }}>
-              Couldn&apos;t load issues: {loadError}
+              Couldn&apos;t load tags: {loadError}
             </div>
           )}
 
-          {Array.from(groupTagsByCategory(activeTags).entries()).map(([cat, list]) =>
-            list.length === 0 ? null : (
-              <div key={cat} style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                  {TAG_CATEGORY_LABELS[cat]}
-                </div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {list.map((t) => (
-                    <span key={t.id} style={chipStyle}>
-                      {t.label}
-                      <select
-                        value={t.category}
-                        disabled={busy}
-                        onChange={(e) => {
-                          const next = e.target.value as TagCategory;
-                          void updateTagCategory(supabase, t.id, next).then(() => {
-                            setTags((prev) =>
-                              (prev ?? []).map((x) => (x.id === t.id ? { ...x, category: next } : x)),
-                            );
-                          });
-                        }}
-                        style={{ fontSize: 10, marginLeft: 4, border: "none", background: "transparent" }}
-                        title="Category"
-                      >
-                        {(Object.keys(TAG_CATEGORY_LABELS) as TagCategory[]).map((c) => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
-                      <button
-                        onClick={() => remove(t.id)}
-                        disabled={busy}
-                        style={{
-                          marginLeft: 2, color: "var(--sun)", opacity: busy ? 0.3 : 0.6,
-                          display: "grid", placeItems: "center",
-                          cursor: busy ? "not-allowed" : "pointer",
-                        }}
-                        title="Remove"
-                      >
-                        <Icon name="x" size={10} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ),
-          )}
-          {tags !== null && activeTags.length === 0 && (
-            <span style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
-              No active tags yet
-            </span>
-          )}
+          {renderActiveBody()}
 
           {opError && (
             <div style={{
-              padding: 10, marginBottom: 12,
+              padding: 10, marginTop: 12, marginBottom: 12,
               border: "1px solid var(--rose)", borderRadius: 6,
               background: "var(--rose-soft)", color: "var(--rose)",
               fontSize: 12,
@@ -317,29 +402,48 @@ export function AdminTags() {
                     if (e.key === "Enter") save();
                     if (e.key === "Escape") cancel();
                   }}
-                  placeholder="e.g. Peeling decals"
+                  placeholder={purposeTab === "quality_flag" ? "e.g. Peeling decals" : purposeTab === "photo_rating" ? "e.g. Hero shot" : "e.g. Great variety"}
                   maxLength={48}
                 />
                 <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4, fontFamily: "var(--font-mono)" }}>
                   id: {slugifyTagId(newLabel) || "—"}
                 </div>
               </div>
-              <div>
-                <label className="label" style={{ marginBottom: 4 }}>Category</label>
-                <select
-                  className="input"
-                  value={newCategory}
-                  onChange={(e) => setNewCategory(e.target.value as TagCategory)}
-                >
-                  {(Object.keys(TAG_CATEGORY_LABELS) as TagCategory[]).map((c) => (
-                    <option key={c} value={c}>{TAG_CATEGORY_LABELS[c]}</option>
-                  ))}
-                </select>
-              </div>
+              {showsCategory && (
+                <div>
+                  <label className="label" style={{ marginBottom: 4 }}>Category</label>
+                  <select
+                    className="input"
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value as TagCategory)}
+                  >
+                    {(Object.keys(TAG_CATEGORY_LABELS) as TagCategory[]).map((c) => (
+                      <option key={c} value={c}>{TAG_CATEGORY_LABELS[c]}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {showsValencePicker && (
+                <div>
+                  <label className="label" style={{ marginBottom: 4 }}>Valence</label>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    {(["positive", "negative"] as TagValence[]).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        className={"btn " + (newValence === v ? "btn-primary" : "btn-ghost")}
+                        onClick={() => setNewValence(v)}
+                      >
+                        {v === "positive" ? "Positive" : "Concern"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="label" style={{ marginBottom: 4 }}>Preview</label>
-                <span style={chipStyle}>
-                  {newLabel.trim() || "Issue label"}
+                <span style={chipStyleFor(lockedValence ?? newValence)}>
+                  {newLabel.trim() || "Tag label"}
                 </span>
               </div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 2 }}>
@@ -347,16 +451,17 @@ export function AdminTags() {
                 <button className="btn btn-primary" disabled={!canSave}
                   style={{ opacity: canSave ? 1 : 0.5, cursor: canSave ? "pointer" : "not-allowed" }}
                   onClick={save}>
-                  <Icon name="plus" size={12} /> Add issue
+                  <Icon name="plus" size={12} /> Add {PURPOSE_NOUN[purposeTab]}
                 </button>
               </div>
             </div>
           ) : (
             <button
-              onClick={() => setAdding(true)}
+              onClick={() => { setAdding(true); setEditingId(null); }}
               disabled={tags === null}
               style={{
                 width: "100%",
+                marginTop: 8,
                 padding: "10px 12px",
                 border: "1px dashed var(--rule-2)",
                 borderRadius: 8,
@@ -368,16 +473,16 @@ export function AdminTags() {
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
               }}
             >
-              <Icon name="plus" size={12} /> Add tag
+              <Icon name="plus" size={12} /> Add {PURPOSE_NOUN[purposeTab]}
             </button>
           )}
         </div>
 
         {inactiveTags.length > 0 && (
           <div className="card">
-            <h3 className="card-title" style={{ marginBottom: 4 }}>Retired issues</h3>
+            <h3 className="card-title" style={{ marginBottom: 4 }}>Retired {PURPOSE_NOUN[purposeTab]}s</h3>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
-              Issues that were used in past reviews but no longer show up in
+              Tags that were used in past reviews but no longer show up in
               the reviewer UI. Reactivate to put one back in circulation.
             </div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -404,6 +509,138 @@ export function AdminTags() {
         )}
       </div>
     </>
+  );
+}
+
+function chipStyleFor(valence: TagValence): React.CSSProperties {
+  const tone = CHIP_TONE[valence];
+  return {
+    display: "inline-flex", alignItems: "center", gap: 6,
+    padding: "5px 10px", borderRadius: 999,
+    fontSize: 12, fontWeight: 500,
+    background: tone.bg,
+    color: tone.fg,
+    border: "1px solid transparent",
+  };
+}
+
+function TagChip({
+  tag,
+  busy,
+  onEdit,
+  onRemove,
+}: {
+  tag: Tag;
+  busy: boolean;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  const style = chipStyleFor(tag.valence);
+  return (
+    <span style={style}>
+      {tag.label}
+      <button
+        onClick={onEdit}
+        disabled={busy}
+        style={{
+          marginLeft: 2, color: style.color as string, opacity: busy ? 0.3 : 0.6,
+          display: "grid", placeItems: "center",
+          cursor: busy ? "not-allowed" : "pointer",
+        }}
+        title="Edit"
+      >
+        <Icon name="pencil" size={10} />
+      </button>
+      <button
+        onClick={onRemove}
+        disabled={busy}
+        style={{
+          color: style.color as string, opacity: busy ? 0.3 : 0.6,
+          display: "grid", placeItems: "center",
+          cursor: busy ? "not-allowed" : "pointer",
+        }}
+        title="Remove"
+      >
+        <Icon name="x" size={10} />
+      </button>
+    </span>
+  );
+}
+
+function TagEditCard({
+  tag,
+  showCategory,
+  showValence,
+  busy,
+  onCancel,
+  onSave,
+}: {
+  tag: Tag;
+  showCategory: boolean;
+  showValence: boolean;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (patch: { label?: string; category?: TagCategory | null; valence?: TagValence }) => Promise<void>;
+}) {
+  const [label, setLabel] = React.useState(tag.label);
+  const [category, setCategory] = React.useState<TagCategory>(tag.category ?? "general");
+  const [valence, setValence] = React.useState<TagValence>(tag.valence);
+
+  const submit = () => {
+    const trimmed = label.trim();
+    const patch: { label?: string; category?: TagCategory | null; valence?: TagValence } = {};
+    if (trimmed && trimmed !== tag.label) patch.label = trimmed;
+    if (showCategory && category !== (tag.category ?? "general")) patch.category = category;
+    if (showValence && valence !== tag.valence) patch.valence = valence;
+    void onSave(patch);
+  };
+
+  return (
+    <div style={{
+      padding: 10,
+      background: "var(--paper-2)",
+      border: "1px solid var(--rule)",
+      borderRadius: 8,
+      display: "flex", flexDirection: "column", gap: 8,
+      minWidth: 240,
+    }}>
+      <input
+        className="input"
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") onCancel(); }}
+        maxLength={48}
+      />
+      {showCategory && (
+        <select
+          className="input"
+          value={category}
+          onChange={(e) => setCategory(e.target.value as TagCategory)}
+        >
+          {(Object.keys(TAG_CATEGORY_LABELS) as TagCategory[]).map((c) => (
+            <option key={c} value={c}>{TAG_CATEGORY_LABELS[c]}</option>
+          ))}
+        </select>
+      )}
+      {showValence && (
+        <div style={{ display: "flex", gap: 6 }}>
+          {(["positive", "negative"] as TagValence[]).map((v) => (
+            <button
+              key={v}
+              type="button"
+              className={"btn " + (valence === v ? "btn-primary" : "btn-ghost")}
+              onClick={() => setValence(v)}
+            >
+              {TAG_VALENCE_LABELS[v]}
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+        <button className="btn btn-ghost" disabled={busy} onClick={onCancel}>Cancel</button>
+        <button className="btn btn-primary" disabled={busy || !label.trim()} onClick={submit}>Save</button>
+      </div>
+    </div>
   );
 }
 

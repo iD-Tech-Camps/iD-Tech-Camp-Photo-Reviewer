@@ -44,6 +44,14 @@ export async function countActiveRatingClaimsForReviewer(
   return count ?? 0;
 }
 
+export type CampQualityTriageState =
+  | "not_required"
+  | "pending"
+  | "in_progress"
+  | "clean"
+  | "flagged"
+  | "deleted";
+
 export type RatingClaimPhoto = {
   id: string;
   thumbnailUrl: string | null;
@@ -51,6 +59,8 @@ export type RatingClaimPhoto = {
   caption: string | null;
   capturedAt: string | null;
   ratingState: string;
+  triageState: CampQualityTriageState;
+  flagTagIds: string[];
 };
 
 export async function fetchRatingClaimPhotos(
@@ -59,24 +69,53 @@ export async function fetchRatingClaimPhotos(
 ): Promise<RatingClaimPhoto[]> {
   const { data, error } = await supabase
     .from("photos")
-    .select("id, thumbnail_url, image_url, caption, captured_at, rating_state")
+    .select("id, thumbnail_url, image_url, caption, captured_at, rating_state, triage_state")
     .eq("rating_claim_id", claimId)
     .order("captured_at", { ascending: true });
   if (error) throw error;
-  return ((data ?? []) as Array<{
+  const rows = (data ?? []) as Array<{
     id: string;
     thumbnail_url: string | null;
     image_url: string | null;
     caption: string | null;
     captured_at: string | null;
     rating_state: string;
-  }>).map((p) => ({
+    triage_state: CampQualityTriageState;
+  }>;
+
+  // For currently-flagged photos, pull the most recent flag event's tags so
+  // the rater can see what camp-quality reviewers caught.
+  const flaggedIds = rows.filter((r) => r.triage_state === "flagged").map((r) => r.id);
+  const flagTagsByPhoto = new Map<string, string[]>();
+  if (flaggedIds.length > 0) {
+    const { data: events, error: evErr } = await supabase
+      .from("triage_events")
+      .select("id, photo_id, created_at, kind, triage_event_tags ( tag_id )")
+      .in("photo_id", flaggedIds)
+      .eq("kind", "flag")
+      .order("created_at", { ascending: false });
+    if (evErr) throw evErr;
+    for (const row of (events ?? []) as Array<{
+      photo_id: string;
+      triage_event_tags: Array<{ tag_id: string }> | null;
+    }>) {
+      if (flagTagsByPhoto.has(row.photo_id)) continue;
+      flagTagsByPhoto.set(
+        row.photo_id,
+        (row.triage_event_tags ?? []).map((t) => t.tag_id),
+      );
+    }
+  }
+
+  return rows.map((p) => ({
     id: p.id,
     thumbnailUrl: p.thumbnail_url,
     imageUrl: p.image_url,
     caption: p.caption,
     capturedAt: p.captured_at,
     ratingState: p.rating_state,
+    triageState: p.triage_state,
+    flagTagIds: flagTagsByPhoto.get(p.id) ?? [],
   }));
 }
 
