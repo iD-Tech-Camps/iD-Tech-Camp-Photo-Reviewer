@@ -51,7 +51,7 @@ async function postSignoff(body: unknown): Promise<Response> {
   );
 }
 
-describe("POST /api/triage/signoff (dual-write shim)", () => {
+describe("POST /api/triage/signoff (per-week audit marker)", () => {
   it("rejects unauthenticated callers with 401", async () => {
     const res = await postSignoff({ camp_week_id: fixture.campWeekId });
     expect(res.status).toBe(401);
@@ -69,7 +69,7 @@ describe("POST /api/triage/signoff (dual-write shim)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("dual-writes location_approvals + legacy signoff columns", async () => {
+  it("writes signoff_at + signoff_by on the camp week", async () => {
     setMockAuth({
       kind: "user",
       userId: fixture.senior.id,
@@ -83,26 +83,36 @@ describe("POST /api/triage/signoff (dual-write shim)", () => {
     });
     expect(res.status).toBe(200);
 
-    const supabase = service();
-
-    // 1. Legacy: camp_weeks.signoff_at / signoff_by populated.
-    const { data: week } = await supabase
+    const { data: week } = await service()
       .from("camp_weeks")
       .select("signoff_by, signoff_at")
       .eq("id", fixture.campWeekId)
       .single();
     expect(week?.signoff_by).toBe(fixture.senior.id);
     expect(week?.signoff_at).toBeTruthy();
+  });
 
-    // 2. New model: a location_approvals row exists for this location.
-    const { data: approval } = await supabase
+  it("does NOT create a location_approvals row (per-week marker only)", async () => {
+    setMockAuth({
+      kind: "user",
+      userId: fixture.senior.id,
+      role: "senior",
+      email: fixture.senior.email,
+    });
+
+    // Clean any pre-existing approval row from prior tests.
+    await service().from("location_approvals").delete().eq("location_id", fixture.locationId);
+
+    await postSignoff({
+      camp_week_id: fixture.campWeekId,
+      flag_second_week_recheck: false,
+    });
+
+    const { data: approvals } = await service()
       .from("location_approvals")
-      .select("location_id, approved_by, revoked_at")
+      .select("id")
       .eq("location_id", fixture.locationId)
-      .is("revoked_at", null)
-      .single();
-    expect(approval?.location_id).toBe(fixture.locationId);
-    expect(approval?.approved_by).toBe(fixture.senior.id);
-    expect(approval?.revoked_at).toBeNull();
+      .is("revoked_at", null);
+    expect(approvals ?? []).toHaveLength(0);
   });
 });

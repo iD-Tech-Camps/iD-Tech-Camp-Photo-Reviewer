@@ -85,6 +85,8 @@ export function SeniorWeekDashboard({
   const [photoFilter, setPhotoFilter] = React.useState<PhotoFilter>("all");
   const [lightboxIndex, setLightboxIndex] = React.useState<number | null>(null);
   const [actionBusy, setActionBusy] = React.useState(false);
+  const [finishConfirmOpen, setFinishConfirmOpen] = React.useState(false);
+  const [finishBusy, setFinishBusy] = React.useState(false);
   const labelLookup = buildTagLabelLookup(tags);
 
   const isComplete = week?.triageState === "complete";
@@ -157,12 +159,21 @@ export function SeniorWeekDashboard({
 
   const signoff = async () => {
     if (readOnly) return;
+    setFinishBusy(true);
     try {
-      await signoffCampWeek(supabase, campWeekId, recheck && week?.triageRole === "first_week");
-      toast.show("Review finished", "check");
-      onBack();
+      await signoffCampWeek(supabase, campWeekId, false);
+      toast.show("Week marked as reviewed.", "check");
+      setFinishConfirmOpen(false);
+      await reload();
     } catch (err: unknown) {
-      toast.show(err instanceof Error ? err.message : "Couldn't finish review", "x");
+      // Translate the most common legacy error before showing.
+      const raw = err instanceof Error ? err.message : "Couldn't finish review";
+      const friendly = raw.includes("not eligible for signoff")
+        ? "This week isn't ready to finish — make sure every photo has been reviewed first."
+        : raw;
+      toast.show(friendly, "x");
+    } finally {
+      setFinishBusy(false);
     }
   };
 
@@ -309,19 +320,19 @@ export function SeniorWeekDashboard({
 
           {!readOnly && (
             <section style={{ borderTop: "1px solid var(--rule)", paddingTop: 16 }}>
-              {week.triageRole === "first_week" && (
-                <label style={{ display: "block", marginBottom: 12, fontSize: 13 }}>
-                  <input type="checkbox" checked={recheck} onChange={(e) => setRecheck(e.target.checked)} />
-                  {" "}Flag 2nd week for follow-up review when finished
-                </label>
-              )}
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={() => void signoff()}
+                onClick={() => setFinishConfirmOpen(true)}
+                disabled={finishBusy}
               >
-                Finish Review
+                {week?.signoffAt ? "Update your review note" : "Mark week as reviewed"}
               </button>
+              <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 6, lineHeight: 1.5 }}>
+                Records that you&apos;ve reviewed this week&apos;s photos. Doesn&apos;t close
+                the location — use <strong>Approve location</strong> on the location page
+                when you&apos;re ready to close it for the season.
+              </div>
             </section>
           )}
         </div>
@@ -450,7 +461,95 @@ export function SeniorWeekDashboard({
           onAction={(kind) => seniorAction(lightboxPhoto.id, kind)}
         />
       )}
+
+      {finishConfirmOpen && week && (
+        <FinishReviewModal
+          weekName={week.name}
+          locationName={week.locationName}
+          onConfirm={() => void signoff()}
+          onCancel={() => setFinishConfirmOpen(false)}
+          busy={finishBusy}
+        />
+      )}
     </>
+  );
+}
+
+function FinishReviewModal({
+  weekName,
+  locationName,
+  onConfirm,
+  onCancel,
+  busy,
+}: {
+  weekName: string;
+  locationName: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  busy: boolean;
+}) {
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.4)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 50,
+        padding: 24,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="card"
+        style={{
+          maxWidth: 480,
+          width: "100%",
+          background: "var(--paper)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+        }}
+      >
+        <h3 style={{ margin: 0 }}>Mark {weekName} as reviewed?</h3>
+        <p style={{ margin: 0, fontSize: 14, color: "var(--ink-2)" }}>
+          Records that you&apos;ve looked at this week&apos;s photos and recorded your feedback.
+        </p>
+        <div
+          style={{
+            padding: "10px 12px",
+            borderRadius: 6,
+            background: "var(--paper-3)",
+            fontSize: 13,
+            color: "var(--ink-2)",
+            lineHeight: 1.5,
+          }}
+        >
+          This is just a per-week marker — it doesn&apos;t affect the Camp Quality Review queue.
+          When you&apos;re ready to close <strong>{locationName}</strong> for the rest of
+          the season, use <strong>Approve location</strong> on the location page.
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-primary" onClick={onConfirm} disabled={busy}>
+            {busy ? "Recording…" : "Mark as reviewed"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

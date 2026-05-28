@@ -42,7 +42,7 @@ export async function POST(request: Request) {
     });
     if (approved === true) {
       return NextResponse.json(
-        { error: "location_approved", message: "Location is approved; no triage needed." },
+        { error: "location_approved", message: "Location is approved; no Camp Quality Review needed." },
         { status: 409 },
       );
     }

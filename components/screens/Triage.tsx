@@ -310,6 +310,46 @@ function ClaimGrid({
     return () => { cancelled = true; };
   }, [supabase, claimId, campWeekId]);
 
+  // Realtime drain detection: a lead approving this location mid-batch
+  // fires the drain trigger, which stamps the claim's released_at +
+  // release_reason='location_approved'. Subscribing to this claim row lets
+  // the reviewer see a toast and return to the queue without a refresh.
+  // The 60s grace window on /api/triage/events accepts in-flight events.
+  React.useEffect(() => {
+    const channel = supabase
+      .channel(`triage_claim_${claimId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "triage_claims",
+          filter: `id=eq.${claimId}`,
+        },
+        (payload) => {
+          const row = payload.new as {
+            released_at: string | null;
+            release_reason: string | null;
+          };
+          if (row.released_at && row.release_reason === "location_approved") {
+            // Sticky toast so the reviewer can actually read it. They control
+            // when to dismiss; we also schedule a fallback nav after 8s in
+            // case they walk away from the screen.
+            toast.show(
+              `${ctx?.locationName ?? "This location"} was just approved by a lead — nice work on the last batch. You'll be returned to the queue.`,
+              "check",
+              { sticky: true },
+            );
+            window.setTimeout(() => onBack(), 8000);
+          }
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [supabase, claimId, toast, onBack, ctx?.locationName]);
+
   // Preload neighbors of the current lightbox photo so arrow nav lands on
   // an already-cached image. The lightbox renders the XL variant (rewritten
   // from thumbnail_url), so that's what we prefetch — never the original

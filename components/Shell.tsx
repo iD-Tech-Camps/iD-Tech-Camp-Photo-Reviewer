@@ -223,23 +223,73 @@ export function fireConfetti(
   }
 }
 
-type Toast = { id: number; kind: "info"; msg: string; icon?: string; tone?: string };
+type Toast = {
+  id: number;
+  kind: "info";
+  msg: string;
+  icon?: string;
+  tone?: string;
+  // When `sticky` is true, the toast renders larger and stays until the
+  // user dismisses it (or `duration` elapses). Used for events the user
+  // needs to read, like a location-approval drain.
+  sticky?: boolean;
+  duration?: number;
+};
+
+const DEFAULT_DURATION = 2400;
+const STICKY_DURATION = 12_000;
 
 export function useToast() {
   const [toasts, setToasts] = React.useState<Toast[]>([]);
-  const push = (t: Omit<Toast, "id" | "kind">) => {
-    const id = Date.now() + Math.random();
-    setToasts(ts => [...ts, { ...t, id, kind: "info" }]);
-    setTimeout(() => setToasts(ts => ts.filter(x => x.id !== id)), 2400);
-  };
-  const show = (msg: string, icon?: string) => push({ msg, icon });
+  const dismiss = React.useCallback((id: number) => {
+    setToasts((ts) => ts.filter((x) => x.id !== id));
+  }, []);
+  const push = React.useCallback(
+    (t: Omit<Toast, "id" | "kind">) => {
+      const id = Date.now() + Math.random();
+      setToasts((ts) => [...ts, { ...t, id, kind: "info" }]);
+      const duration = t.duration ?? (t.sticky ? STICKY_DURATION : DEFAULT_DURATION);
+      setTimeout(() => dismiss(id), duration);
+    },
+    [dismiss],
+  );
+  const show = React.useCallback(
+    (msg: string, icon?: string, opts?: { sticky?: boolean; duration?: number }) => {
+      push({ msg, icon, sticky: opts?.sticky, duration: opts?.duration });
+    },
+    [push],
+  );
 
   const node = (
     <div className="toast-stack">
-      {toasts.map(t => (
-        <div key={t.id} className={"toast" + (t.tone ? " toast-" + t.tone : "")}>
-          {t.icon && <Icon name={t.icon} size={15} />}
-          <span>{t.msg}</span>
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          className={"toast" + (t.tone ? " toast-" + t.tone : "") + (t.sticky ? " toast-sticky" : "")}
+          role={t.sticky ? "alert" : "status"}
+        >
+          {t.icon && <Icon name={t.icon} size={t.sticky ? 18 : 15} />}
+          <span style={t.sticky ? { fontSize: 14, lineHeight: 1.4 } : undefined}>{t.msg}</span>
+          {t.sticky && (
+            <button
+              type="button"
+              onClick={() => dismiss(t.id)}
+              aria-label="Dismiss"
+              style={{
+                marginLeft: "auto",
+                background: "transparent",
+                border: 0,
+                color: "inherit",
+                cursor: "pointer",
+                fontSize: 16,
+                fontWeight: 600,
+                padding: "0 4px",
+                opacity: 0.7,
+              }}
+            >
+              ×
+            </button>
+          )}
         </div>
       ))}
     </div>

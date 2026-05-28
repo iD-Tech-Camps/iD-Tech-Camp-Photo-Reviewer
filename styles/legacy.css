@@ -524,6 +524,16 @@ button {
 }
 .toast.toast-moss { background: var(--moss); color: white; }
 .toast.toast-rose { background: var(--rose); color: white; }
+.toast.toast-sticky {
+  /* Render larger and skip the auto-dismiss fade-out; useToast schedules
+     its own removal at ~12s, and the dismiss button covers any sooner exit. */
+  animation: toast-in 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  padding: 16px 20px;
+  min-width: 320px;
+  max-width: 420px;
+  border-left: 3px solid var(--sun);
+  align-items: flex-start;
+}
 @keyframes toast-in {
   from { transform: translateY(12px) scale(0.96); opacity: 0; }
   to   { transform: translateY(0) scale(1);       opacity: 1; }

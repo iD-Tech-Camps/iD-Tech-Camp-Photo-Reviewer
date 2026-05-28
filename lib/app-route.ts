@@ -28,6 +28,7 @@ export const SUBVIEW_PARAMS = {
   week: "week",
   claim: "claim",
   lead: "lead",
+  location: "location",
 } as const;
 
 export function readSearchParams(): URLSearchParams {
@@ -81,7 +82,8 @@ export type PhotoRatingView =
 
 export type SeniorReviewView =
   | { kind: "hub" }
-  | { kind: "week"; campWeekId: string };
+  | { kind: "location"; locationId: string }
+  | { kind: "week"; campWeekId: string; locationId?: string };
 
 export function parseTriageViewFromUrl(): TriageView | null {
   const p = readSearchParams();
@@ -130,8 +132,11 @@ export function writePhotoRatingViewToUrl(view: PhotoRatingView) {
 }
 
 export function parseSeniorReviewViewFromUrl(): SeniorReviewView | null {
-  const week = readSearchParams().get(SUBVIEW_PARAMS.week);
-  if (week) return { kind: "week", campWeekId: week };
+  const params = readSearchParams();
+  const week = params.get(SUBVIEW_PARAMS.week);
+  const location = params.get(SUBVIEW_PARAMS.location);
+  if (week) return { kind: "week", campWeekId: week, locationId: location ?? undefined };
+  if (location) return { kind: "location", locationId: location };
   return null;
 }
 
@@ -141,13 +146,20 @@ export function writeSeniorReviewViewToUrl(view: SeniorReviewView) {
     p.delete(SUBVIEW_PARAMS.claim);
     p.delete(SUBVIEW_PARAMS.week);
     p.delete(SUBVIEW_PARAMS.lead);
-    if (view.kind === "week") p.set(SUBVIEW_PARAMS.week, view.campWeekId);
+    p.delete(SUBVIEW_PARAMS.location);
+    if (view.kind === "location") {
+      p.set(SUBVIEW_PARAMS.location, view.locationId);
+    } else if (view.kind === "week") {
+      p.set(SUBVIEW_PARAMS.week, view.campWeekId);
+      if (view.locationId) p.set(SUBVIEW_PARAMS.location, view.locationId);
+    }
   });
 }
 
 function inferScreenFromSubViewParams(params: URLSearchParams): string | null {
   if (params.get(SUBVIEW_PARAMS.lead)) return "triage";
   if (params.get(SUBVIEW_PARAMS.claim) && params.get(SUBVIEW_PARAMS.week)) return null;
+  if (params.get(SUBVIEW_PARAMS.location)) return "senior-review";
   if (params.get(SUBVIEW_PARAMS.week)) return "senior-review";
   return null;
 }

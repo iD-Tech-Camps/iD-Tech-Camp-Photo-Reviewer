@@ -15,6 +15,11 @@ const ACCENT_MAP: Record<PublicBranding["accent"], string> = {
 export function LoginForm({ branding }: { branding: PublicBranding }) {
   const [loading, setLoading] = React.useState(false);
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
+  // Dev-only password sign-in. NEXT_PUBLIC_DEV_AUTH must be set to "1" at
+  // build/dev time; production deploys leave it unset and never render this.
+  const devAuthEnabled = process.env.NEXT_PUBLIC_DEV_AUTH === "1";
+  const [devEmail, setDevEmail] = React.useState("");
+  const [devPassword, setDevPassword] = React.useState("");
 
   React.useEffect(() => {
     const color = ACCENT_MAP[branding.accent] ?? ACCENT_MAP.sun;
@@ -43,6 +48,24 @@ export function LoginForm({ branding }: { branding: PublicBranding }) {
       setLoading(false);
       setErrorMsg("Could not start sign-in. Please try again.");
     }
+  };
+
+  const handleDevSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!devAuthEnabled) return;
+    setLoading(true);
+    setErrorMsg(null);
+    const supabase = createClient();
+    const { error } = await supabase.auth.signInWithPassword({
+      email: devEmail,
+      password: devPassword,
+    });
+    if (error) {
+      setLoading(false);
+      setErrorMsg(error.message);
+      return;
+    }
+    window.location.href = "/";
   };
 
   return (
@@ -127,6 +150,44 @@ export function LoginForm({ branding }: { branding: PublicBranding }) {
           >
             {errorMsg}
           </div>
+        )}
+
+        {devAuthEnabled && (
+          <form
+            onSubmit={handleDevSignIn}
+            style={{
+              marginTop: 24,
+              paddingTop: 20,
+              borderTop: "1px dashed var(--rule)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              textAlign: "left",
+            }}
+          >
+            <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+              Dev sign-in (local only)
+            </div>
+            <input
+              type="email"
+              placeholder="email"
+              value={devEmail}
+              onChange={(e) => setDevEmail(e.target.value)}
+              required
+              style={{ padding: 8, border: "1px solid var(--rule)", borderRadius: 6, fontSize: 13 }}
+            />
+            <input
+              type="password"
+              placeholder="password"
+              value={devPassword}
+              onChange={(e) => setDevPassword(e.target.value)}
+              required
+              style={{ padding: 8, border: "1px solid var(--rule)", borderRadius: 6, fontSize: 13 }}
+            />
+            <button type="submit" className="btn btn-ghost" disabled={loading}>
+              Sign in (dev)
+            </button>
+          </form>
         )}
 
         <div

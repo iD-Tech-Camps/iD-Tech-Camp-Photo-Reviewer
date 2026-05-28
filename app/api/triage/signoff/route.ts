@@ -3,14 +3,12 @@ import { requireRole } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
-// Dual-write shim during phases 2-3 of the location-approval refactor.
-// Resolves the camp_week → location, then:
-//   1. Inserts a location_approvals row (new model — drains in-flight triage).
-//   2. Writes the legacy camp_weeks.signoff_at / signoff_by columns so the old
-//      senior-review screen keeps rendering historical signoff state.
-// Removed entirely in phase 4. The flag_second_week_recheck parameter is
-// silently dropped (the new model has no sibling-week side effects); we log a
-// warning when callers still set it so we know if anything depends on it.
+// Records the lead's per-week review as an audit marker on camp_weeks.
+// This is intentionally NOT the queue-affecting action — approval of the
+// location (which closes the triage queue for the season) lives on
+// /api/locations/[id]/approve. Phase 3 of the location-approval refactor
+// split these two concepts so leads can record "I reviewed this week"
+// without committing to "this location is closed for the season."
 export async function POST(request: Request) {
   const auth = await requireRole(["senior", "admin"]);
   if ("error" in auth) {
@@ -26,36 +24,24 @@ export async function POST(request: Request) {
   }
 
   if (flagRecheck) {
+    // The recheck flag was a legacy concept tied to sibling-week side
+    // effects, which were retired in migration 43. Phase 4 removes the
+    // param entirely; for now we accept and ignore it.
     console.warn(
-      "[/api/triage/signoff] flag_second_week_recheck is deprecated; the location-approval model has no sibling-week side effects.",
+      "[/api/triage/signoff] flag_second_week_recheck is no longer supported; ignored.",
     );
   }
 
-  // Resolve camp_week → location.
-  const { data: week, error: weekErr } = await auth.supabase
-    .from("camp_weeks")
-    .select("id, location_id")
-    .eq("id", campWeekId)
-    .single();
-
-  if (weekErr || !week) {
-    return NextResponse.json(
-      { error: weekErr?.message ?? "camp_week not found" },
-      { status: 404 },
-    );
-  }
-
-  // Single SECURITY DEFINER RPC does both writes atomically: new
-  // location_approvals row + legacy camp_weeks.signoff_at/signoff_by columns.
-  // Phase 4 drops the legacy parameter and the column writes.
-  const { error: approveErr } = await auth.supabase.rpc("approve_location", {
-    p_location_id: week.location_id,
-    p_season_start: null,
-    p_legacy_camp_week_id: campWeekId,
+  const { error } = await auth.supabase.rpc("triage_signoff_camp_week", {
+    p_camp_week_id: campWeekId,
+    p_flag_second_week_recheck: false,
   });
-  if (approveErr && approveErr.code !== "23505") {
-    // 23505 = already approved this season; treat as idempotent.
-    return NextResponse.json({ error: approveErr.message }, { status: 500 });
+
+  if (error) {
+    if (error.code === "P0002") {
+      return NextResponse.json({ error: "camp week not found" }, { status: 404 });
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });
