@@ -2,6 +2,30 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type LocationApprovalStatus = "unapproved" | "approved" | "reopened";
 
+// Lifecycle buckets for the lead hub. Computed from approval status + photo
+// counts + season window so the hub can section locations by where they
+// are in the workflow instead of showing a flat list of 80+ "needs your
+// review" cards (most of which are dormant).
+export type LocationLifecycle =
+  | "needs_attention"   // unapproved, has photos in this season's eligible weeks
+  | "awaiting_re_review"// approval was revoked, now back in queue
+  | "photos_arriving"   // unapproved, first eligible week has started but no photos synced yet
+  | "upcoming"          // unapproved, first eligible week is in the future
+  | "approved"          // approved this season
+  | "out_of_season";    // no triage-eligible weeks at all this season
+
+export function classifyLocation(
+  loc: { approvalStatus: LocationApprovalStatus; totalPhotos: number; firstWeekStart: string | null },
+  todayYmd: string,
+): LocationLifecycle {
+  if (loc.approvalStatus === "approved") return "approved";
+  if (loc.approvalStatus === "reopened") return "awaiting_re_review";
+  if (!loc.firstWeekStart) return "out_of_season";
+  if (loc.firstWeekStart > todayYmd) return "upcoming";
+  if (loc.totalPhotos === 0) return "photos_arriving";
+  return "needs_attention";
+}
+
 export type LocationSummary = {
   id: string;
   name: string;

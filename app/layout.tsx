@@ -46,7 +46,13 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      {/* suppressHydrationWarning: browser extensions (ColorZilla, Grammarly,
+          dark-reader, etc.) inject attributes into <body> before React
+          hydrates, which trips an SSR/CSR mismatch warning. The mismatch is
+          benign — React still hydrates the children correctly. This is the
+          Next.js-documented pattern for this scenario; it does NOT suppress
+          warnings for children, only for the body element itself. */}
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

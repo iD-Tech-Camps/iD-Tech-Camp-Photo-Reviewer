@@ -7,14 +7,15 @@ import { fetchTags, type Tag } from "@/lib/tags";
 import { SeniorWeekDashboard } from "@/components/screens/SeniorWeekDashboard";
 import {
   approveLocation,
+  classifyLocation,
   fetchLocationDetail,
   fetchLocationSummaries,
   postFeedback,
   revokeLocation,
   type FeedbackEvent,
-  type LocationApprovalStatus,
   type LocationCampWeek,
   type LocationDetail,
+  type LocationLifecycle,
   type LocationSummary,
 } from "@/lib/location-approval";
 import {
@@ -24,29 +25,84 @@ import {
   type SeniorReviewView,
 } from "@/lib/app-route";
 
-type Filter = "all" | "awaiting" | "approved" | "revoked";
-
-const STATUS_LABEL: Record<LocationApprovalStatus, string> = {
-  unapproved: "Needs your review",
-  approved: "Approved",
-  reopened: "Awaiting re-review",
-};
-
-// Reopened locations re-enter the normal review flow; the "re-" prefix in
-// the label is enough signal — no need for a rose/alarm tone.
-const STATUS_TONE: Record<LocationApprovalStatus, string> = {
-  unapproved: "var(--ink-3)",
-  approved: "var(--moss)",
-  reopened: "var(--ink-3)",
-};
-
-function statusMatchesFilter(status: LocationApprovalStatus, filter: Filter): boolean {
-  if (filter === "all") return true;
-  if (filter === "awaiting") return status === "unapproved";
-  if (filter === "approved") return status === "approved";
-  if (filter === "revoked") return status === "reopened";
-  return true;
+// Per-card status label keyed on lifecycle stage so "Needs your review" stops
+// appearing on dormant locations. Sections supply the broader grouping; this
+// label is the per-row hint about what specifically is going on.
+function statusForLifecycle(
+  stage: LocationLifecycle,
+  loc: LocationSummary,
+): { label: string; tone: string } {
+  switch (stage) {
+    case "needs_attention":
+      if (loc.pendingCount > 0 || loc.inProgressCount > 0) {
+        return { label: "Photos waiting for review", tone: "var(--ink-3)" };
+      }
+      return { label: "Ready for your approval", tone: "var(--sun)" };
+    case "awaiting_re_review":
+      return { label: "Awaiting re-review", tone: "var(--ink-3)" };
+    case "photos_arriving":
+      return { label: "Awaiting photos", tone: "var(--ink-3)" };
+    case "upcoming":
+      return {
+        label: loc.firstWeekStart
+          ? `Starts ${new Date(loc.firstWeekStart).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+          : "Upcoming",
+        tone: "var(--ink-3)",
+      };
+    case "approved":
+      return { label: "Approved", tone: "var(--moss)" };
+    case "out_of_season":
+      return { label: "Not in season", tone: "var(--ink-3)" };
+  }
 }
+
+type SectionKey = LocationLifecycle;
+
+const SECTION_META: Record<
+  SectionKey,
+  { title: string; defaultCollapsed: boolean; hideWhenEmpty: boolean; empty?: string }
+> = {
+  needs_attention: {
+    title: "Needs your attention",
+    defaultCollapsed: false,
+    hideWhenEmpty: false,
+    empty: "All caught up — nothing waiting on you.",
+  },
+  awaiting_re_review: {
+    title: "Awaiting re-review",
+    defaultCollapsed: false,
+    hideWhenEmpty: true,
+  },
+  photos_arriving: {
+    title: "Photos arriving",
+    defaultCollapsed: false,
+    hideWhenEmpty: true,
+  },
+  upcoming: {
+    title: "Upcoming",
+    defaultCollapsed: false,
+    hideWhenEmpty: true,
+  },
+  approved: {
+    title: "Approved",
+    defaultCollapsed: true,
+    hideWhenEmpty: true,
+  },
+  out_of_season: {
+    title: "Not in current season",
+    defaultCollapsed: true,
+    hideWhenEmpty: true,
+  },
+};
+
+const SECTION_ORDER: SectionKey[] = [
+  "needs_attention",
+  "awaiting_re_review",
+  "photos_arriving",
+  "upcoming",
+  "approved",
+  "out_of_season",
+];
 
 function relativeDate(iso: string | null): string {
   if (!iso) return "";
@@ -136,8 +192,13 @@ function LocationListView({
 }) {
   const supabase = React.useMemo(() => createClient(), []);
   const [locations, setLocations] = React.useState<LocationSummary[] | null>(null);
-  const [filter, setFilter] = React.useState<Filter>("all");
   const [error, setError] = React.useState<string | null>(null);
+  const [collapsed, setCollapsed] = React.useState<Partial<Record<SectionKey, boolean>>>(() => {
+    const init: Partial<Record<SectionKey, boolean>> = {};
+    for (const k of SECTION_ORDER) init[k] = SECTION_META[k].defaultCollapsed;
+    return init;
+  });
+  void toast;
 
   React.useEffect(() => {
     let cancelled = false;
@@ -154,16 +215,41 @@ function LocationListView({
     };
   }, [supabase]);
 
-  const filtered = React.useMemo(
-    () => (locations ?? []).filter((l) => statusMatchesFilter(l.approvalStatus, filter)),
-    [locations, filter],
-  );
+  const today = new Date().toISOString().slice(0, 10);
+  const sections = React.useMemo(() => {
+    const buckets: Record<SectionKey, LocationSummary[]> = {
+      needs_attention: [],
+      awaiting_re_review: [],
+      photos_arriving: [],
+      upcoming: [],
+      approved: [],
+      out_of_season: [],
+    };
+    for (const loc of locations ?? []) {
+      const stage = classifyLocation(loc, today);
+      buckets[stage].push(loc);
+    }
+    // Sort each bucket. Needs-attention first by pending desc (most urgent
+    // at the top), upcoming by start date asc, approved by most-recently
+    // approved first, others alphabetically.
+    buckets.needs_attention.sort((a, b) => (b.pendingCount + b.inProgressCount) - (a.pendingCount + a.inProgressCount) || a.name.localeCompare(b.name));
+    buckets.awaiting_re_review.sort((a, b) => (b.revokedAt ?? "").localeCompare(a.revokedAt ?? ""));
+    buckets.photos_arriving.sort((a, b) => (a.firstWeekStart ?? "").localeCompare(b.firstWeekStart ?? ""));
+    buckets.upcoming.sort((a, b) => (a.firstWeekStart ?? "").localeCompare(b.firstWeekStart ?? ""));
+    buckets.approved.sort((a, b) => (b.approvedAt ?? "").localeCompare(a.approvedAt ?? ""));
+    buckets.out_of_season.sort((a, b) => a.name.localeCompare(b.name));
+    return buckets;
+  }, [locations, today]);
 
   const total = locations?.length ?? 0;
-  const approvedCount = (locations ?? []).filter((l) => l.approvalStatus === "approved").length;
-  const awaitingCount = (locations ?? []).filter((l) => l.approvalStatus === "unapproved").length;
-  const revokedCount = (locations ?? []).filter((l) => l.approvalStatus === "reopened").length;
-  void toast;
+  const inFocus =
+    sections.needs_attention.length +
+    sections.awaiting_re_review.length +
+    sections.photos_arriving.length +
+    sections.upcoming.length;
+
+  const toggle = (k: SectionKey) =>
+    setCollapsed((prev) => ({ ...prev, [k]: !prev[k] }));
 
   return (
     <>
@@ -173,59 +259,126 @@ function LocationListView({
         sub={
           locations === null
             ? "Loading…"
-            : `${total} location${total === 1 ? "" : "s"} · ${approvedCount} approved · ${awaitingCount} awaiting`
+            : `${inFocus} active · ${sections.approved.length} approved · ${total} total`
         }
       />
-      <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         {error && <div className="card" style={{ color: "var(--rose)", fontSize: 12 }}>{error}</div>}
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {(
-            [
-              ["all", `All (${total})`],
-              ["awaiting", `Awaiting (${awaitingCount})`],
-              ["approved", `Approved (${approvedCount})`],
-              ["revoked", `Revoked (${revokedCount})`],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              className={"btn " + (filter === key ? "btn-primary" : "btn-ghost")}
-              onClick={() => setFilter(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        {SECTION_ORDER.map((key) => {
+          const meta = SECTION_META[key];
+          const rows = sections[key];
+          if (meta.hideWhenEmpty && rows.length === 0) return null;
+          const isCollapsed = collapsed[key] ?? meta.defaultCollapsed;
 
-        {filtered.length === 0 && locations !== null && (
-          <div className="card" style={{ color: "var(--ink-3)" }}>
-            No locations match this filter.
-          </div>
-        )}
-
-        {filtered.map((loc) => (
-          <LocationRow key={loc.id} loc={loc} onOpen={() => onOpenLocation(loc.id)} />
-        ))}
+          return (
+            <section key={key} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <button
+                type="button"
+                onClick={() => toggle(key)}
+                style={{
+                  background: "transparent",
+                  border: 0,
+                  padding: 0,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: 8,
+                  color: "inherit",
+                  font: "inherit",
+                }}
+                aria-expanded={!isCollapsed}
+              >
+                <span
+                  aria-hidden
+                  style={{
+                    display: "inline-block",
+                    width: 10,
+                    transform: isCollapsed ? "rotate(-90deg)" : "rotate(0deg)",
+                    transition: "transform 120ms",
+                    color: "var(--ink-3)",
+                    fontSize: 10,
+                  }}
+                >
+                  ▾
+                </span>
+                <h2 className="page-eyebrow" style={{ margin: 0 }}>
+                  {meta.title} ({rows.length})
+                </h2>
+              </button>
+              {!isCollapsed && (
+                <>
+                  {rows.length === 0 ? (
+                    <div className="card" style={{ color: "var(--ink-3)", fontSize: 13 }}>
+                      {meta.empty ?? "Nothing here."}
+                    </div>
+                  ) : (
+                    rows.map((loc) => (
+                      <LocationRow
+                        key={loc.id}
+                        loc={loc}
+                        stage={key}
+                        onOpen={() => onOpenLocation(loc.id)}
+                      />
+                    ))
+                  )}
+                </>
+              )}
+            </section>
+          );
+        })}
       </div>
     </>
   );
 }
 
-function LocationRow({ loc, onOpen }: { loc: LocationSummary; onOpen: () => void }) {
-  const tone = STATUS_TONE[loc.approvalStatus];
-  const label = STATUS_LABEL[loc.approvalStatus];
-  const isApproved = loc.approvalStatus === "approved";
-  const isReopened = loc.approvalStatus === "reopened";
+function LocationRow({
+  loc,
+  stage,
+  onOpen,
+}: {
+  loc: LocationSummary;
+  stage: LocationLifecycle;
+  onOpen: () => void;
+}) {
+  const { label, tone } = statusForLifecycle(stage, loc);
+  const isApproved = stage === "approved";
+  const isReopened = stage === "awaiting_re_review";
+  const isAttention = stage === "needs_attention";
 
-  // Attribution line below the badge. Tells the lead WHO and WHEN, which
-  // is the most common follow-up question after seeing the status label.
+  // Attribution line: who/when for approved + reopened. Most common follow-up
+  // question right after "what's the status of this location?"
   let attribution: string | null = null;
   if (isApproved && loc.approvedAt) {
     attribution = `by ${loc.approvedByName ?? "—"} · ${relativeDate(loc.approvedAt)}`;
   } else if (isReopened && loc.revokedAt) {
     attribution = `Approval pulled back ${relativeDate(loc.revokedAt)}${loc.revokedByName ? ` by ${loc.revokedByName}` : ""}`;
+  }
+
+  // Stats line: only show counts that exist for this stage, so a "Photos
+  // arriving" card doesn't show "0 photos in eligible weeks" as noise.
+  const stats: React.ReactNode[] = [];
+  if (loc.totalPhotos > 0) {
+    stats.push(
+      <span key="total">{loc.totalPhotos} photos in eligible weeks</span>,
+    );
+  }
+  if (loc.pendingCount > 0) {
+    stats.push(<span key="pending">{loc.pendingCount} pending</span>);
+  }
+  if (loc.flaggedCount > 0) {
+    stats.push(
+      <span key="flagged" style={{ color: "var(--rose)" }}>{loc.flaggedCount} flagged</span>,
+    );
+  }
+  if (loc.lastFeedbackAt) {
+    stats.push(
+      <span key="feedback">
+        Last feedback {relativeDate(loc.lastFeedbackAt)}
+        {loc.lastFeedbackAuthor && <> by {loc.lastFeedbackAuthor}</>}
+      </span>,
+    );
   }
 
   return (
@@ -235,7 +388,7 @@ function LocationRow({ loc, onOpen }: { loc: LocationSummary; onOpen: () => void
           <div style={{ fontWeight: 600, fontSize: 15 }}>{loc.name}</div>
           <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
             {loc.divisionName}
-            {loc.firstWeekStart && (
+            {loc.firstWeekStart && !isApproved && (
               <>
                 {" · "}First week {new Date(loc.firstWeekStart).toLocaleDateString(undefined, {
                   month: "short",
@@ -268,40 +421,27 @@ function LocationRow({ loc, onOpen }: { loc: LocationSummary; onOpen: () => void
         </div>
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          gap: 16,
-          flexWrap: "wrap",
-          fontSize: 12,
-          color: "var(--ink-3)",
-        }}
-      >
-        <span>{loc.totalPhotos} photos in eligible weeks</span>
-        {loc.pendingCount > 0 && <span>{loc.pendingCount} pending</span>}
-        {loc.flaggedCount > 0 && (
-          <span style={{ color: "var(--rose)" }}>{loc.flaggedCount} flagged</span>
-        )}
-        {loc.lastFeedbackAt && (
-          <span>
-            Last feedback {relativeDate(loc.lastFeedbackAt)}
-            {loc.lastFeedbackAuthor && <> by {loc.lastFeedbackAuthor}</>}
-          </span>
-        )}
-      </div>
+      {stats.length > 0 && (
+        <div
+          style={{
+            display: "flex",
+            gap: 16,
+            flexWrap: "wrap",
+            fontSize: 12,
+            color: "var(--ink-3)",
+          }}
+        >
+          {stats}
+        </div>
+      )}
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
         <button
           type="button"
-          className={
-            "btn " +
-            (loc.approvalStatus === "unapproved" || loc.approvalStatus === "reopened"
-              ? "btn-primary"
-              : "btn-ghost")
-          }
+          className={"btn " + (isAttention ? "btn-primary" : "btn-ghost")}
           onClick={onOpen}
         >
-          {loc.approvalStatus === "approved" ? "View location" : "Open location"}
+          {isApproved ? "View location" : "Open location"}
         </button>
       </div>
     </div>
@@ -413,8 +553,8 @@ function LocationDetailView({
     );
   }
 
-  const tone = STATUS_TONE[detail.approvalStatus];
-  const statusLabel = STATUS_LABEL[detail.approvalStatus];
+  const detailStage = classifyLocation(detail, new Date().toISOString().slice(0, 10));
+  const { label: statusLabel, tone } = statusForLifecycle(detailStage, detail);
 
   return (
     <>
