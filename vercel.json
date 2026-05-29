@@ -5,10 +5,6 @@
       "schedule": "0 8 * * *"
     },
     {
-      "path": "/api/triage/sample-burst",
-      "schedule": "0 19 * * 2"
-    },
-    {
       "path": "/api/triage/sweep-claims",
       "schedule": "*/5 * * * *"
     },

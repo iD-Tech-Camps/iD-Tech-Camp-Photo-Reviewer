@@ -57,9 +57,8 @@ If **Sync now** returns 500 or 503 with `server_config_incomplete`, one or more 
 
 1. SmugMug sync populates `photos` under `camp_weeks`.
 2. **1st week** per location is derived from `triage_config` window (or admin override).
-3. Reviewers open **Camp Quality Review**, claim a batch (max 3 active claim batches), mark photos clean or flag with issues.
-4. Tuesday sample pull prioritizes unsampled pending photos (`sampled_for_burst`).
-5. When a week is done, the **lead reviewer** reviews flagged photos, toggles positive rubric fields, signs off (optionally flags 2nd week for follow-up review).
+3. Reviewers open **Camp Quality Review**, claim a batch (max 3 active claim batches), mark photos clean or flag with issues. Every pending photo at an unapproved location is in scope, newest first.
+4. The **lead reviewer** works at the location level: once a location looks good for the season they **approve** it, which drains the remaining triage queue there; revoke reopens it. Leads can also mark an individual week as reviewed (audit marker) without closing the location.
 
 ## Points & My stats
 
@@ -94,5 +93,4 @@ The harness refuses to run against a non-local Supabase URL — fixture seeding 
 | Path | Schedule |
 |------|----------|
 | `/api/smugmug/sync-scheduled` | Daily 08:00 UTC |
-| `/api/triage/sample-burst` | Tuesday 19:00 UTC |
 | `/api/triage/sweep-claims` | Every 5 minutes |

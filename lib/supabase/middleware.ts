@@ -9,7 +9,6 @@ const PUBLIC_PATHS = [
   "/login",
   "/auth/callback",
   "/api/smugmug/sync-scheduled",
-  "/api/triage/sample-burst",
   "/api/triage/sweep-claims",
 ];
 

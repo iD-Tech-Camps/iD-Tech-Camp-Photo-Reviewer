@@ -51,7 +51,6 @@ export type ClaimPhoto = {
   caption: string | null;
   capturedAt: string | null;
   triageState: string;
-  sampledForBurst: boolean;
 };
 
 export async function fetchClaimPhotos(
@@ -60,9 +59,8 @@ export async function fetchClaimPhotos(
 ): Promise<ClaimPhoto[]> {
   const { data, error } = await supabase
     .from("photos")
-    .select("id, thumbnail_url, image_url, caption, captured_at, triage_state, sampled_for_burst")
+    .select("id, thumbnail_url, image_url, caption, captured_at, triage_state")
     .eq("triage_claim_id", claimId)
-    .order("sampled_for_burst", { ascending: false })
     .order("captured_at", { ascending: true });
   if (error) throw error;
   return ((data ?? []) as Array<{
@@ -72,7 +70,6 @@ export async function fetchClaimPhotos(
     caption: string | null;
     captured_at: string | null;
     triage_state: string;
-    sampled_for_burst: boolean;
   }>).map((p) => ({
     id: p.id,
     thumbnailUrl: p.thumbnail_url,
@@ -80,7 +77,6 @@ export async function fetchClaimPhotos(
     caption: p.caption,
     capturedAt: p.captured_at,
     triageState: p.triage_state,
-    sampledForBurst: p.sampled_for_burst,
   }));
 }
 

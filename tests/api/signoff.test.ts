@@ -10,11 +10,10 @@ beforeAll(async () => {
 
   const supabase = service();
 
-  // Claim + clean every photo so the week recomputes to triage_done. The new
-  // shim doesn't require the week to be in triage_done (it writes the
-  // location-level approval regardless), but doing this keeps the signoff_at
-  // dual-write assertion meaningful since the legacy column write only
-  // succeeds when signoff_at is null.
+  // Claim + clean every photo so the week recomputes to triage_done. The
+  // per-week marker RPC doesn't require any particular triage_state, but
+  // doing this keeps the signoff_at assertion meaningful since the column
+  // write only fills in when signoff_at is null.
   const { error: claimErr } = await supabase.from("triage_claims").insert({
     camp_week_id: fixture.campWeekId,
     reviewer_id: fixture.reviewer.id,
@@ -79,7 +78,6 @@ describe("POST /api/triage/signoff (per-week audit marker)", () => {
 
     const res = await postSignoff({
       camp_week_id: fixture.campWeekId,
-      flag_second_week_recheck: false,
     });
     expect(res.status).toBe(200);
 
@@ -105,7 +103,6 @@ describe("POST /api/triage/signoff (per-week audit marker)", () => {
 
     await postSignoff({
       camp_week_id: fixture.campWeekId,
-      flag_second_week_recheck: false,
     });
 
     const { data: approvals } = await service()

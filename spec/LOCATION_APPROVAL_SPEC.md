@@ -296,7 +296,7 @@ The following triggers no longer fire (drop in the same migration as the new log
 - `tg_camp_weeks_after_update_first_senior_touch` — no longer needed; no `senior_review` state assignment.
 - `tg_camp_weeks_after_update_signoff` — no longer needed; signoff is no longer the unit of approval. The associated recheck side-effect (flipping a sibling week to `second_week_recheck`) is dropped along with it. Approval has no sibling-week side effects.
 
-The `triage_signoff_camp_week` RPC is retained but rewritten in phase 2 to insert into `location_approvals` (dual-write per Decision 6). Phase 4 removes it.
+The `triage_signoff_camp_week` RPC is **retained** as the per-week "Mark week as reviewed" audit marker (writes `camp_weeks.signoff_at`/`signoff_by` only). Phase 3 decoupled it from location-level approval; phase 4 dropped its dead `p_flag_second_week_recheck` parameter but kept the RPC and columns. (Earlier drafts planned to remove it entirely — superseded once phase 3 repurposed it.)
 
 ---
 
@@ -313,14 +313,11 @@ The `triage_signoff_camp_week` RPC is retained but rewritten in phase 2 to inser
 
 ### 5b. Modified routes
 
-**`/api/triage/signoff`** (shim during phases 2-3, removed in phase 4):
+**`/api/triage/signoff`** (retained post-refactor as the per-week review marker):
 
-- Continues to accept its existing body (`{ camp_week_id, flag_second_week_recheck }`).
-- Resolves the camp_week → location, then **dual-writes**:
-  - Inserts a `location_approvals` row for `(location_id, current season)`.
-  - Updates `camp_weeks.signoff_at` / `signoff_by` (legacy column writes preserved for rollback safety).
-- `flag_second_week_recheck` is **silently ignored**; the new model has no sibling-week side effects. Log a deprecation warning when the flag is true so we know if any caller still sets it.
-- Returns the same `{ ok: true }` shape so existing clients keep working.
+- Accepts `{ camp_week_id }` and writes `camp_weeks.signoff_at` / `signoff_by` via `triage_signoff_camp_week` — a pure per-week audit marker, **not** a queue-affecting action. Location-level approval lives at `/api/locations/[id]/approve`.
+- Phase 3 decoupled this from location approval; phase 4 dropped the dead `flag_second_week_recheck` body field (no sibling-week side effects exist).
+- Returns `{ ok: true }`.
 
 **`/api/triage/events`** — adds a grace window for the approve-drain race:
 
@@ -352,7 +349,7 @@ if (isLocationApproved(locationIdForPhoto)) {
 
 The 60-second window is server-side derived from `now() - approved_at`, never trusted from a client timestamp.
 
-**`/api/triage/sample-burst`** — kept available through phase 2-3 for rollback; phase 4 removes the route entirely and the corresponding `vercel.json` cron entry.
+**`/api/triage/sample-burst`** — **removed in phase 4** (migration 46) along with its `vercel.json` cron entry, the `lib/triage-sample-burst.ts` sampler, the `triage_reset_sample_flags` RPC + admin controls, and the `photos.sampled_for_burst` column. There is no longer a queue to sample.
 
 ### 5c. Reviewer queue ordering
 
@@ -370,7 +367,7 @@ where photos.triage_state = 'pending'
 order by photos.captured_at desc, photos.id desc;
 ```
 
-The `sampled_for_burst desc` clause is removed from the order. The column stays through phase 4, then drops.
+The `sampled_for_burst desc` clause is removed from the order (newest-first). The column was dropped in phase 4 (migration 46).
 
 ---
 
@@ -421,8 +418,11 @@ Per the IMPLEMENTATION_PLAN.md phases, split as follows:
 | 41 | `20260527000041_location_approval_schema.sql` | 1 | Tables, view, RPC, RLS, backfill `INSERT … SELECT` from currently-signed-off camp_weeks. No trigger changes. |
 | 42 | `20260528000042_location_approval_enum.sql` | 2 | `alter type claim_release_reason add value 'location_approved'`. Standalone so the value commits before the logic migration's literal references parse. |
 | 43 | `20260528000043_location_approval_logic.sql` | 2 | Drop legacy triggers (§4d), modify existing triggers (§4c), create new triggers (§4a-b). Idempotent (`create or replace`, `drop policy if exists`). |
+| 46 | `20260529000046_location_approval_phase4_cleanup.sql` | 4 | Drop the sample-burst sampler surface (`photos.sampled_for_burst` + pool index, `triage_config` burst columns, `triage_reset_sample_flags`), and drop the dead dual-write shim params (`approve_location.p_legacy_camp_week_id`, `triage_signoff_camp_week.p_flag_second_week_recheck`). |
 
 Phases 1 and 2 land as separate PRs so the schema can soak for 24-48h with zero behavioral change before the logic swap.
+
+**Phase 4 note (shipped 2026-05-29):** The original plan called for removing the `/api/triage/signoff` shim and `camp_weeks.signoff_at`/`signoff_by` entirely. Phase 3 repurposed that route, the `triage_signoff_camp_week` RPC, and those columns as the live **per-week "Mark week as reviewed" audit marker** (decoupled from location-level approval), so they are **kept**. Phase 4 only removed the genuinely dead pieces: the sample-burst sampler and the two dual-write shim parameters.
 
 ---
 

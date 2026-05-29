@@ -16,9 +16,8 @@ import {
 // Reviewer-facing stats hub. See spec/GAMIFICATION_SPEC.md §5d.
 //
 // The "today / this week / all-time" toggle buckets points_ledger.occurred_at
-// by UTC day — same convention as the Tuesday UTC sample-burst cron. Per-user
-// timezone is intentionally deferred (no UX cost yet; would require either
-// a profile column or a per-request offset).
+// by UTC day. Per-user timezone is intentionally deferred (no UX cost yet;
+// would require either a profile column or a per-request offset).
 
 type WindowKey = "today" | "week" | "all";
 

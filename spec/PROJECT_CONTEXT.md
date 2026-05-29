@@ -24,9 +24,9 @@ The legacy marketing-review queue (approve/flag/points/leaderboard) was removed 
 - **Primary entity:** `camp_weeks` with unified `triage_role` + `triage_state`. `camp_weeks` carry triage state and photos; **approval lives on `locations`** (per season, see [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md)).
 - **Photo triage:** `photos.triage_state` column (not a join table). Mutations go through `SECURITY DEFINER` triggers on `triage_events` / `triage_claims` — not direct client `UPDATE` on `photos`.
 - **Claims:** `triage_claims` stamp pending photos `in_progress`; max **3** active claims per reviewer.
-- **Sampler:** Tuesday UTC burst marks `photos.sampled_for_burst` (fair redistribution per spec §5). **Deprecated in phase 4** of the location-approval refactor — the new model has no queue to sample.
+- **Sampler:** **Removed in phase 4** of the location-approval refactor (the legacy Tuesday `sampled_for_burst` burst). The new model has no queue to sample — every pending photo at an unapproved location is in scope, ordered newest-first.
 - **Quarantine:** `photos.is_quarantined` + `/api/smugmug/quarantine` (`Image.Hidden`) — unchanged from pre-refactor.
-- **Approval (post location-approval refactor):** `location_approvals` row per `(location_id, season_start)`; approve drains in-flight triage at that location, revoke reopens. Legacy `triage_signoff_camp_week` RPC becomes a shim that dual-writes for rollback safety; removed in phase 4. The `camp_weeks.triage_state` values `senior_review` and `complete` are no longer assigned by triggers (enum values retained for historical rows). See [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md).
+- **Approval (post location-approval refactor):** `location_approvals` row per `(location_id, season_start)`; approve drains in-flight triage at that location, revoke reopens. The `triage_signoff_camp_week` RPC is retained as the per-week "Mark week as reviewed" audit marker (`camp_weeks.signoff_at`/`signoff_by`), decoupled from approval. The `camp_weeks.triage_state` values `senior_review` and `complete` are no longer assigned by triggers (enum values retained for historical rows). See [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md).
 - **Photo rating:** `photos.rating_state` + `photo_rating_claims` / `photo_rating_events` — see [`PHOTO_RATING_SPEC.md`](./PHOTO_RATING_SPEC.md). Untouched by the location-approval refactor.
 - **Gamification:** points layer on top of triage via a source-agnostic ledger — see [`GAMIFICATION_SPEC.md`](./GAMIFICATION_SPEC.md).
 
@@ -65,7 +65,7 @@ Trigger functions that `UPDATE photos` must be `SECURITY DEFINER SET search_path
 
 ```
 app/api/smugmug/     # ping, sync-folders, sync-now, sync-scheduled, quarantine
-app/api/triage/      # claims, events (grace window post-refactor), signoff (shim post-refactor), sample-burst (deprecated phase 4), sweep-claims
+app/api/triage/      # claims, events (grace window post-refactor), signoff (per-week review marker), sweep-claims
 app/api/locations/[id]/  # approve, revoke, feedback — post location-approval refactor
 app/api/photo-rating/  # claims, events, week-tags, sweep-claims
 components/screens/

@@ -161,7 +161,7 @@ export function SeniorWeekDashboard({
     if (readOnly) return;
     setFinishBusy(true);
     try {
-      await signoffCampWeek(supabase, campWeekId, false);
+      await signoffCampWeek(supabase, campWeekId);
       toast.show("Week marked as reviewed.", "check");
       setFinishConfirmOpen(false);
       await reload();

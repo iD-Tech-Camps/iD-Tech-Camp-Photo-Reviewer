@@ -442,7 +442,7 @@ Released rows trigger §4d revert automatically.
 
 ## 5. Sampler algorithm — Tuesday burst
 
-> **DEPRECATED post location-approval refactor.** In the new model there is no queue to sample — every photo at an unapproved location is in scope, every photo at an approved location is `not_required`. The route, the cron, the `sampled_for_burst` column, and the `triage_config.sample_burst_*` columns are dropped in phase 4 of the refactor. The section is preserved unchanged below for historical reference. See [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md) §5c for the replacement queue ordering.
+> **REMOVED in phase 4 (migration 46).** In the new model there is no queue to sample — every photo at an unapproved location is in scope, every photo at an approved location is `not_required`. The route, the cron, the `sampled_for_burst` column, and the `triage_config.sample_burst_*` columns have been dropped. The section is preserved unchanged below for historical reference. See [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md) §5c for the replacement queue ordering.
 
 **Schedule:** [`vercel.json`](vercel.json) invokes **`/api/triage/sample-burst`** on **`0 19 * * 2`** (Tuesday 19:00 UTC). Defaults in **`triage_config`** (`sample_burst_dow = 2`, **`sample_burst_hour = 19`**) align with that cron.
 
@@ -497,8 +497,8 @@ Under `app/api/triage/` (and admin helpers). Mutations follow existing SmugMug p
 | `/api/triage/claims/[id]/release` | POST | owner or admin | |
 | `/api/triage/events` | POST | authenticated | Reviewer `clean` / `flag` + tags + optional quarantine intent. **Post-refactor:** 60-second grace window for events landing immediately after location approval; beyond that → **410 Gone**. See LOCATION_APPROVAL_SPEC §5b. |
 | `/api/triage/events/senior` | POST | senior or admin | Senior actions + quarantine reconcile hooks. |
-| `/api/triage/signoff` | POST | senior or admin | Prefer **`SECURITY DEFINER` RPC` for DB writes (Q3). **DEPRECATED post location-approval refactor:** becomes a dual-write shim (inserts `location_approvals` row + writes legacy `camp_weeks.signoff_at`). Removed in phase 4. |
-| `/api/triage/sample-burst` | GET / POST | `CRON_SECRET` or admin | Implements §5 gates + sampler. **DEPRECATED post location-approval refactor:** removed in phase 4 along with the cron entry. |
+| `/api/triage/signoff` | POST | senior or admin | **RETAINED post location-approval refactor** as the per-week "Mark week as reviewed" audit marker (`triage_signoff_camp_week` writes `camp_weeks.signoff_at`/`signoff_by` only). Decoupled from location-level approval; the dead `flag_second_week_recheck` field was dropped in phase 4. |
+| `/api/triage/sample-burst` | GET / POST | `CRON_SECRET` or admin | Implements §5 gates + sampler. **REMOVED in phase 4 (migration 46)** along with the cron entry. |
 | `/api/triage/sweep-claims` | GET | `CRON_SECRET` | Runs §4g. |
 | `/api/locations/[id]/approve` | POST | senior or admin | **New post-refactor.** Inserts `location_approvals` row; drains in-flight triage at this location. |
 | `/api/locations/[id]/revoke` | POST | senior or admin | **New post-refactor.** Sets `revoked_at`/`revoked_by` on the active approval; reopens triage-eligible photos. |
@@ -512,7 +512,7 @@ Under `app/api/triage/` (and admin helpers). Mutations follow existing SmugMug p
 | Path | Schedule | Purpose |
 |---|---|---|
 | `/api/smugmug/sync-scheduled` | `0 8 * * *` | Existing photo sync. |
-| `/api/triage/sample-burst` | **`0 19 * * 2`** | Tuesday 19:00 UTC sample burst (Q7). **DEPRECATED post location-approval refactor — removed in phase 4.** |
+| `/api/triage/sample-burst` | ~~**`0 19 * * 2`**~~ | Tuesday 19:00 UTC sample burst (Q7). **REMOVED in phase 4 (migration 46).** |
 | `/api/triage/sweep-claims` | `*/5 * * * *` | Claim expiry sweep. |
 
 ---

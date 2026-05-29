@@ -3,7 +3,6 @@
 import React from "react";
 import { PageHeader, type ToastApi } from "@/components/Shell";
 import { createClient } from "@/lib/supabase/client";
-import { resetAllSampleFlags } from "@/lib/triage-config";
 import {
   fetchLatestSyncSummary,
   fetchRecentSyncLog,
@@ -16,7 +15,6 @@ import {
 } from "@/lib/sync-log";
 
 export function SmugMugImport({ toast }: { toast?: ToastApi }) {
-  const supabase = React.useMemo(() => createClient(), []);
   const [refreshTick, setRefreshTick] = React.useState(0);
   const bumpRefresh = React.useCallback(() => setRefreshTick((t) => t + 1), []);
 
@@ -31,7 +29,7 @@ export function SmugMugImport({ toast }: { toast?: ToastApi }) {
       <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
           <LastSyncCard refreshTick={refreshTick} />
-          <ActionsCard onDone={bumpRefresh} toast={toast} supabase={supabase} />
+          <ActionsCard onDone={bumpRefresh} toast={toast} />
         </div>
         <SyncLogCard refreshTick={refreshTick} />
       </div>
@@ -86,15 +84,12 @@ function LastSyncCard({ refreshTick }: { refreshTick: number }) {
 function ActionsCard({
   onDone,
   toast,
-  supabase,
 }: {
   onDone: () => void;
   toast?: ToastApi;
-  supabase: ReturnType<typeof createClient>;
 }) {
   const [syncing, setSyncing] = React.useState(false);
   const [syncError, setSyncError] = React.useState<string | null>(null);
-  const [maintBusy, setMaintBusy] = React.useState(false);
 
   const onSyncNow = async () => {
     if (syncing) return;
@@ -134,67 +129,20 @@ function ActionsCard({
     }
   };
 
-  const onResetSamples = async () => {
-    if (maintBusy) return;
-    if (!confirm("Reset weekly sample flags on all pending/in-progress photos?")) return;
-    setMaintBusy(true);
-    try {
-      const count = await resetAllSampleFlags(supabase);
-      toast?.show(`Reset sample flags on ${count} photo(s)`);
-    } catch (err: unknown) {
-      toast?.show(err instanceof Error ? err.message : "Reset failed");
-    } finally {
-      setMaintBusy(false);
-    }
-  };
-
-  const onSampleBurst = async () => {
-    if (maintBusy) return;
-    setMaintBusy(true);
-    try {
-      const res = await fetch("/api/triage/sample-burst", { method: "POST" });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(body?.message ?? body?.error ?? `sample-pull failed (${res.status})`);
-      }
-      const n = body?.photosSampled ?? body?.photos_sampled ?? 0;
-      toast?.show(`Sample pull complete · ${n} photo(s) marked`);
-      onDone();
-    } catch (err: unknown) {
-      toast?.show(err instanceof Error ? err.message : "Sample pull failed");
-    } finally {
-      setMaintBusy(false);
-    }
-  };
-
   return (
     <div className="card">
       <h3 className="card-title" style={{ marginBottom: 4 }}>Actions</h3>
       <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
-        Manual sync and review maintenance. Season cutoff comes from App settings.
+        Manual sync. Season cutoff comes from App settings.
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <button
           className="btn btn-primary"
           onClick={onSyncNow}
-          disabled={syncing || maintBusy}
+          disabled={syncing}
           style={{ opacity: syncing ? 0.6 : 1 }}
         >
           {syncing ? "Syncing…" : "Sync now"}
-        </button>
-        <button
-          className="btn"
-          onClick={onResetSamples}
-          disabled={syncing || maintBusy}
-        >
-          Reset sample flags
-        </button>
-        <button
-          className="btn"
-          onClick={onSampleBurst}
-          disabled={syncing || maintBusy}
-        >
-          Run sample pull now
         </button>
       </div>
       {syncError && (

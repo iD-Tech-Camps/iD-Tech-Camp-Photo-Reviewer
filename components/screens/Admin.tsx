@@ -1082,7 +1082,6 @@ const FAVICON_ACCEPT = "image/png";
 type TriageForm = {
   seasonFirstWeekStart: string;
   seasonLastWeekStart: string;
-  maxForTriagePerBurst: number;
   batchSize: number;
   claimExpiryMinutes: number;
 };
@@ -1097,7 +1096,6 @@ export function AdminSettings() {
   const [triageForm, setTriageForm] = React.useState<TriageForm>({
     seasonFirstWeekStart: "",
     seasonLastWeekStart: "",
-    maxForTriagePerBurst: 200,
     batchSize: 50,
     claimExpiryMinutes: 60,
   });
@@ -1120,7 +1118,6 @@ export function AdminSettings() {
         setTriageForm({
           seasonFirstWeekStart: c.seasonFirstWeekStart,
           seasonLastWeekStart: c.seasonLastWeekStart,
-          maxForTriagePerBurst: c.maxForTriagePerBurst,
           batchSize: c.batchSize,
           claimExpiryMinutes: c.claimExpiryMinutes,
         });
@@ -1173,7 +1170,6 @@ export function AdminSettings() {
   const triageDirty = triageConfig !== null && (
     triageForm.seasonFirstWeekStart !== triageConfig.seasonFirstWeekStart ||
     triageForm.seasonLastWeekStart !== triageConfig.seasonLastWeekStart ||
-    triageForm.maxForTriagePerBurst !== triageConfig.maxForTriagePerBurst ||
     triageForm.batchSize !== triageConfig.batchSize ||
     triageForm.claimExpiryMinutes !== triageConfig.claimExpiryMinutes
   );
@@ -1438,22 +1434,9 @@ export function AdminSettings() {
           <div className="card">
             <h3 className="card-title" style={{ marginBottom: 4 }}>Review</h3>
             <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
-              Weekly sample schedule is fixed in cron (Tuesday 19:00 UTC). Reset samples and run a sample pull live on Photo sync.
+              Batch size and claim expiry for the reviewer queue.
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-              <FieldRow label="Photos to sample each week">
-                <input
-                  type="number"
-                  min={1}
-                  className="input"
-                  disabled={triageConfig === null || triageBusy}
-                  value={triageForm.maxForTriagePerBurst}
-                  onChange={(e) => setTriageForm((f) => ({
-                    ...f,
-                    maxForTriagePerBurst: Number(e.target.value),
-                  }))}
-                />
-              </FieldRow>
               <FieldRow
                 label="Batch size"
                 hint="How many photos a reviewer pulls when they click Start a batch. Whole week still pulls all pending."

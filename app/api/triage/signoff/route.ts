@@ -17,24 +17,13 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => null);
   const campWeekId = body?.camp_week_id as string | undefined;
-  const flagRecheck = Boolean(body?.flag_second_week_recheck);
 
   if (!campWeekId) {
     return NextResponse.json({ error: "camp_week_id required" }, { status: 400 });
   }
 
-  if (flagRecheck) {
-    // The recheck flag was a legacy concept tied to sibling-week side
-    // effects, which were retired in migration 43. Phase 4 removes the
-    // param entirely; for now we accept and ignore it.
-    console.warn(
-      "[/api/triage/signoff] flag_second_week_recheck is no longer supported; ignored.",
-    );
-  }
-
   const { error } = await auth.supabase.rpc("triage_signoff_camp_week", {
     p_camp_week_id: campWeekId,
-    p_flag_second_week_recheck: false,
   });
 
   if (error) {
