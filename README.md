@@ -37,6 +37,25 @@ CLI link (from repo root): `npx vercel link` → team **i-d-tech**, project **id
 
 If **Sync now** returns 500 or 503 with `server_config_incomplete`, one or more of the rows above is missing on the deployment.
 
+## Database migrations
+
+> ⚠️ **Migrations do not auto-deploy.** There is no CI for the database. Pushing to `main` redeploys the **app code** on Vercel, but schema changes in `supabase/migrations/` must be applied to prod **manually**. Forgetting this leaves deployed code running against an older schema.
+
+Linked production project: **`idtech-photo-reviewer`** (ref `xatxybwbjuusybfmwkbg`). Run `npx supabase link` once if a fresh checkout isn't linked.
+
+```bash
+# 1. Apply + test locally first (resets the local DB through every migration)
+npx supabase db reset
+
+# 2. See what's pending on prod — an empty "Remote" column means not yet applied
+npx supabase migration list --linked
+
+# 3. Apply pending migrations to prod (prompts before running)
+npx supabase db push --linked
+```
+
+**Sequencing with the Vercel deploy:** additive migrations are safe to push before the code. For destructive migrations (dropping columns/functions), make sure the deployed code no longer references the dropped objects first, then push the migration — otherwise the live app errors against the old schema in the gap between the two.
+
 ## Scripts
 
 | Command | Purpose |
@@ -44,6 +63,9 @@ If **Sync now** returns 500 or 503 with `server_config_incomplete`, one or more 
 | `npm run dev` | Dev server |
 | `npm run build` | Production build |
 | `npm run lint` | ESLint |
+| `npx tsc --noEmit` | Type-check (no emit) |
+| `npm run test:unit` | Unit tests — pure logic, no DB |
+| `npm run test:api` | API integration tests — needs the local Supabase stack |
 
 ## Roles
 
@@ -66,16 +88,27 @@ Reviewers earn points for every photo they clean or flag — both reviewer actio
 
 ## Tests (local)
 
-Both suites run against the local Supabase stack (`npx supabase start` — needs Docker).
+Three suites. Unit tests are pure logic and need nothing; the other two run against the local Supabase stack (`npx supabase start` — needs Docker).
 
-**Database trigger tests** — `psql`-style SQL files that exercise schema + triggers directly:
+**Unit tests** — pure functions, no database:
+
+```bash
+npm run test:unit
+```
+
+**Database trigger tests** — `psql`-style SQL files that exercise schema + triggers directly (run after `npx supabase db reset` so the local DB is current):
 
 ```bash
 npx supabase db reset
 npx supabase db query --file supabase/tests/e2e_smugmug_sync_flow.sql
 npx supabase db query --file supabase/tests/e2e_triage_triggers.sql
+npx supabase db query --file supabase/tests/e2e_location_approval.sql
+npx supabase db query --file supabase/tests/e2e_photo_rating_triggers.sql
+npx supabase db query --file supabase/tests/e2e_points_award.sql
 npx supabase db query --file supabase/tests/smoke_test.sql
 ```
+
+Each file wraps its scenarios in a transaction and `ROLLBACK`s at the end, printing a `… passed` row on success (it raises and aborts on the first failed assertion).
 
 **API integration tests** — Vitest invokes each Next.js route handler with a fake `Request`, mocks `lib/api-auth.ts` for auth/role injection, and asserts both the HTTP response and the DB state after each call. Covers happy path + auth-rejection + input-validation path per route under `app/api/triage/*`.
 
