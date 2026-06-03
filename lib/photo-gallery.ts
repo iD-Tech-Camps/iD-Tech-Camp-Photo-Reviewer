@@ -230,6 +230,22 @@ export async function fetchRatedPhotos(
   return photos;
 }
 
+// Senior/admin rating correction (Photo Library). A behind-the-scenes update of
+// the photo's current_rating via the role-gated route — attribution and the
+// reviewer's event are left untouched; only the gallery's sort/display value
+// changes.
+export async function overridePhotoRating(photoId: string, rating: number): Promise<void> {
+  const res = await fetch("/api/photo-rating/override", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ photo_id: photoId, rating }),
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw new Error(json.error ?? `override failed (${res.status})`);
+  }
+}
+
 export type GalleryPhotoMeta = { tagIds: string[]; ratedBy: string | null };
 
 // photoId → { tag ids, reviewer name } from the latest rating event per photo.

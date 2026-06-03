@@ -5,11 +5,13 @@ import { Icon } from "@/components/Icon";
 import { PhotoImg } from "@/components/PhotoImg";
 import { PageHeader, type ToastApi } from "@/components/Shell";
 import { createClient } from "@/lib/supabase/client";
+import { useCurrentUser } from "@/lib/current-user";
 import { smugmugVariantUrl } from "@/lib/smugmug/url-variants";
 import { buildTagLabelLookup } from "@/lib/tags";
 import {
   fetchGalleryFilterOptions,
   fetchRatedPhotos,
+  overridePhotoRating,
   type GalleryFilterOptions,
   type GalleryPhoto,
   type GallerySort,
@@ -44,6 +46,8 @@ const DEFAULT_FILTERS: Filters = {
 
 export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
   const supabase = React.useMemo(() => createClient(), []);
+  const viewer = useCurrentUser();
+  const canEditRating = viewer.role === "senior" || viewer.role === "admin";
   const [options, setOptions] = React.useState<GalleryFilterOptions | null>(null);
   const [filters, setFilters] = React.useState<Filters>(DEFAULT_FILTERS);
   const [photos, setPhotos] = React.useState<GalleryPhoto[]>([]);
@@ -99,6 +103,23 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
   };
 
   const patch = (next: Partial<Filters>) => setFilters((f) => ({ ...f, ...next }));
+
+  // Senior/admin rating correction — a behind-the-scenes edit of the rating
+  // used for sorting/display. Attribution ("rated by") is intentionally left
+  // unchanged; only the star value updates.
+  const overrideRating = async (photoId: string, rating: number): Promise<boolean> => {
+    try {
+      await overridePhotoRating(photoId, rating);
+      setPhotos((prev) =>
+        prev.map((p) => (p.id === photoId ? { ...p, rating } : p)),
+      );
+      toast.show(`Rating corrected to ${rating}★`, "check");
+      return true;
+    } catch (e: unknown) {
+      toast.show(e instanceof Error ? e.message : "Couldn't change rating", "x");
+      return false;
+    }
+  };
 
   const locationOptions = (options?.locations ?? []).filter(
     (l) => !filters.divisionId || l.divisionId === filters.divisionId,
@@ -333,6 +354,8 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
           onClose={() => setLightboxIndex(null)}
           onPrev={() => setLightboxIndex((i) => (i === null || i <= 0 ? i : i - 1))}
           onNext={() => setLightboxIndex((i) => (i === null || i >= photos.length - 1 ? i : i + 1))}
+          canEditRating={canEditRating}
+          onOverrideRating={(rating) => overrideRating(lightboxPhoto.id, rating)}
         />
       )}
     </>
@@ -450,6 +473,8 @@ function GalleryLightbox({
   onClose,
   onPrev,
   onNext,
+  canEditRating,
+  onOverrideRating,
 }: {
   photo: GalleryPhoto;
   tagLabel: (id: string) => string;
@@ -459,7 +484,13 @@ function GalleryLightbox({
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
+  canEditRating: boolean;
+  onOverrideRating: (rating: number) => Promise<boolean>;
 }) {
+  const [editingRating, setEditingRating] = React.useState(false);
+  const [savingRating, setSavingRating] = React.useState(false);
+  // Reset the editor when navigating between photos.
+  React.useEffect(() => { setEditingRating(false); }, [photo.id]);
   React.useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
@@ -587,7 +618,58 @@ function GalleryLightbox({
               {photo.ratedBy && (
                 <span style={{ fontSize: 12, color: "var(--ink-3)" }}>· rated by {photo.ratedBy}</span>
               )}
+              {canEditRating && !editingRating && (
+                <button
+                  type="button"
+                  onClick={() => setEditingRating(true)}
+                  style={{
+                    background: "none", border: "none", padding: 0, cursor: "pointer",
+                    color: "var(--lake, var(--ink-2))", fontSize: 12, textDecoration: "underline",
+                  }}
+                >
+                  Change
+                </button>
+              )}
             </div>
+            {canEditRating && editingRating && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Set rating:</span>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    disabled={savingRating}
+                    aria-label={`${n} star${n === 1 ? "" : "s"}`}
+                    onClick={async () => {
+                      setSavingRating(true);
+                      const ok = await onOverrideRating(n);
+                      setSavingRating(false);
+                      if (ok) setEditingRating(false);
+                    }}
+                    style={{
+                      display: "grid", placeItems: "center",
+                      width: 30, height: 30, borderRadius: 6, cursor: "pointer",
+                      border: "1px solid var(--rule-2)",
+                      background: n === photo.rating ? "var(--sun)" : "var(--paper)",
+                      color: n === photo.rating ? "white" : "var(--ink-2)",
+                    }}
+                  >
+                    {n}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  disabled={savingRating}
+                  onClick={() => setEditingRating(false)}
+                  style={{
+                    background: "none", border: "none", padding: 0, cursor: "pointer",
+                    color: "var(--ink-3)", fontSize: 12, marginLeft: 4,
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
             <div style={{ fontWeight: 600 }}>{photo.locationName} — {photo.weekName}</div>
             <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
               {[photo.divisionName, captured].filter(Boolean).join(" · ")}
