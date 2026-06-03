@@ -333,7 +333,6 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
           onClose={() => setLightboxIndex(null)}
           onPrev={() => setLightboxIndex((i) => (i === null || i <= 0 ? i : i - 1))}
           onNext={() => setLightboxIndex((i) => (i === null || i >= photos.length - 1 ? i : i + 1))}
-          toast={toast}
         />
       )}
     </>
@@ -451,7 +450,6 @@ function GalleryLightbox({
   onClose,
   onPrev,
   onNext,
-  toast,
 }: {
   photo: GalleryPhoto;
   tagLabel: (id: string) => string;
@@ -461,7 +459,6 @@ function GalleryLightbox({
   onClose: () => void;
   onPrev: () => void;
   onNext: () => void;
-  toast: ToastApi;
 }) {
   React.useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -475,11 +472,32 @@ function GalleryLightbox({
     return () => window.removeEventListener("keydown", handler);
   }, [onClose, onPrev, onNext, hasPrev, hasNext]);
 
+  // One SmugMug !sizedetails call per opened photo, shared by the default
+  // download button (for its label + dimensions) and the "More sizes" menu
+  // (so it makes no further call). Browsing the grid stays API-free.
+  const [sizes, setSizes] = React.useState<SizeOption[] | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    setSizes(null);
+    fetch(`/api/smugmug/download?photoId=${photo.id}&action=sizes`)
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled && Array.isArray(j.sizes)) setSizes(j.sizes as SizeOption[]); })
+      .catch(() => { /* default button falls back to a plain label */ });
+    return () => { cancelled = true; };
+  }, [photo.id]);
+
   const xlUrl = photo.thumbnailUrl ? smugmugVariantUrl(photo.thumbnailUrl, "XL") : null;
   const heroSrc = xlUrl ?? photo.imageUrl ?? photo.thumbnailUrl;
   const captured = photo.capturedAt
     ? new Date(photo.capturedAt).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
     : null;
+
+  // The stored image_url is SmugMug's "Original" rendition, so label the
+  // default button with that size's real name + dimensions once known.
+  const original = sizes?.find((s) => s.size === "O") ?? null;
+  const dims = original?.width && original?.height ? ` · ${original.width}×${original.height}` : "";
+  const defaultLabel = original ? `Download (${original.label}${dims})` : "Download Original";
+  const otherSizes = (sizes ?? []).filter((s) => s.size !== "O");
 
   return (
     <div
@@ -599,9 +617,9 @@ function GalleryLightbox({
               style={{ textAlign: "center" }}
             >
               <Icon name="download" size={16} />
-              <span style={{ marginLeft: 6 }}>Download Original</span>
+              <span style={{ marginLeft: 6 }}>{defaultLabel}</span>
             </a>
-            <DownloadMenu photoId={photo.id} toast={toast} />
+            <DownloadMenu photoId={photo.id} sizes={otherSizes} loading={sizes === null} />
             {photo.smugmugUrl && (
               <a
                 className="btn btn-ghost"
@@ -643,13 +661,20 @@ function RatingStars({ rating }: { rating: number }) {
 
 type SizeOption = { size: string; label: string; width: number | null; height: number | null };
 
-// "Other sizes" — only this menu hits SmugMug's !sizedetails API, and only when
-// opened. The primary "Download (full size)" button streams the image we
-// already store, so the common case makes no API call.
-function DownloadMenu({ photoId, toast }: { photoId: string; toast: ToastApi }) {
+// Presentational size menu. `sizes`/`loading` come from the one !sizedetails
+// call the lightbox makes when it opens (shared with the default download
+// button), so opening this menu costs no extra request. Browsing the grid
+// makes no API calls at all.
+function DownloadMenu({
+  photoId,
+  sizes,
+  loading,
+}: {
+  photoId: string;
+  sizes: SizeOption[] | null;
+  loading: boolean;
+}) {
   const [open, setOpen] = React.useState(false);
-  const [sizes, setSizes] = React.useState<SizeOption[] | null>(null);
-  const [loading, setLoading] = React.useState(false);
   // Open up or down depending on which side of the trigger has more room, and
   // cap the height to that space so the menu never spills off-screen.
   const [placement, setPlacement] = React.useState<{ dropUp: boolean; maxHeight: number }>({
@@ -668,7 +693,7 @@ function DownloadMenu({ photoId, toast }: { photoId: string; toast: ToastApi }) 
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  const toggle = async () => {
+  const toggle = () => {
     const next = !open;
     if (next && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
@@ -678,20 +703,6 @@ function DownloadMenu({ photoId, toast }: { photoId: string; toast: ToastApi }) 
       setPlacement({ dropUp, maxHeight: Math.max(160, Math.floor(dropUp ? above : below)) });
     }
     setOpen(next);
-    if (next && sizes === null && !loading) {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/smugmug/download?photoId=${photoId}&action=sizes`);
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error ?? "Couldn't load sizes");
-        setSizes(json.sizes as SizeOption[]);
-      } catch (e: unknown) {
-        toast.show(e instanceof Error ? e.message : "Couldn't load sizes", "x");
-        setOpen(false);
-      } finally {
-        setLoading(false);
-      }
-    }
   };
 
   const download = (size: string) => {

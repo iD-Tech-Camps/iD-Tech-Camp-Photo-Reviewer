@@ -63,11 +63,12 @@ export async function fetchGalleryFilterOptions(
       .from("camp_weeks")
       .select(
         "id, name, starts_on, location_id, " +
-          "locations!inner ( id, name, division_id, divisions!inner ( id, name ) ), " +
+          "locations!inner ( id, name, division_id, is_ignored, divisions!inner ( id, name ) ), " +
           "photos!inner ( id )",
       )
       .eq("photos.rating_state", "rated")
       .eq("photos.is_quarantined", false)
+      .eq("locations.is_ignored", false)
       .limit(1, { referencedTable: "photos" })
       .order("starts_on", { ascending: true }),
     fetchTags(supabase, { purpose: "photo_rating" }),
@@ -149,7 +150,8 @@ export async function fetchRatedPhotos(
     .from("photos")
     .select(SELECT_COLUMNS)
     .eq("rating_state", "rated")
-    .eq("is_quarantined", false);
+    .eq("is_quarantined", false)
+    .eq("camp_weeks.locations.is_ignored", false);
 
   if (filters.campWeekId) {
     query = query.eq("camp_week_id", filters.campWeekId);

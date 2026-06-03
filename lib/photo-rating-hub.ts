@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type PhotoRatingHubWeek = {
   id: string;
   name: string;
+  locationId: string;
   locationName: string;
   ratingRole: string;
   ratingState: string;
@@ -19,16 +20,18 @@ export async function fetchPhotoRatingHubWeeks(
   const { data, error } = await supabase
     .from("camp_weeks")
     .select(
-      "id, name, starts_on, ends_on, rating_role, rating_state, " +
-        "locations!inner ( name ), photos ( rating_state )",
+      "id, name, location_id, starts_on, ends_on, rating_role, rating_state, " +
+        "locations!inner ( name, is_ignored ), photos ( rating_state )",
     )
     .not("rating_state", "in", '("not_required","complete")')
+    .eq("locations.is_ignored", false)
     .order("starts_on", { ascending: true });
   if (error) throw error;
 
   type Raw = {
     id: string;
     name: string;
+    location_id: string;
     starts_on: string;
     ends_on: string;
     rating_role: string;
@@ -42,6 +45,7 @@ export async function fetchPhotoRatingHubWeeks(
     return {
       id: w.id,
       name: w.name,
+      locationId: w.location_id,
       locationName: w.locations?.name ?? "—",
       ratingRole: w.rating_role,
       ratingState: w.rating_state,

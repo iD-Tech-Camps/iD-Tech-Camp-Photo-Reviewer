@@ -20,7 +20,7 @@ import {
   fetchRatingWeekPendingCount,
   type PhotoRatingHubWeek,
 } from "@/lib/photo-rating-hub";
-import { ReviewHubWeekSections } from "@/components/ReviewHubWeekSections";
+import { setLocationIgnored } from "@/lib/locations-ignore";
 import { buildTagLabelLookup, fetchTags, type Tag } from "@/lib/tags";
 import { smugmugVariantUrl } from "@/lib/smugmug/url-variants";
 import { BatchPointsHud } from "@/components/BatchPointsHud";
@@ -36,15 +36,6 @@ import {
 } from "@/lib/app-route";
 
 type View = PhotoRatingView;
-
-const WEEK_STATE_LABEL: Record<string, string> = {
-  not_required: "Not in season",
-  awaiting_photos: "Awaiting photos",
-  photos_in: "Not started",
-  rating_in_progress: "In review",
-  rating_done: "All photos rated",
-  complete: "Done",
-};
 
 const WEEK_ROLE_LABEL: Record<string, string> = {
   none: "",
@@ -108,6 +99,28 @@ export function PhotoRatingApp({ toast }: { toast: ToastApi }) {
     }
   };
 
+  // Leads/admins can hide a junk/test location (e.g. "zz TEST") from every
+  // review surface and the Photo Library.
+  const canHide = user.role === "senior" || user.role === "admin";
+  const hideLocation = async (locationId: string, locationName: string) => {
+    if (!window.confirm(`Hide "${locationName}" from all review screens and the Photo Library?`)) return;
+    try {
+      await setLocationIgnored(supabase, locationId, true);
+      toast.show(`Hid ${locationName}`, "check");
+      await reloadHub();
+    } catch (err: unknown) {
+      toast.show(err instanceof Error ? err.message : "Couldn't hide location", "x");
+    }
+  };
+
+  // Only surface weeks that actually have photos waiting to be rated. Fully
+  // rated weeks (rating_done) and weeks still awaiting uploads drop off.
+  const needsRating = (weeks ?? [])
+    .filter((w) => w.pendingCount > 0)
+    .sort((a, b) =>
+      a.locationName.localeCompare(b.locationName) || a.startsOn.localeCompare(b.startsOn),
+    );
+
   if (view.kind === "claim") {
     return (
       <RatingClaimGrid
@@ -164,44 +177,39 @@ export function PhotoRatingApp({ toast }: { toast: ToastApi }) {
           </div>
         )}
 
-        <ReviewHubWeekSections
-          weeks={weeks}
-          emptyMessage="No camp weeks need photo review right now."
-          renderWeek={(w, section) => (
-            <div className="card" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
-              <div>
-                <div style={{ fontWeight: 600 }}>{w.locationName} — {w.name}</div>
-                <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                  {section === "upcoming"
-                    ? [
-                        WEEK_ROLE_LABEL[w.ratingRole] || w.ratingRole,
-                        `Starts ${w.startsOn}`,
-                        "Awaiting photos",
-                      ].filter(Boolean).join(" · ")
-                    : [
-                        WEEK_ROLE_LABEL[w.ratingRole] || w.ratingRole,
-                        WEEK_STATE_LABEL[w.ratingState] || w.ratingState,
-                        `${w.pendingCount} pending`,
-                      ].filter(Boolean).join(" · ")}
+        {weeks === null ? null : needsRating.length === 0 ? (
+          <div className="card" style={{ color: "var(--ink-3)" }}>
+            Nothing to rate right now — every week with photos has been rated.
+          </div>
+        ) : (
+          needsRating.map((w) => {
+            const startSize = batchSize === null
+              ? Math.max(1, w.pendingCount)
+              : Math.max(1, Math.min(batchSize, w.pendingCount));
+            return (
+              <div
+                key={w.id}
+                className="card"
+                style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600 }}>{w.locationName} — {w.name}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                    {[
+                      WEEK_ROLE_LABEL[w.ratingRole] || w.ratingRole,
+                      `${w.pendingCount} pending`,
+                    ].filter(Boolean).join(" · ")}
+                  </div>
                 </div>
-              </div>
-              {section === "active" && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {(() => {
-                    const startSize = batchSize === null
-                      ? Math.max(1, w.pendingCount)
-                      : Math.max(1, Math.min(batchSize, w.pendingCount));
-                    return (
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        onClick={() => openClaim(w.id, startSize)}
-                        disabled={w.pendingCount === 0 || batchSize === null}
-                      >
-                        Start a batch ({w.pendingCount === 0 ? 0 : startSize})
-                      </button>
-                    );
-                  })()}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => openClaim(w.id, startSize)}
+                    disabled={batchSize === null}
+                  >
+                    Start a batch ({startSize})
+                  </button>
                   <button
                     type="button"
                     className="btn btn-ghost"
@@ -209,15 +217,27 @@ export function PhotoRatingApp({ toast }: { toast: ToastApi }) {
                       const n = await fetchRatingWeekPendingCount(supabase, w.id);
                       void openClaim(w.id, Math.max(1, n));
                     }}
-                    disabled={w.pendingCount === 0}
                   >
                     Whole week
                   </button>
+                  {canHide && (
+                    <button
+                      type="button"
+                      onClick={() => void hideLocation(w.locationId, w.locationName)}
+                      title="Hide this location from all review screens"
+                      style={{
+                        background: "none", border: "none", cursor: "pointer",
+                        color: "var(--ink-3)", fontSize: 12, textDecoration: "underline",
+                      }}
+                    >
+                      Hide location
+                    </button>
+                  )}
                 </div>
-              )}
-            </div>
-          )}
-        />
+              </div>
+            );
+          })
+        )}
       </div>
     </>
   );

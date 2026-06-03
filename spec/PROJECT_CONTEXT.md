@@ -43,6 +43,7 @@ The legacy marketing-review queue (approve/flag/points/leaderboard) was removed 
 | `20260528000042` | Location approval — `claim_release_reason` enum value `'location_approved'`. Standalone so the value commits before the logic migration parses. |
 | `20260528000043` | Location approval — triggers swap: drain on approve, reopen on revoke, drop legacy signoff side-effects. |
 | `20260603000047` | Photo Library — `photos.current_rating` (denormalized latest star rating) + index + rating-event trigger update + backfill. Additive. |
+| `20260603000048` | `locations.is_ignored` + `set_location_ignored` RPC (senior/admin) + recreate `locations_with_approval` view. Hides a location from every review hub + the Photo Library. Additive. |
 
 **Dead migration slots (do not reuse):** `20260505000010`, `20260505000011`, `20260505000012` — comment-only placeholders. Gamification was deferred during the triage refactor; V1 (points only) ships under migration 32 — see [`GAMIFICATION_SPEC.md`](./GAMIFICATION_SPEC.md). The slots stay dead — future gamification work (streaks, badges, etc.) uses new migration numbers.
 

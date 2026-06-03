@@ -20,9 +20,10 @@ export async function fetchTriageHubWeeks(
     .from("camp_weeks")
     .select(
       "id, name, starts_on, ends_on, triage_role, triage_state, " +
-        "locations!inner ( name ), photos ( triage_state )",
+        "locations!inner ( name, is_ignored ), photos ( triage_state )",
     )
     .not("triage_state", "in", '("not_required","complete")')
+    .eq("locations.is_ignored", false)
     .order("starts_on", { ascending: true });
   if (error) throw error;
 

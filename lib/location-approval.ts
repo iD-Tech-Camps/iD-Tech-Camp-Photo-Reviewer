@@ -138,6 +138,7 @@ export async function fetchLocationSummaries(
       "id, name, approval_id, approval_status, approved_at, revoked_at, approved_by, revoked_by, " +
         "divisions ( name )",
     )
+    .eq("is_ignored", false)
     .order("name", { ascending: true });
   if (error) throw error;
   const locations = (locs ?? []) as unknown as LocationWithApprovalRow[];

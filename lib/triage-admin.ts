@@ -4,6 +4,7 @@ export type AdminLocation = {
   id: string;
   name: string;
   evergreenNotes: string | null;
+  isIgnored: boolean;
   // Sorted ascending. Used to bucket the location as active vs inactive
   // relative to the admin's season window (triage_config.season_*).
   weekStarts: string[];
@@ -13,6 +14,7 @@ type RawLocation = {
   id: string;
   name: string;
   evergreen_notes: string | null;
+  is_ignored: boolean;
   camp_weeks: Array<{ starts_on: string }>;
 };
 
@@ -21,7 +23,7 @@ export async function fetchLocationsForAdmin(
 ): Promise<AdminLocation[]> {
   const { data, error } = await supabase
     .from("locations")
-    .select("id, name, evergreen_notes, camp_weeks ( starts_on )")
+    .select("id, name, evergreen_notes, is_ignored, camp_weeks ( starts_on )")
     .order("name", { ascending: true });
   if (error) throw error;
 
@@ -29,6 +31,7 @@ export async function fetchLocationsForAdmin(
     id: loc.id,
     name: loc.name,
     evergreenNotes: loc.evergreen_notes,
+    isIgnored: loc.is_ignored,
     weekStarts: (loc.camp_weeks ?? [])
       .map((w) => w.starts_on)
       .sort((a, b) => a.localeCompare(b)),

@@ -8,6 +8,7 @@ import {
   updateEvergreenNotes,
   type AdminLocation,
 } from "@/lib/triage-admin";
+import { setLocationIgnored } from "@/lib/locations-ignore";
 import { fetchTriageConfig, type TriageConfig } from "@/lib/triage-config";
 
 export function AdminLocationsNotes({ toast }: { toast: ToastApi }) {
@@ -35,6 +36,21 @@ export function AdminLocationsNotes({ toast }: { toast: ToastApi }) {
       });
     return () => { cancelled = true; };
   }, [supabase]);
+
+  const toggleIgnored = async (locationId: string, ignored: boolean) => {
+    setBusyId(locationId);
+    try {
+      await setLocationIgnored(supabase, locationId, ignored);
+      setLocations((prev) =>
+        (prev ?? []).map((l) => (l.id === locationId ? { ...l, isIgnored: ignored } : l)),
+      );
+      toast.show(ignored ? "Location hidden from review" : "Location restored", "check");
+    } catch (err: unknown) {
+      toast.show(err instanceof Error ? err.message : "Update failed", "x");
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const saveNotes = async (locationId: string) => {
     setBusyId(locationId);
@@ -97,7 +113,21 @@ export function AdminLocationsNotes({ toast }: { toast: ToastApi }) {
             cursor: "pointer", padding: 0, marginBottom: isExpanded ? 12 : 0,
           }}
         >
-          <h3 className="card-title">{loc.name}</h3>
+          <h3 className="card-title">
+            {loc.name}
+            {loc.isIgnored && (
+              <span
+                style={{
+                  marginLeft: 8, fontSize: 11, fontWeight: 600,
+                  padding: "2px 8px", borderRadius: 999,
+                  background: "var(--paper-3)", color: "var(--ink-3)",
+                  border: "1px solid var(--rule)",
+                }}
+              >
+                Hidden
+              </span>
+            )}
+          </h3>
           <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
             {subtitle}
             {loc.evergreenNotes ? " · has notes" : ""}
@@ -116,15 +146,25 @@ export function AdminLocationsNotes({ toast }: { toast: ToastApi }) {
               onChange={(e) => setDraftNotes((d) => ({ ...d, [loc.id]: e.target.value }))}
               placeholder="e.g. Watch for loose cables near the main lab door…"
             />
-            <button
-              type="button"
-              className="btn btn-primary"
-              style={{ marginTop: 8 }}
-              disabled={busyId === loc.id}
-              onClick={() => void saveNotes(loc.id)}
-            >
-              Save notes
-            </button>
+            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={busyId === loc.id}
+                onClick={() => void saveNotes(loc.id)}
+              >
+                Save notes
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={busyId === loc.id}
+                onClick={() => void toggleIgnored(loc.id, !loc.isIgnored)}
+                title="Hidden locations are removed from every review screen and the Photo Library"
+              >
+                {loc.isIgnored ? "Restore to review" : "Hide from review"}
+              </button>
+            </div>
           </>
         )}
       </div>
