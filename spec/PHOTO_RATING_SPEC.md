@@ -52,7 +52,39 @@ app/api/photo-rating/sweep-claims
 
 - Sidebar: **Camp Photo Review** (`photo-rating` screen)
 - Lead review: **Week assessment tags** card on `SeniorDashboard`
+- Sidebar: **Photo Library** (`photo-gallery` screen) — see below
 
-## Migration
+## Photo Library (marketing gallery)
 
-`20260520000034_photo_rating.sql`
+Read-only browse of the rated pool, open to **every signed-in user**, for finding
+and downloading the best photos for marketing. `components/screens/PhotoGallery.tsx`
++ data layer `lib/photo-gallery.ts`.
+
+- **Pool:** `photos.rating_state = 'rated'` and `is_quarantined = false` (quarantined /
+  "hide from parent view" photos are excluded).
+- **Current rating:** denormalized onto `photos.current_rating` (migration 47), maintained
+  by the existing `tg_photo_rating_events_after_insert_apply` trigger. A photo is rated by
+  exactly one reviewer (the claim selector only picks `pending`), so the latest event wins.
+- **Filters:** division → searchable location → week (week disabled until a location is picked,
+  options grouped by year), min rating, `photo_rating` tags (tag filter = "has a rating event
+  carrying the tag"), plus a **Clear filters** link. **Sort:** rating / capture date. Server-side,
+  paginated via `.range()` ("Load more"). Dropdown options are derived from the rated pool only
+  (`camp_weeks` with a `photos!inner` filter), so empty divisions/locations never appear.
+- **Lightbox:** rating + **rated by** (latest event's reviewer), location, week, capture date,
+  `photo_rating` tags. Two downloads: **Download (full size)** streams the stored `image_url`
+  (no SmugMug API call); **Other sizes…** lists sizes from SmugMug `!sizedetails` on demand. Both
+  stream through `GET /api/smugmug/download`. Plus a **View on SmugMug** link (`photos.smugmug_url`).
+  The SmugMug-generated `caption` and camp-quality-review status are intentionally not shown —
+  irrelevant in a marketing context.
+
+### Local dev
+`scripts/capture-gallery-fixture.mjs` does a one-time read-only pull from prod into a gitignored
+`.dev-seed/gallery-fixture.json`. The dev-bar **Reseed dev data** button (and `POST /api/dev/seed`)
+loads that fixture into the local DB — day-to-day reseeding never touches prod. A single dev login
+(`dev@idtech.com`) with a dev-bar **role selector** (`POST /api/dev/role`) previews each role.
+All dev routes/UI are gated behind `NEXT_PUBLIC_DEV_AUTH=1` and 404 in production.
+
+## Migrations
+
+- `20260520000034_photo_rating.sql`
+- `20260603000047_photo_current_rating.sql` — `photos.current_rating` + index + trigger + backfill (Photo Library)

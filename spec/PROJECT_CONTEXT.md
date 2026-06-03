@@ -42,6 +42,7 @@ The legacy marketing-review queue (approve/flag/points/leaderboard) was removed 
 | `20260527000041` | Location approval — schema (`location_approvals`, `location_feedback_events`, view, RPC, backfill). Non-breaking. |
 | `20260528000042` | Location approval — `claim_release_reason` enum value `'location_approved'`. Standalone so the value commits before the logic migration parses. |
 | `20260528000043` | Location approval — triggers swap: drain on approve, reopen on revoke, drop legacy signoff side-effects. |
+| `20260603000047` | Photo Library — `photos.current_rating` (denormalized latest star rating) + index + rating-event trigger update + backfill. Additive. |
 
 **Dead migration slots (do not reuse):** `20260505000010`, `20260505000011`, `20260505000012` — comment-only placeholders. Gamification was deferred during the triage refactor; V1 (points only) ships under migration 32 — see [`GAMIFICATION_SPEC.md`](./GAMIFICATION_SPEC.md). The slots stay dead — future gamification work (streaks, badges, etc.) uses new migration numbers.
 
@@ -71,6 +72,7 @@ app/api/photo-rating/  # claims, events, week-tags, sweep-claims
 components/screens/
   Triage.tsx         # Camp Quality Review hub + claim grid + senior dashboard
   PhotoRating.tsx    # Camp Photo Review hub + star-rating lightbox
+  PhotoGallery.tsx   # Photo Library — browse/filter/download rated photos (marketing)
   Admin.tsx          # App settings (branding + triage_config season/triage)
   AdminSmugMug.tsx   # Photo sync (log + sync / sample maintenance)
   AdminLocations.tsx # evergreen notes + 1st-week override

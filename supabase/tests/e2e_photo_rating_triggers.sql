@@ -73,6 +73,18 @@ begin
     raise exception 'photo should be rated, got %', v_state;
   end if;
 
+  if (select current_rating from public.photos where id = v_photo) <> 4 then
+    raise exception 'current_rating should be 4 after first rating';
+  end if;
+
+  -- Re-rating (same reviewer "Update") overwrites current_rating.
+  insert into public.photo_rating_events (photo_id, reviewer_id, claim_id, rating, quarantine_intent)
+  values (v_photo, 'ffffffff-1111-1111-1111-111111111101', v_claim, 2, false);
+
+  if (select current_rating from public.photos where id = v_photo) <> 2 then
+    raise exception 'current_rating should be 2 after re-rating';
+  end if;
+
   select rating_state into v_week_state from public.camp_weeks where id = v_week;
   if v_week_state <> 'rating_done' then
     raise exception 'week should be rating_done, got %', v_week_state;

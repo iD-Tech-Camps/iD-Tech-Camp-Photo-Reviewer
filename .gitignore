@@ -45,3 +45,6 @@ next-env.d.ts
 
 # supabase CLI cache (project-ref, pooler URL, version metadata; created by `supabase link`)
 supabase/.temp/
+
+# Local-only dev gallery fixture (prod-derived; never commit)
+.dev-seed/

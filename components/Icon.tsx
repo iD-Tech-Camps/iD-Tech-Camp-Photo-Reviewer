@@ -35,6 +35,7 @@ export function Icon({ name, size = 16, strokeWidth = 1.6, style }: IconProps) {
     case "search":   return <svg {...common}><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>;
     case "plus":     return <svg {...common}><path d="M12 5v14M5 12h14"/></svg>;
     case "download": return <svg {...common}><path d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>;
+    case "image":    return <svg {...common}><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="M21 16l-5-5L5 20"/></svg>;
     case "dots":     return <svg {...common}><circle cx="6" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18" cy="12" r="1.2"/></svg>;
     case "pencil":   return <svg {...common}><path d="M4 20l4-1 11-11-3-3L5 16l-1 4z"/></svg>;
     case "log-out":  return <svg {...common}><path d="M15 4h4a1 1 0 011 1v14a1 1 0 01-1 1h-4M10 17l5-5-5-5M15 12H3"/></svg>;

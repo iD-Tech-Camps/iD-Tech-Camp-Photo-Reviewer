@@ -11,11 +11,15 @@ import {
 import { AdminLocationsNotes } from "@/components/screens/AdminLocations";
 import { TriageApp } from "@/components/screens/Triage";
 import { PhotoRatingApp } from "@/components/screens/PhotoRating";
+import { PhotoGalleryApp } from "@/components/screens/PhotoGallery";
 import { SeniorReviewApp } from "@/components/screens/SeniorReview";
 import { MyStatsApp } from "@/components/screens/MyStats";
 import { SettingsProvider, useSettings } from "@/components/settings";
 import { UserProvider, useCurrentUser, type Role } from "@/lib/current-user";
 import { PointsProvider } from "@/lib/points-context";
+import { DevBar } from "@/components/DevBar";
+
+const DEV_AUTH = process.env.NEXT_PUBLIC_DEV_AUTH === "1";
 
 import {
   navigateToMainScreen,
@@ -25,6 +29,7 @@ import {
 const VALID_SCREENS = [
   "triage",
   "photo-rating",
+  "photo-gallery",
   "my-stats",
   "senior-review",
   "admin-overview",
@@ -121,6 +126,7 @@ function AppInner() {
         <Sidebar current="triage" onNav={setScreen} />
         <main className="main" />
         {toast.node}
+        {DEV_AUTH && <DevBar toast={toast} />}
       </div>
     );
   }
@@ -131,6 +137,7 @@ function AppInner() {
       <main className="main">
         {activeScreen === "triage"           && <TriageApp key={navEpoch} toast={toast} />}
         {activeScreen === "photo-rating"     && <PhotoRatingApp key={navEpoch} toast={toast} />}
+        {activeScreen === "photo-gallery"    && <PhotoGalleryApp key={navEpoch} toast={toast} />}
         {activeScreen === "my-stats"         && <MyStatsApp />}
         {activeScreen === "senior-review"   && <SeniorReviewApp key={navEpoch} toast={toast} />}
         {activeScreen === "admin-overview"  && <AdminOverview toast={toast} />}
@@ -140,6 +147,7 @@ function AppInner() {
         {activeScreen === "admin-settings"  && <AdminSettings />}
       </main>
       {toast.node}
+      {DEV_AUTH && <DevBar toast={toast} />}
     </div>
   );
 }

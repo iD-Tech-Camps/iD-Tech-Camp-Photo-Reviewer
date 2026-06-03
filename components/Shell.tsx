@@ -39,6 +39,7 @@ export function Sidebar({
   const userItems: { id: string; label: string; icon: string }[] = [
     { id: "triage", label: "Camp Quality Review", icon: "review" },
     { id: "photo-rating", label: "Camp Photo Review", icon: "stars" },
+    { id: "photo-gallery", label: "Photo Library", icon: "image" },
     { id: "my-stats", label: "My stats", icon: "check" },
     ...(canSeeSenior ? [{ id: "senior-review", label: "Lead review", icon: "stars" }] : []),
   ];

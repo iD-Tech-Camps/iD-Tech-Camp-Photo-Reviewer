@@ -13,6 +13,12 @@ const PUBLIC_PATHS = [
 ];
 
 function isPublicPath(pathname: string) {
+  // Dev-only seed/role helpers bypass the login redirect when the dev sign-in
+  // flag is on (local only); production never sets it. The handlers re-check
+  // the flag and (for /role) the session, so this only skips the redirect.
+  if (process.env.NEXT_PUBLIC_DEV_AUTH === "1" && pathname.startsWith("/api/dev/")) {
+    return true;
+  }
   return PUBLIC_PATHS.some(
     (p) => pathname === p || pathname.startsWith(p + "/")
   );
