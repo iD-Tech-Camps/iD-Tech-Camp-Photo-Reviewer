@@ -67,6 +67,17 @@ describe("POST /api/locations/[id]/feedback", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects missing camp_week_id with 400", async () => {
+    setMockAuth({
+      kind: "user",
+      userId: fixture.senior.id,
+      role: "senior",
+      email: fixture.senior.email,
+    });
+    const res = await postFeedback(fixture.locationId, { body: "no week attached" });
+    expect(res.status).toBe(400);
+  });
+
   it("creates a feedback event and persists optional tags", async () => {
     setMockAuth({
       kind: "user",
@@ -104,8 +115,8 @@ describe("GET /api/locations/[id]/feedback", () => {
       email: fixture.senior.email,
     });
 
-    await postFeedback(fixture.locationId, { body: "first" });
-    await postFeedback(fixture.locationId, { body: "second" });
+    await postFeedback(fixture.locationId, { body: "first", camp_week_id: fixture.campWeekId });
+    await postFeedback(fixture.locationId, { body: "second", camp_week_id: fixture.campWeekId });
 
     // Reviewer can read feedback too.
     setMockAuth({ kind: "user", userId: fixture.reviewer.id, role: "reviewer" });

@@ -4,6 +4,7 @@ import type { TagCategory } from "@/lib/tags";
 export type SeniorWeekSummary = {
   id: string;
   name: string;
+  locationId: string;
   locationName: string;
   triageRole: string;
   triageState: string;
@@ -129,7 +130,7 @@ export async function fetchSeniorWeek(
   const { data, error } = await supabase
     .from("camp_weeks")
     .select(
-      "id, name, triage_role, triage_state, signoff_at, " +
+      "id, name, location_id, triage_role, triage_state, signoff_at, " +
         "positive_great_quality, positive_great_variety, positive_shininess_great, " +
         "locations!inner ( name, evergreen_notes ), " +
         "signoff_profile:profiles!camp_weeks_signoff_by_fkey ( full_name )",
@@ -140,6 +141,7 @@ export async function fetchSeniorWeek(
   const raw = data as unknown as {
     id: string;
     name: string;
+    location_id: string;
     triage_role: string;
     triage_state: string;
     signoff_at: string | null;
@@ -152,6 +154,7 @@ export async function fetchSeniorWeek(
   return {
     id: raw.id,
     name: raw.name,
+    locationId: raw.location_id,
     locationName: raw.locations?.name ?? "—",
     triageRole: raw.triage_role,
     triageState: raw.triage_state,

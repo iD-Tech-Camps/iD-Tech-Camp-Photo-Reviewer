@@ -3,7 +3,7 @@
 import React from "react";
 import { Icon } from "@/components/Icon";
 import { PhotoImg } from "@/components/PhotoImg";
-import { PageHeader, type ToastApi } from "@/components/Shell";
+import { Breadcrumb, PageHeader, type Crumb, type ToastApi } from "@/components/Shell";
 import { createClient } from "@/lib/supabase/client";
 import {
   fetchCategoryRollup,
@@ -17,6 +17,12 @@ import {
   fetchCampWeekSeniorTagIds,
   setCampWeekSeniorTags,
 } from "@/lib/photo-rating-senior";
+import {
+  fetchCampWeekFeedback,
+  postFeedback,
+  type FeedbackEvent,
+} from "@/lib/location-approval";
+import { FeedbackRow } from "@/components/FeedbackThread";
 import {
   buildTagLabelLookup,
   groupTagsByValence,
@@ -67,43 +73,64 @@ export function SeniorWeekDashboard({
   campWeekId,
   tags,
   weekSeniorTags,
-  onBack,
+  rootCrumb,
+  onNavigateLocation,
 }: {
   toast: ToastApi;
   supabase: ReturnType<typeof createClient>;
   campWeekId: string;
   tags: Tag[];
   weekSeniorTags: Tag[];
-  onBack: () => void;
+  // Ancestor crumb for the breadcrumb (e.g. "Lead review" or "Camp Quality
+  // Review") — supplied by the parent since this screen is reached from both.
+  rootCrumb: Crumb;
+  // When present, inserts a clickable location crumb between root and the
+  // current week (Lead-review context). Omitted from the Triage context.
+  onNavigateLocation?: () => void;
 }) {
   const [week, setWeek] = React.useState<SeniorWeekSummary | null>(null);
   const [photos, setPhotos] = React.useState<SeniorWeekPhoto[]>([]);
   const [rollup, setRollup] = React.useState<Record<TagCategory, number> | null>(null);
-  const [recheck, setRecheck] = React.useState(false);
+  // Staged assessment inputs — these no longer auto-save on toggle; they commit
+  // together when the lead clicks "Save Feedback". `savedWeekTags` / the week's
+  // own positive_* fields are the server baseline used to compute dirtiness.
   const [selectedWeekTags, setSelectedWeekTags] = React.useState<string[]>([]);
-  const [weekTagsBusy, setWeekTagsBusy] = React.useState(false);
+  const [savedWeekTags, setSavedWeekTags] = React.useState<string[]>([]);
+  const [positive, setPositive] = React.useState({
+    greatQuality: false,
+    greatVariety: false,
+    shininessGreat: false,
+  });
+  const [feedbackEvents, setFeedbackEvents] = React.useState<FeedbackEvent[]>([]);
+  const [noteBody, setNoteBody] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
   const [photoFilter, setPhotoFilter] = React.useState<PhotoFilter>("all");
   const [lightboxIndex, setLightboxIndex] = React.useState<number | null>(null);
   const [actionBusy, setActionBusy] = React.useState(false);
-  const [finishConfirmOpen, setFinishConfirmOpen] = React.useState(false);
-  const [finishBusy, setFinishBusy] = React.useState(false);
   const labelLookup = buildTagLabelLookup(tags);
 
   const isComplete = week?.triageState === "complete";
   const readOnly = isComplete;
 
   const reload = React.useCallback(async () => {
-    const [w, p, r, weekTagIds] = await Promise.all([
+    const [w, p, r, weekTagIds, feedback] = await Promise.all([
       fetchSeniorWeek(supabase, campWeekId),
       fetchWeekPhotosForSenior(supabase, campWeekId),
       fetchCategoryRollup(supabase, campWeekId),
       fetchCampWeekSeniorTagIds(supabase, campWeekId),
+      fetchCampWeekFeedback(supabase, campWeekId),
     ]);
     setWeek(w);
     setPhotos(p);
     setRollup(r);
     setSelectedWeekTags(weekTagIds);
-    setRecheck(false);
+    setSavedWeekTags(weekTagIds);
+    setPositive({
+      greatQuality: w.positiveGreatQuality,
+      greatVariety: w.positiveGreatVariety,
+      shininessGreat: w.positiveShininessGreat,
+    });
+    setFeedbackEvents(feedback);
     if (p.some((photo) => photo.triageState === "flagged")) {
       setPhotoFilter("issues");
     } else {
@@ -118,24 +145,12 @@ export function SeniorWeekDashboard({
     [photos, photoFilter],
   );
 
-  const togglePositive = async (
-    field: "positiveGreatQuality" | "positiveGreatVariety" | "positiveShininessGreat",
+  const togglePositive = (
+    field: "greatQuality" | "greatVariety" | "shininessGreat",
     value: boolean,
   ) => {
-    if (!week || readOnly) return;
-    const next = {
-      greatQuality: field === "positiveGreatQuality" ? value : week.positiveGreatQuality,
-      greatVariety: field === "positiveGreatVariety" ? value : week.positiveGreatVariety,
-      shininessGreat: field === "positiveShininessGreat" ? value : week.positiveShininessGreat,
-    };
-    try {
-      await setPositiveAssessment(
-        supabase, campWeekId, next.greatQuality, next.greatVariety, next.shininessGreat,
-      );
-      await reload();
-    } catch (err: unknown) {
-      toast.show(err instanceof Error ? err.message : "Update failed", "x");
-    }
+    if (readOnly) return;
+    setPositive((prev) => ({ ...prev, [field]: value }));
   };
 
   const seniorAction = async (photoId: string, kind: string) => {
@@ -157,39 +172,50 @@ export function SeniorWeekDashboard({
     }
   };
 
-  const signoff = async () => {
+  const toggleWeekTag = (tagId: string) => {
     if (readOnly) return;
-    setFinishBusy(true);
-    try {
-      await signoffCampWeek(supabase, campWeekId);
-      toast.show("Week marked as reviewed.", "check");
-      setFinishConfirmOpen(false);
-      await reload();
-    } catch (err: unknown) {
-      // Translate the most common legacy error before showing.
-      const raw = err instanceof Error ? err.message : "Couldn't finish review";
-      const friendly = raw.includes("not eligible for signoff")
-        ? "This week isn't ready to finish — make sure every photo has been reviewed first."
-        : raw;
-      toast.show(friendly, "x");
-    } finally {
-      setFinishBusy(false);
-    }
+    setSelectedWeekTags((prev) =>
+      prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId],
+    );
   };
 
-  const toggleWeekTag = async (tagId: string) => {
-    if (readOnly) return;
-    const next = selectedWeekTags.includes(tagId)
-      ? selectedWeekTags.filter((id) => id !== tagId)
-      : [...selectedWeekTags, tagId];
-    setWeekTagsBusy(true);
+  const sameTags = (a: string[], b: string[]) =>
+    a.length === b.length && [...a].sort().join() === [...b].sort().join();
+  const tagsChanged = !sameTags(selectedWeekTags, savedWeekTags);
+  const positivesChanged =
+    !!week &&
+    (positive.greatQuality !== week.positiveGreatQuality ||
+      positive.greatVariety !== week.positiveGreatVariety ||
+      positive.shininessGreat !== week.positiveShininessGreat);
+  const dirty = tagsChanged || positivesChanged || noteBody.trim() !== "";
+
+  // Commit every staged edit together, then stamp the per-week review marker.
+  // Saving feedback is what marks the week reviewed — there is no separate
+  // "mark as reviewed" step.
+  const saveFeedback = async () => {
+    if (readOnly || !week || saving) return;
+    setSaving(true);
     try {
-      await setCampWeekSeniorTags(supabase, campWeekId, next);
-      setSelectedWeekTags(next);
+      if (tagsChanged) {
+        await setCampWeekSeniorTags(supabase, campWeekId, selectedWeekTags);
+      }
+      if (positivesChanged) {
+        await setPositiveAssessment(
+          supabase, campWeekId, positive.greatQuality, positive.greatVariety, positive.shininessGreat,
+        );
+      }
+      const text = noteBody.trim();
+      if (text) {
+        await postFeedback(week.locationId, text, { campWeekId });
+      }
+      await signoffCampWeek(supabase, campWeekId);
+      toast.show("Feedback saved.", "check");
+      setNoteBody("");
+      await reload();
     } catch (err: unknown) {
-      toast.show(err instanceof Error ? err.message : "Couldn't update week tags", "x");
+      toast.show(err instanceof Error ? err.message : "Couldn't save feedback", "x");
     } finally {
-      setWeekTagsBusy(false);
+      setSaving(false);
     }
   };
 
@@ -224,16 +250,23 @@ export function SeniorWeekDashboard({
 
   const lightboxPhoto = lightboxIndex !== null ? filteredPhotos[lightboxIndex] ?? null : null;
 
+  const crumbs: Crumb[] = [
+    rootCrumb,
+    ...(onNavigateLocation ? [{ label: week.locationName, onClick: onNavigateLocation }] : []),
+    { label: week.name },
+  ];
+  // Back goes up one level: to the location (Lead review) or the hub (Triage).
+  const goBack = onNavigateLocation ?? rootCrumb.onClick;
+
   return (
     <>
       <PageHeader
-        eyebrow="Lead review · Camp week"
+        breadcrumb={<Breadcrumb items={crumbs} />}
         title={`${week.locationName} — ${week.name}`}
         sub={WEEK_STATE_LABEL[week.triageState] ?? week.triageState}
+        onBack={goBack}
       />
       <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <button type="button" className="btn btn-ghost" onClick={onBack}>← Back</button>
-
         {week.evergreenNotes && (
           <div className="card" style={{ fontSize: 13, color: "var(--ink-2)" }}>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>Location notes</div>
@@ -241,26 +274,44 @@ export function SeniorWeekDashboard({
           </div>
         )}
 
+        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <h3 className="card-title" style={{ margin: 0 }}>Issue report</h3>
+          <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+            Issues reviewers flagged across this week&apos;s photos.
+          </div>
+          <ul style={{ fontSize: 13, margin: 0, paddingLeft: 18 }}>
+            {(Object.keys(TAG_CATEGORY_LABELS) as TagCategory[]).map((cat) => (
+              <li key={cat}>{TAG_CATEGORY_LABELS[cat]}: {rollup[cat]}</li>
+            ))}
+          </ul>
+        </div>
+
         <div className="card" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-          <h3 className="card-title" style={{ margin: 0 }}>Week report</h3>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+            <h3 className="card-title" style={{ margin: 0 }}>Feedback</h3>
+            {week.signoffAt && (
+              <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                Reviewed {formatReviewedAt(week.signoffAt)}
+                {week.signoffByName ? ` by ${week.signoffByName}` : ""}
+              </span>
+            )}
+          </div>
 
           <section>
             <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Highlights</div>
-            {[
-              ["Great Quality", "positiveGreatQuality", week.positiveGreatQuality],
-              ["Great Variety", "positiveGreatVariety", week.positiveGreatVariety],
-              ["Shininess Looks Great", "positiveShininessGreat", week.positiveShininessGreat],
-            ].map(([label, field, checked]) => (
-              <label key={field as string} style={{ display: "block", marginBottom: 8, fontSize: 13 }}>
+            {([
+              ["Great Quality", "greatQuality"],
+              ["Great Variety", "greatVariety"],
+              ["Shininess Looks Great", "shininessGreat"],
+            ] as const).map(([label, field]) => (
+              <label key={field} style={{ display: "block", marginBottom: 8, fontSize: 13 }}>
                 <input
                   type="checkbox"
-                  checked={checked as boolean}
+                  checked={positive[field]}
                   disabled={readOnly}
-                  onChange={(e) =>
-                    void togglePositive(field as "positiveGreatQuality", e.target.checked)
-                  }
+                  onChange={(e) => togglePositive(field, e.target.checked)}
                 />{" "}
-                {label as string}
+                {label}
               </label>
             ))}
           </section>
@@ -288,8 +339,8 @@ export function SeniorWeekDashboard({
                             key={t.id}
                             type="button"
                             className={"btn " + (selectedWeekTags.includes(t.id) ? "btn-primary" : "btn-ghost")}
-                            disabled={weekTagsBusy || readOnly}
-                            onClick={() => void toggleWeekTag(t.id)}
+                            disabled={readOnly}
+                            onClick={() => toggleWeekTag(t.id)}
                           >
                             {t.label}
                           </button>
@@ -303,36 +354,46 @@ export function SeniorWeekDashboard({
           )}
 
           <section>
-            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Issue summary</div>
-            <ul style={{ fontSize: 13, margin: 0, paddingLeft: 18 }}>
-              {(Object.keys(TAG_CATEGORY_LABELS) as TagCategory[]).map((cat) => (
-                <li key={cat}>{TAG_CATEGORY_LABELS[cat]}: {rollup[cat]}</li>
-              ))}
-            </ul>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Notes</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {feedbackEvents.length === 0 ? (
+                <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No notes yet.</div>
+              ) : (
+                feedbackEvents.map((e) => <FeedbackRow key={e.id} event={e} />)
+              )}
+              {!readOnly && (
+                <textarea
+                  value={noteBody}
+                  onChange={(e) => setNoteBody(e.target.value)}
+                  placeholder="Feedback for the regional manager about this week…"
+                  rows={3}
+                  style={{
+                    width: "100%",
+                    fontFamily: "inherit",
+                    fontSize: 14,
+                    padding: 8,
+                    border: "1px solid var(--rule)",
+                    borderRadius: 6,
+                    resize: "vertical",
+                  }}
+                />
+              )}
+            </div>
           </section>
 
-          {isComplete && week.signoffAt && (
-            <section style={{ fontSize: 13, color: "var(--ink-3)" }}>
-              Approved {formatReviewedAt(week.signoffAt)}
-              {week.signoffByName ? ` by ${week.signoffByName}` : ""}
-            </section>
-          )}
-
           {!readOnly && (
-            <section style={{ borderTop: "1px solid var(--rule)", paddingTop: 16 }}>
+            <section style={{ borderTop: "1px solid var(--rule)", paddingTop: 16, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={() => setFinishConfirmOpen(true)}
-                disabled={finishBusy}
+                onClick={() => void saveFeedback()}
+                disabled={saving || (!dirty && !!week.signoffAt)}
               >
-                {week?.signoffAt ? "Update your review note" : "Mark week as reviewed"}
+                {saving ? "Saving…" : "Save Feedback"}
               </button>
-              <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 6, lineHeight: 1.5 }}>
-                Records that you&apos;ve reviewed this week&apos;s photos. Doesn&apos;t close
-                the location — use <strong>Approve location</strong> on the location page
-                when you&apos;re ready to close it for the season.
-              </div>
+              {dirty && !saving && (
+                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Unsaved changes</span>
+              )}
             </section>
           )}
         </div>
@@ -462,94 +523,7 @@ export function SeniorWeekDashboard({
         />
       )}
 
-      {finishConfirmOpen && week && (
-        <FinishReviewModal
-          weekName={week.name}
-          locationName={week.locationName}
-          onConfirm={() => void signoff()}
-          onCancel={() => setFinishConfirmOpen(false)}
-          busy={finishBusy}
-        />
-      )}
     </>
-  );
-}
-
-function FinishReviewModal({
-  weekName,
-  locationName,
-  onConfirm,
-  onCancel,
-  busy,
-}: {
-  weekName: string;
-  locationName: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-  busy: boolean;
-}) {
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
-
-  return (
-    <div
-      onClick={onCancel}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.4)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 50,
-        padding: 24,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="card"
-        style={{
-          maxWidth: 480,
-          width: "100%",
-          background: "var(--paper)",
-          display: "flex",
-          flexDirection: "column",
-          gap: 16,
-        }}
-      >
-        <h3 style={{ margin: 0 }}>Mark {weekName} as reviewed?</h3>
-        <p style={{ margin: 0, fontSize: 14, color: "var(--ink-2)" }}>
-          Records that you&apos;ve looked at this week&apos;s photos and recorded your feedback.
-        </p>
-        <div
-          style={{
-            padding: "10px 12px",
-            borderRadius: 6,
-            background: "var(--paper-3)",
-            fontSize: 13,
-            color: "var(--ink-2)",
-            lineHeight: 1.5,
-          }}
-        >
-          This is just a per-week marker — it doesn&apos;t affect the Camp Quality Review queue.
-          When you&apos;re ready to close <strong>{locationName}</strong> for the rest of
-          the season, use <strong>Approve location</strong> on the location page.
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button" className="btn btn-ghost" onClick={onCancel} disabled={busy}>
-            Cancel
-          </button>
-          <button type="button" className="btn btn-primary" onClick={onConfirm} disabled={busy}>
-            {busy ? "Recording…" : "Mark as reviewed"}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
 

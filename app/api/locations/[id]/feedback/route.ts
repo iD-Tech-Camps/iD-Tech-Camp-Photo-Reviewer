@@ -56,6 +56,12 @@ export async function POST(
     return NextResponse.json({ error: "body required" }, { status: 400 });
   }
 
+  // Feedback is always about a specific week — location-level notes are not
+  // meaningful here, so the week must be supplied.
+  if (!campWeekId) {
+    return NextResponse.json({ error: "camp_week_id required" }, { status: 400 });
+  }
+
   const { data: event, error } = await auth.supabase
     .from("location_feedback_events")
     .insert({

@@ -147,7 +147,10 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
         campWeekId={view.campWeekId}
         tags={tags}
         weekSeniorTags={weekSeniorTags}
-        onBack={() => { setView({ kind: "hub" }); void reloadHub(); }}
+        rootCrumb={{
+          label: "Camp Quality Review",
+          onClick: () => { setView({ kind: "hub" }); void reloadHub(); },
+        }}
       />
     );
   }

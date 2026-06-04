@@ -60,6 +60,10 @@ export type LocationCampWeek = {
   flaggedCount: number;
   signoffAt: string | null;
   signoffByName: string | null;
+  positiveGreatQuality: boolean;
+  positiveGreatVariety: boolean;
+  positiveShininessGreat: boolean;
+  assessmentTagIds: string[];
 };
 
 export type FeedbackEvent = {
@@ -96,6 +100,10 @@ type LocationCampWeekRow = {
   signoff_by: string | null;
   signoff_profile: { full_name: string | null; email: string | null } | null;
   photos: Array<{ triage_state: string }>;
+  positive_great_quality: boolean;
+  positive_great_variety: boolean;
+  positive_shininess_great: boolean;
+  camp_week_senior_tags: Array<{ tag_id: string }>;
 };
 
 type FeedbackEventRow = {
@@ -264,8 +272,10 @@ export async function fetchLocationDetail(
       .from("camp_weeks")
       .select(
         "id, name, starts_on, ends_on, triage_role, triage_state, signoff_at, signoff_by, " +
+          "positive_great_quality, positive_great_variety, positive_shininess_great, " +
           "signoff_profile:profiles!camp_weeks_signoff_by_fkey ( full_name, email ), " +
-          "photos ( triage_state )",
+          "photos ( triage_state ), " +
+          "camp_week_senior_tags ( tag_id )",
       )
       .eq("location_id", locationId)
       .order("starts_on", { ascending: true }),
@@ -337,6 +347,10 @@ export async function fetchLocationDetail(
       flaggedCount: flagged,
       signoffAt: w.signoff_at,
       signoffByName: w.signoff_profile?.full_name ?? w.signoff_profile?.email ?? null,
+      positiveGreatQuality: w.positive_great_quality,
+      positiveGreatVariety: w.positive_great_variety,
+      positiveShininessGreat: w.positive_shininess_great,
+      assessmentTagIds: (w.camp_week_senior_tags ?? []).map((t) => t.tag_id),
     };
   });
 
@@ -387,6 +401,39 @@ export async function fetchLocationDetail(
   };
 
   return { detail, weeks, feedback };
+}
+
+/**
+ * Fetch the feedback thread for a single camp week. Used by the camp-week
+ * dashboard; the same `location_feedback_events` rows surface (grouped by week)
+ * on the location detail screen via {@link fetchLocationDetail}.
+ */
+export async function fetchCampWeekFeedback(
+  supabase: SupabaseClient,
+  campWeekId: string,
+): Promise<FeedbackEvent[]> {
+  const { data, error } = await supabase
+    .from("location_feedback_events")
+    .select(
+      "id, body, created_at, camp_week_id, " +
+        "author:profiles!location_feedback_events_author_id_fkey ( full_name, email ), " +
+        "camp_weeks ( name ), " +
+        "location_feedback_event_tags ( tag_id )",
+    )
+    .eq("camp_week_id", campWeekId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  const rows = (data ?? []) as unknown as FeedbackEventRow[];
+  return rows.map((e) => ({
+    id: e.id,
+    body: e.body,
+    createdAt: e.created_at,
+    authorName: e.author?.full_name ?? e.author?.email ?? null,
+    authorEmail: e.author?.email ?? null,
+    campWeekId: e.camp_week_id,
+    campWeekName: e.camp_weeks?.name ?? null,
+    tagIds: (e.location_feedback_event_tags ?? []).map((t) => t.tag_id),
+  }));
 }
 
 export async function approveLocation(locationId: string): Promise<void> {

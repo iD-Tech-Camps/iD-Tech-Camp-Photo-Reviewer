@@ -1,16 +1,16 @@
 "use client";
 
 import React from "react";
-import { PageHeader, type ToastApi } from "@/components/Shell";
+import { Breadcrumb, PageHeader, type ToastApi } from "@/components/Shell";
 import { createClient } from "@/lib/supabase/client";
 import { fetchTags, type Tag } from "@/lib/tags";
 import { SeniorWeekDashboard } from "@/components/screens/SeniorWeekDashboard";
+import { FeedbackRow } from "@/components/FeedbackThread";
 import {
   approveLocation,
   classifyLocation,
   fetchLocationDetail,
   fetchLocationSummaries,
-  postFeedback,
   revokeLocation,
   type FeedbackEvent,
   type LocationCampWeek,
@@ -24,6 +24,10 @@ import {
   writeSeniorReviewViewToUrl,
   type SeniorReviewView,
 } from "@/lib/app-route";
+import {
+  groupFeedbackByWeek,
+  partitionLocationWeeks,
+} from "@/lib/location-detail-sections";
 
 // Per-card status label keyed on lifecycle stage so "Needs your review" stops
 // appearing on dormant locations. Sections supply the broader grouping; this
@@ -150,10 +154,11 @@ export function SeniorReviewApp({ toast }: { toast: ToastApi }) {
         campWeekId={view.campWeekId}
         tags={tags}
         weekSeniorTags={weekSeniorTags}
-        onBack={() =>
+        rootCrumb={{ label: "Lead review", onClick: () => setView({ kind: "hub" }) }}
+        onNavigateLocation={
           view.locationId
-            ? setView({ kind: "location", locationId: view.locationId })
-            : setView({ kind: "hub" })
+            ? () => setView({ kind: "location", locationId: view.locationId! })
+            : undefined
         }
       />
     );
@@ -520,15 +525,8 @@ function LocationDetailView({
     }
   };
 
-  const handleFeedback = async (body: string, campWeekId: string | null, tagIds: string[]) => {
-    try {
-      await postFeedback(locationId, body, { campWeekId, tagIds });
-      toast.show("Feedback added.");
-      await reload();
-    } catch (err) {
-      toast.show(err instanceof Error ? err.message : "Feedback failed");
-    }
-  };
+  const sections = React.useMemo(() => partitionLocationWeeks(weeks), [weeks]);
+  const grouped = React.useMemo(() => groupFeedbackByWeek(feedback), [feedback]);
 
   if (!detail && !error) {
     return (
@@ -556,18 +554,38 @@ function LocationDetailView({
   const detailStage = classifyLocation(detail, new Date().toISOString().slice(0, 10));
   const { label: statusLabel, tone } = statusForLifecycle(detailStage, detail);
 
+  // Read-only summary of each week's review results and any feedback given.
+  // Feedback is added on the week screen (via "Open week"), not here.
+  const renderWeek = (w: LocationCampWeek) => (
+    <WeekCard
+      key={w.id}
+      week={w}
+      feedback={grouped.byWeek.get(w.id) ?? []}
+      weekSeniorTags={weekSeniorTags}
+      onOpen={() => onOpenWeek(w.id)}
+    />
+  );
+  const noWeeks =
+    sections.needsReview.length === 0 &&
+    sections.recentlyReviewed.length === 0 &&
+    sections.pastSeasons.length === 0;
+
   return (
     <>
       <PageHeader
-        eyebrow="Lead review"
+        breadcrumb={
+          <Breadcrumb
+            items={[
+              { label: "Lead review", onClick: onBack },
+              { label: detail.name },
+            ]}
+          />
+        }
         title={detail.name}
         sub={`${detail.divisionName}`}
+        onBack={onBack}
       />
       <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-        <button type="button" className="btn btn-ghost" onClick={onBack} style={{ alignSelf: "flex-start" }}>
-          ← All locations
-        </button>
-
         <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -618,25 +636,37 @@ function LocationDetailView({
           )}
         </div>
 
-        <FeedbackSection
-          events={feedback}
-          weeks={weeks}
-          weekSeniorTags={weekSeniorTags}
-          onSubmit={handleFeedback}
-        />
+        {noWeeks && (
+          <div className="card" style={{ color: "var(--ink-3)" }}>
+            No weeks have needed review at this location.
+          </div>
+        )}
 
-        <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <h2 className="page-eyebrow" style={{ margin: 0 }}>
-            Camp weeks ({weeks.length})
-          </h2>
-          {weeks.length === 0 ? (
-            <div className="card" style={{ color: "var(--ink-3)" }}>No camp weeks at this location.</div>
-          ) : (
-            weeks.map((w) => (
-              <WeekRow key={w.id} week={w} onOpen={() => onOpenWeek(w.id)} />
-            ))
-          )}
-        </section>
+        {sections.needsReview.length > 0 && (
+          <CollapsibleSection title="Needs review" count={sections.needsReview.length}>
+            {sections.needsReview.map((w) => renderWeek(w))}
+          </CollapsibleSection>
+        )}
+
+        {sections.recentlyReviewed.length > 0 && (
+          <CollapsibleSection title="Recently reviewed" count={sections.recentlyReviewed.length}>
+            {sections.recentlyReviewed.map((w) => renderWeek(w))}
+          </CollapsibleSection>
+        )}
+
+        {sections.pastSeasons.length > 0 && (
+          <CollapsibleSection title="Past seasons" count={sections.pastSeasons.length} defaultCollapsed>
+            {sections.pastSeasons.map((w) => renderWeek(w))}
+          </CollapsibleSection>
+        )}
+
+        {grouped.unassigned.length > 0 && (
+          <CollapsibleSection title="Unassigned notes" count={grouped.unassigned.length} defaultCollapsed>
+            {grouped.unassigned.map((e) => (
+              <FeedbackRow key={e.id} event={e} />
+            ))}
+          </CollapsibleSection>
+        )}
       </div>
 
       {approveOpen && (
@@ -661,202 +691,183 @@ function LocationDetailView({
   );
 }
 
-function WeekRow({ week, onOpen }: { week: LocationCampWeek; onOpen: () => void }) {
-  const isEligible = week.triageRole !== "none";
-  const reviewed = !!week.signoffAt;
-  return (
-    <div className="card" style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-      <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <div style={{ fontWeight: 600, fontSize: 14 }}>{week.name}</div>
-          {reviewed && (
-            <span
-              title={
-                week.signoffByName
-                  ? `Reviewed by ${week.signoffByName} on ${new Date(week.signoffAt!).toLocaleDateString()}`
-                  : undefined
-              }
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                padding: "2px 8px",
-                borderRadius: 999,
-                fontSize: 11,
-                background: "var(--moss-soft, oklch(0.93 0.05 155))",
-                color: "var(--moss)",
-              }}
-            >
-              ✓ Reviewed{week.signoffByName ? ` by ${week.signoffByName}` : ""}
-            </span>
-          )}
-        </div>
-        <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
-          {new Date(week.startsOn).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-          {" – "}
-          {new Date(week.endsOn).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-          {" · "}
-          {week.totalPhotos} photos
-          {week.pendingCount > 0 && <> · {week.pendingCount} pending</>}
-          {week.flaggedCount > 0 && (
-            <span style={{ color: "var(--rose)" }}> · {week.flaggedCount} flagged</span>
-          )}
-        </div>
-      </div>
-      <button type="button" className="btn btn-ghost" onClick={onOpen} disabled={!isEligible}>
-        {isEligible ? "Open week" : "Not in season"}
-      </button>
-    </div>
-  );
-}
-
-// ─── Feedback feed + composer ─────────────────────────────────────────────────
-
-function FeedbackSection({
-  events,
-  weeks,
-  weekSeniorTags,
-  onSubmit,
+// Shared collapsible section: chevron disclosure mirroring the one inlined in
+// LocationListView so the two Lead-review screens stay visually consistent.
+function CollapsibleSection({
+  title,
+  count,
+  defaultCollapsed = false,
+  children,
 }: {
-  events: FeedbackEvent[];
-  weeks: LocationCampWeek[];
-  weekSeniorTags: Tag[];
-  onSubmit: (body: string, campWeekId: string | null, tagIds: string[]) => Promise<void>;
+  title: string;
+  count: number;
+  defaultCollapsed?: boolean;
+  children: React.ReactNode;
 }) {
-  const [composerOpen, setComposerOpen] = React.useState(false);
-  const [body, setBody] = React.useState("");
-  const [campWeekId, setCampWeekId] = React.useState<string>("");
-  const [selectedTagIds, setSelectedTagIds] = React.useState<string[]>([]);
-  const [submitting, setSubmitting] = React.useState(false);
-
-  const handleSubmit = async () => {
-    const text = body.trim();
-    if (!text) return;
-    setSubmitting(true);
-    try {
-      await onSubmit(text, campWeekId || null, selectedTagIds);
-      setBody("");
-      setCampWeekId("");
-      setSelectedTagIds([]);
-      setComposerOpen(false);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
+  const [collapsed, setCollapsed] = React.useState(defaultCollapsed);
   return (
     <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        style={{
+          background: "transparent",
+          border: 0,
+          padding: 0,
+          cursor: "pointer",
+          textAlign: "left",
+          display: "flex",
+          alignItems: "baseline",
+          gap: 8,
+          color: "inherit",
+          font: "inherit",
+        }}
+        aria-expanded={!collapsed}
+      >
+        <span
+          aria-hidden
+          style={{
+            display: "inline-block",
+            width: 10,
+            transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)",
+            transition: "transform 120ms",
+            color: "var(--ink-3)",
+            fontSize: 10,
+          }}
+        >
+          ▾
+        </span>
         <h2 className="page-eyebrow" style={{ margin: 0 }}>
-          Feedback ({events.length})
+          {title} ({count})
         </h2>
-        {!composerOpen && (
-          <button type="button" className="btn btn-ghost" onClick={() => setComposerOpen(true)}>
-            Add feedback
-          </button>
-        )}
-      </div>
-
-      {composerOpen && (
-        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            placeholder="Note for the regional manager…"
-            rows={4}
-            style={{
-              width: "100%",
-              fontFamily: "inherit",
-              fontSize: 14,
-              padding: 8,
-              border: "1px solid var(--rule)",
-              borderRadius: 6,
-              resize: "vertical",
-            }}
-          />
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <select
-              value={campWeekId}
-              onChange={(e) => setCampWeekId(e.target.value)}
-              style={{ padding: "6px 8px", border: "1px solid var(--rule)", borderRadius: 6 }}
-            >
-              <option value="">No specific week</option>
-              {weeks
-                .filter((w) => w.triageRole !== "none")
-                .map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name} ({w.startsOn})
-                  </option>
-                ))}
-            </select>
-            {weekSeniorTags.length > 0 && (
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {weekSeniorTags.map((t) => {
-                  const on = selectedTagIds.includes(t.id);
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      className={"btn btn-ghost"}
-                      style={{
-                        fontSize: 11,
-                        padding: "4px 8px",
-                        background: on ? "var(--moss)" : undefined,
-                        color: on ? "white" : undefined,
-                      }}
-                      onClick={() =>
-                        setSelectedTagIds((prev) =>
-                          on ? prev.filter((id) => id !== t.id) : [...prev, t.id],
-                        )
-                      }
-                    >
-                      {t.label}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <button type="button" className="btn btn-ghost" onClick={() => setComposerOpen(false)} disabled={submitting}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleSubmit}
-              disabled={submitting || !body.trim()}
-            >
-              {submitting ? "Posting…" : "Post feedback"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {events.length === 0 ? (
-        <div className="card" style={{ color: "var(--ink-3)" }}>No feedback yet.</div>
-      ) : (
-        events.map((e) => <FeedbackRow key={e.id} event={e} />)
-      )}
+      </button>
+      {!collapsed && children}
     </section>
   );
 }
 
-function FeedbackRow({ event }: { event: FeedbackEvent }) {
+// Read-only week summary: review results (counts, reviewed badge), the lead's
+// highlights + assessment tags, and any feedback notes recorded. All editing
+// happens on the week screen.
+function WeekCard({
+  week,
+  feedback,
+  weekSeniorTags,
+  onOpen,
+}: {
+  week: LocationCampWeek;
+  feedback: FeedbackEvent[];
+  weekSeniorTags: Tag[];
+  onOpen: () => void;
+}) {
+  const isEligible = week.triageRole !== "none";
+  const reviewed = !!week.signoffAt;
+  const highlights = [
+    week.positiveGreatQuality && "Great Quality",
+    week.positiveGreatVariety && "Great Variety",
+    week.positiveShininessGreat && "Shininess Looks Great",
+  ].filter((h): h is string => !!h);
+  const tagMeta = new Map(weekSeniorTags.map((t) => [t.id, t]));
+  const assessmentTags = week.assessmentTagIds
+    .map((id) => tagMeta.get(id))
+    .filter((t): t is Tag => !!t);
+  const hasSummary =
+    highlights.length > 0 || assessmentTags.length > 0 || feedback.length > 0;
   return (
-    <div className="card" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ fontSize: 12, color: "var(--ink-3)", display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <span>{event.authorName ?? "—"}</span>
-        <span>·</span>
-        <span>{new Date(event.createdAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
-        {event.campWeekName && (
-          <>
-            <span>·</span>
-            <span>{event.campWeekName}</span>
-          </>
-        )}
+    <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>{week.name}</div>
+            {reviewed && (
+              <span
+                title={
+                  week.signoffByName
+                    ? `Reviewed by ${week.signoffByName} on ${new Date(week.signoffAt!).toLocaleDateString()}`
+                    : undefined
+                }
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  fontSize: 11,
+                  background: "var(--moss-soft, oklch(0.93 0.05 155))",
+                  color: "var(--moss)",
+                }}
+              >
+                ✓ Reviewed{week.signoffByName ? ` by ${week.signoffByName}` : ""}
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+            {new Date(week.startsOn).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+            {" – "}
+            {new Date(week.endsOn).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+            {" · "}
+            {week.totalPhotos} photos
+            {week.pendingCount > 0 && <> · {week.pendingCount} pending</>}
+            {week.flaggedCount > 0 && (
+              <span style={{ color: "var(--rose)" }}> · {week.flaggedCount} flagged</span>
+            )}
+          </div>
+        </div>
+        <button type="button" className="btn btn-ghost" onClick={onOpen} disabled={!isEligible}>
+          {isEligible ? "Open week" : "Not in season"}
+        </button>
       </div>
-      <div style={{ fontSize: 14, whiteSpace: "pre-wrap" }}>{event.body}</div>
+
+      {hasSummary && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            borderTop: "1px solid var(--rule)",
+            paddingTop: 12,
+          }}
+        >
+          {highlights.length > 0 && (
+            <SummaryGroup label="Highlights">
+              {highlights.map((h) => (
+                <span key={h} className="pill pill-moss">{h}</span>
+              ))}
+            </SummaryGroup>
+          )}
+          {assessmentTags.length > 0 && (
+            <SummaryGroup label="Assessment">
+              {assessmentTags.map((t) => (
+                <span
+                  key={t.id}
+                  className={"pill " + (t.valence === "positive" ? "pill-moss" : "pill-rose")}
+                >
+                  {t.label}
+                </span>
+              ))}
+            </SummaryGroup>
+          )}
+          {feedback.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {feedback.map((e) => (
+                <FeedbackRow key={e.id} event={e} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Small labeled row of pills used inside a week summary card.
+function SummaryGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-3)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+        {label}
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{children}</div>
     </div>
   );
 }

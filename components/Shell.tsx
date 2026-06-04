@@ -169,24 +169,69 @@ export function BrandLogo({
 
 export function PageHeader({
   eyebrow,
+  breadcrumb,
   title,
   sub,
+  onBack,
   children,
 }: {
   eyebrow?: string;
+  breadcrumb?: React.ReactNode;
   title: string;
   sub?: string;
+  // When provided, renders a left-aligned back button at the bottom of the
+  // header (above the divider). The browser back button doesn't behave in this
+  // app's single-page view model, so nested screens need an explicit one.
+  onBack?: () => void;
   children?: React.ReactNode;
 }) {
   return (
     <div className="page-header">
       <div>
-        {eyebrow && <div className="page-eyebrow">{eyebrow}</div>}
+        {breadcrumb ?? (eyebrow && <div className="page-eyebrow">{eyebrow}</div>)}
         <h1 className="page-title" dangerouslySetInnerHTML={{ __html: title }} />
         {sub && <div className="page-sub">{sub}</div>}
+        {onBack && (
+          <button type="button" className="btn btn-ghost" onClick={onBack} style={{ marginTop: 16 }}>
+            ← Back
+          </button>
+        )}
       </div>
       {children && <div style={{ display: "flex", gap: 10, alignItems: "center" }}>{children}</div>}
     </div>
+  );
+}
+
+export type Crumb = { label: string; onClick?: () => void };
+
+// Breadcrumb trail rendered in the page header's eyebrow slot. Non-final crumbs
+// with an onClick are clickable links up the hierarchy; the final crumb is the
+// current page. Replaces the per-screen back buttons on nested screens.
+export function Breadcrumb({ items }: { items: Crumb[] }) {
+  return (
+    <nav aria-label="Breadcrumb" className="breadcrumb">
+      {items.map((c, i) => {
+        const isLast = i === items.length - 1;
+        return (
+          <React.Fragment key={`${i}-${c.label}`}>
+            {!isLast && c.onClick ? (
+              <button type="button" className="breadcrumb-link" onClick={c.onClick}>
+                {c.label}
+              </button>
+            ) : (
+              <span className="breadcrumb-current" aria-current={isLast ? "page" : undefined}>
+                {c.label}
+              </span>
+            )}
+            {!isLast && (
+              <span className="breadcrumb-sep" aria-hidden>
+                /
+              </span>
+            )}
+          </React.Fragment>
+        );
+      })}
+    </nav>
   );
 }
 
