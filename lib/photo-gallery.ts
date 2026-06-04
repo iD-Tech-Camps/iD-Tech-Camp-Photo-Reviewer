@@ -20,6 +20,10 @@ export type GalleryFilters = {
   campWeekId?: string | null;
   minRating?: number | null;
   tagIds?: string[];
+  // Restrict to photos the given viewer has rated. `mineOnly` is the toggle;
+  // `viewerId` is the reviewer to match (the signed-in user).
+  mineOnly?: boolean;
+  viewerId?: string | null;
   sort: GallerySort;
   offset: number;
   limit: number;
@@ -41,6 +45,7 @@ export type GalleryPhoto = {
   weekStartsOn: string | null;
   tagIds: string[];
   ratedBy: string | null;
+  ratedById: string | null;
 };
 
 export type GalleryFilterOptions = {
@@ -130,6 +135,24 @@ async function fetchPhotoIdsForTags(
   return [...ids];
 }
 
+// Photo ids the given reviewer has a rating event for. Semantics mirror the tag
+// pre-filter: "has rated this photo" (superseded events count too), which is
+// fine since admin corrections don't append events and re-rating is rare, so
+// the photo's current "rated by" is virtually always this reviewer.
+async function fetchPhotoIdsRatedBy(
+  supabase: SupabaseClient,
+  reviewerId: string,
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("photo_rating_events")
+    .select("photo_id")
+    .eq("reviewer_id", reviewerId);
+  if (error) throw error;
+  const ids = new Set<string>();
+  for (const row of (data ?? []) as Array<{ photo_id: string }>) ids.add(row.photo_id);
+  return [...ids];
+}
+
 const SELECT_COLUMNS =
   "id, current_rating, captured_at, thumbnail_url, image_url, smugmug_url, " +
   "smugmug_image_id, width, height, " +
@@ -139,11 +162,23 @@ export async function fetchRatedPhotos(
   supabase: SupabaseClient,
   filters: GalleryFilters,
 ): Promise<GalleryPhoto[]> {
-  // Resolve the tag pre-filter first; an empty result short-circuits the page.
-  let tagPhotoIds: string[] | null = null;
+  // Resolve id pre-filters (tags, "only my ratings") up front and intersect
+  // them; any empty result short-circuits the page.
+  let restrictIds: string[] | null = null;
   if (filters.tagIds && filters.tagIds.length > 0) {
-    tagPhotoIds = await fetchPhotoIdsForTags(supabase, filters.tagIds);
-    if (tagPhotoIds.length === 0) return [];
+    restrictIds = await fetchPhotoIdsForTags(supabase, filters.tagIds);
+    if (restrictIds.length === 0) return [];
+  }
+  if (filters.mineOnly && filters.viewerId) {
+    const mineIds = await fetchPhotoIdsRatedBy(supabase, filters.viewerId);
+    if (mineIds.length === 0) return [];
+    if (restrictIds) {
+      const mineSet = new Set(mineIds);
+      restrictIds = restrictIds.filter((id) => mineSet.has(id));
+      if (restrictIds.length === 0) return [];
+    } else {
+      restrictIds = mineIds;
+    }
   }
 
   let query = supabase
@@ -165,8 +200,8 @@ export async function fetchRatedPhotos(
     query = query.gte("current_rating", filters.minRating);
   }
 
-  if (tagPhotoIds) {
-    query = query.in("id", tagPhotoIds);
+  if (restrictIds) {
+    query = query.in("id", restrictIds);
   }
 
   const asc = filters.sort === "rating_asc" || filters.sort === "captured_asc";
@@ -217,6 +252,7 @@ export async function fetchRatedPhotos(
     divisionName: r.camp_weeks?.locations?.divisions?.name ?? "—",
     tagIds: [],
     ratedBy: null,
+    ratedById: null,
   }));
 
   // Attach current tags + "rated by" for this page from the latest event.
@@ -225,15 +261,16 @@ export async function fetchRatedPhotos(
     const meta = metaMap.get(p.id);
     p.tagIds = meta?.tagIds ?? [];
     p.ratedBy = meta?.ratedBy ?? null;
+    p.ratedById = meta?.ratedById ?? null;
   }
 
   return photos;
 }
 
-// Senior/admin rating correction (Photo Library). A behind-the-scenes update of
-// the photo's current_rating via the role-gated route — attribution and the
-// reviewer's event are left untouched; only the gallery's sort/display value
-// changes.
+// Rating correction (Photo Library). A behind-the-scenes update of the photo's
+// current_rating via the gated route — attribution and the reviewer's event are
+// left untouched; only the gallery's sort/display value changes. Allowed for
+// seniors/admins (any photo) and a photo's own current rater (re-rating).
 export async function overridePhotoRating(photoId: string, rating: number): Promise<void> {
   const res = await fetch("/api/photo-rating/override", {
     method: "POST",
@@ -246,9 +283,9 @@ export async function overridePhotoRating(photoId: string, rating: number): Prom
   }
 }
 
-export type GalleryPhotoMeta = { tagIds: string[]; ratedBy: string | null };
+export type GalleryPhotoMeta = { tagIds: string[]; ratedBy: string | null; ratedById: string | null };
 
-// photoId → { tag ids, reviewer name } from the latest rating event per photo.
+// photoId → { tag ids, reviewer name + id } from the latest rating event per photo.
 export async function fetchGalleryPhotoMeta(
   supabase: SupabaseClient,
   photoIds: string[],
@@ -263,10 +300,11 @@ export async function fetchGalleryPhotoMeta(
     .order("created_at", { ascending: false });
   if (evErr) throw evErr;
 
-  const latestByPhoto = new Map<string, { eventId: string; ratedBy: string | null }>();
+  const latestByPhoto = new Map<string, { eventId: string; ratedBy: string | null; ratedById: string | null }>();
   for (const row of (events ?? []) as unknown as Array<{
     id: string;
     photo_id: string;
+    reviewer_id: string | null;
     profiles: { full_name: string | null; email: string | null } | null;
   }>) {
     if (latestByPhoto.has(row.photo_id)) continue;
@@ -274,6 +312,7 @@ export async function fetchGalleryPhotoMeta(
     latestByPhoto.set(row.photo_id, {
       eventId: row.id,
       ratedBy: p?.full_name || p?.email || null,
+      ratedById: row.reviewer_id ?? null,
     });
   }
 
@@ -293,7 +332,7 @@ export async function fetchGalleryPhotoMeta(
   }
 
   for (const [photoId, v] of latestByPhoto) {
-    out.set(photoId, { tagIds: tagsByEvent.get(v.eventId) ?? [], ratedBy: v.ratedBy });
+    out.set(photoId, { tagIds: tagsByEvent.get(v.eventId) ?? [], ratedBy: v.ratedBy, ratedById: v.ratedById });
   }
   return out;
 }

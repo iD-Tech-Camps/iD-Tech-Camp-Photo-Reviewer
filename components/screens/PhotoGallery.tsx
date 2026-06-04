@@ -32,6 +32,7 @@ type Filters = {
   campWeekId: string | null;
   minRating: number | null;
   tagIds: string[];
+  mineOnly: boolean;
   sort: GallerySort;
 };
 
@@ -42,11 +43,13 @@ const DEFAULT_FILTERS: Filters = {
   minRating: 4,
   sort: "rating_desc",
   tagIds: [],
+  mineOnly: false,
 };
 
 export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
   const supabase = React.useMemo(() => createClient(), []);
   const viewer = useCurrentUser();
+  const viewerId = viewer.id;
   const canEditRating = viewer.role === "senior" || viewer.role === "admin";
   const [options, setOptions] = React.useState<GalleryFilterOptions | null>(null);
   const [filters, setFilters] = React.useState<Filters>(DEFAULT_FILTERS);
@@ -74,7 +77,7 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetchRatedPhotos(supabase, { ...filters, offset: 0, limit: PAGE_SIZE })
+    fetchRatedPhotos(supabase, { ...filters, viewerId, offset: 0, limit: PAGE_SIZE })
       .then((rows) => {
         if (cancelled) return;
         setPhotos(rows);
@@ -83,13 +86,14 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
       .catch((e) => { if (!cancelled) setError(e?.message ?? "Failed to load photos"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [supabase, filters]);
+  }, [supabase, filters, viewerId]);
 
   const loadMore = async () => {
     setLoading(true);
     try {
       const rows = await fetchRatedPhotos(supabase, {
         ...filters,
+        viewerId,
         offset: photos.length,
         limit: PAGE_SIZE,
       });
@@ -142,7 +146,7 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
   const isFiltered =
     filters.divisionId !== null || filters.locationId !== null || filters.campWeekId !== null ||
     filters.tagIds.length > 0 || filters.minRating !== DEFAULT_FILTERS.minRating ||
-    filters.sort !== DEFAULT_FILTERS.sort;
+    filters.mineOnly || filters.sort !== DEFAULT_FILTERS.sort;
 
   // Lightbox neighbor preload (XL variant).
   React.useEffect(() => {
@@ -236,6 +240,24 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
               ))}
             </select>
           </Field>
+
+          <label
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              alignSelf: "flex-end", padding: "9px 0", fontSize: 13,
+              cursor: viewerId ? "pointer" : "not-allowed",
+              color: viewerId ? "var(--ink)" : "var(--ink-3)",
+            }}
+            title={viewerId ? undefined : "Sign-in still loading"}
+          >
+            <input
+              type="checkbox"
+              checked={filters.mineOnly}
+              disabled={!viewerId}
+              onChange={(e) => patch({ mineOnly: e.target.checked })}
+            />
+            Show only my ratings
+          </label>
 
           {isFiltered && (
             <button
@@ -354,7 +376,7 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
           onClose={() => setLightboxIndex(null)}
           onPrev={() => setLightboxIndex((i) => (i === null || i <= 0 ? i : i - 1))}
           onNext={() => setLightboxIndex((i) => (i === null || i >= photos.length - 1 ? i : i + 1))}
-          canEditRating={canEditRating}
+          canEditRating={canEditRating || (!!viewerId && lightboxPhoto.ratedById === viewerId)}
           onOverrideRating={(rating) => overrideRating(lightboxPhoto.id, rating)}
         />
       )}
