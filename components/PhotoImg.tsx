@@ -31,8 +31,11 @@
 // downloads. The preview is rendered as a separate <img> layer with a
 // blur/scale filter so it reads as "loading hint, not final" — the main
 // image fades over it on load, and the preview stays visible if the main
-// image errors (blurry-but-present beats no-image). Without this prop the
-// renderer behaves exactly as it did before (skeleton + single image).
+// image errors (blurry-but-present beats no-image). When `showSpinner` is
+// also set, the spinner is overlaid on top of the blurry preview while the
+// larger variant downloads, so a slow/large image reads as "sharper version
+// incoming" rather than a stalled blur. Without `previewSrc` the renderer
+// behaves exactly as it did before (skeleton + single image).
 
 import React from "react";
 
@@ -143,12 +146,16 @@ export function PhotoImg({
           }}
         />
       )}
-      {!previewSrc && status === "loading" && (
+      {status === "loading" && (showSpinner || !previewSrc) && (
         <div
           aria-hidden
           style={{
             position: "absolute", inset: 0,
-            background,
+            // With a preview, stay transparent so the blurry thumbnail shows
+            // through under the spinner — the spinner signals that a sharper
+            // variant is still downloading. Without one, paint the skeleton so
+            // the layout doesn't collapse before first paint.
+            background: previewSrc ? undefined : background,
             display: showSpinner ? "grid" : undefined,
             placeItems: showSpinner ? "center" : undefined,
           }}
