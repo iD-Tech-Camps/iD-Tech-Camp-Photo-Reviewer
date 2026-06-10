@@ -66,10 +66,10 @@ Trigger functions that `UPDATE photos` must be `SECURITY DEFINER SET search_path
 ### Key paths
 
 ```
-app/api/smugmug/     # ping, sync-folders, sync-now, sync-scheduled, quarantine
+app/api/smugmug/     # ping, sync-folders, sync-now, sync-scheduled, quarantine, download, download-zip (bulk .zip), gallery (create Unlisted album)
 app/api/triage/      # claims, events (grace window post-refactor), signoff (per-week review marker), sweep-claims
 app/api/locations/[id]/  # approve, revoke, feedback — post location-approval refactor
-app/api/photo-rating/  # claims, events, week-tags, sweep-claims
+app/api/photo-rating/  # claims, events, week-tags, sweep-claims, override + bulk-override (Photo Library rating correction)
 components/screens/
   Triage.tsx         # Camp Quality Review hub + claim grid + senior dashboard
   PhotoRating.tsx    # Camp Photo Review hub + star-rating lightbox
@@ -78,6 +78,7 @@ components/screens/
   AdminSmugMug.tsx   # Photo sync (log + sync / sample maintenance)
   AdminLocations.tsx # evergreen notes + 1st-week override
 lib/smugmug/sync/photos.ts  # orphan delete preserves triage history (§0)
+lib/smugmug/collections.ts  # create Unlisted album + collect existing images (only SmugMug write path beyond quarantine)
 spec/TRIAGE_SPEC.md  # contract for schema + triggers + UI
 spec/LOCATION_APPROVAL_SPEC.md  # per-location approval lifecycle + drain/reopen contract
 ```

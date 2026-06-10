@@ -76,6 +76,35 @@ and downloading the best photos for marketing. `components/screens/PhotoGallery.
   stream through `GET /api/smugmug/download`. Plus a **View on SmugMug** link (`photos.smugmug_url`).
   The SmugMug-generated `caption` and camp-quality-review status are intentionally not shown —
   irrelevant in a marketing context.
+- **Rating correction (lightbox):** seniors/admins (and a photo's own rater) get a **Change** link
+  that sets `current_rating` via `POST /api/photo-rating/override`. A behind-the-scenes edit of the
+  denormalized rating only — no rating event is appended, so attribution ("rated by") and
+  gamification points are untouched.
+
+### Multi-select & bulk actions
+
+A Google-Drive-style **Select** toggle in a toolbar below the filters. In select mode each grid tile
+gets a checkbox + selection ring and clicking toggles selection instead of opening the lightbox;
+selection is keyed by photo id, so it survives "Load more". The toolbar shows "N selected",
+Select-all-loaded / Clear, and three actions:
+
+- **Download .zip** — `POST /api/smugmug/download-zip` streams a zip of web-size images (XL → L →
+  stored Original fallback, derived from `image_url` via `smugmugVariantUrl` — no SmugMug API call).
+  Images are prefetched server-side with bounded concurrency and zipped store-only (`archiver`, since
+  JPEGs are already compressed). **Capped at 60 photos** (client + server) to stay within the
+  serverless time/memory limit — which is why web sizes, not Originals, are bundled. Unreachable
+  images are skipped rather than failing the whole zip, and the count is reported via an
+  `X-Zip-Skipped` response header.
+- **Create SmugMug gallery** — `POST /api/smugmug/gallery` creates an **Unlisted**, link-shareable
+  album under a "Photo Reviewer Collections" folder and *collects* the selected (already-synced)
+  images into it (no re-upload). A modal lets the user edit the auto-suggested title before creating,
+  then shows a clickable link (opens in a new tab) on success. Helpers live in
+  `lib/smugmug/collections.ts` — **the app's only SmugMug write path beyond the quarantine Hidden
+  flag** (album/folder create via `POST …!children`, image collection via `…!collectimages`).
+- **Change rating** (seniors/admins only) — `POST /api/photo-rating/bulk-override` sets
+  `current_rating` on all selected photos via the service client, with the same correction semantics
+  as the single-photo lightbox path above (no events/attribution/points change). Returns the count
+  actually updated.
 
 ### Local dev
 `scripts/capture-gallery-fixture.mjs` does a one-time read-only pull from prod into a gitignored

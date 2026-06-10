@@ -9,6 +9,7 @@ import { useCurrentUser } from "@/lib/current-user";
 import { smugmugVariantUrl } from "@/lib/smugmug/url-variants";
 import { buildTagLabelLookup } from "@/lib/tags";
 import {
+  bulkOverridePhotoRating,
   fetchGalleryFilterOptions,
   fetchRatedPhotos,
   overridePhotoRating,
@@ -16,6 +17,10 @@ import {
   type GalleryPhoto,
   type GallerySort,
 } from "@/lib/photo-gallery";
+
+// Max photos the .zip download accepts in one request (mirrors the server cap
+// in app/api/smugmug/download-zip). Selecting more disables the zip action.
+const ZIP_MAX = 60;
 
 const PAGE_SIZE = 60;
 
@@ -58,6 +63,12 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
   const [hasMore, setHasMore] = React.useState(false);
   const [lightboxIndex, setLightboxIndex] = React.useState<number | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+
+  // Multi-select mode + bulk actions.
+  const [selectMode, setSelectMode] = React.useState(false);
+  const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
+  const [actionBusy, setActionBusy] = React.useState<null | "zip" | "rating">(null);
+  const [galleryOpen, setGalleryOpen] = React.useState(false);
 
   const tagLabel = React.useMemo(
     () => buildTagLabelLookup(options?.tags ?? []),
@@ -107,6 +118,89 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
   };
 
   const patch = (next: Partial<Filters>) => setFilters((f) => ({ ...f, ...next }));
+
+  // --- Multi-select ---------------------------------------------------------
+  // `selected` is keyed by photo id (not array index), so paging in more
+  // photos via "Load more" never disturbs the current selection.
+  const toggleSelect = (id: string) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const clearSelection = () => setSelected(new Set());
+  const selectAllLoaded = () => setSelected(new Set(photos.map((p) => p.id)));
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    clearSelection();
+  };
+  const selectedCount = selected.size;
+  const overZipCap = selectedCount > ZIP_MAX;
+
+  const runZip = async () => {
+    setActionBusy("zip");
+    try {
+      const res = await fetch("/api/smugmug/download-zip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photo_ids: [...selected] }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? `Download failed (${res.status})`);
+      }
+      const skipped = Number(res.headers.get("X-Zip-Skipped") ?? 0);
+      const blob = await res.blob();
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = `idtech-photos-${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(href);
+      toast.show(
+        skipped > 0 ? `Download ready (${skipped} skipped)` : "Download ready",
+        "download",
+      );
+    } catch (e: unknown) {
+      toast.show(e instanceof Error ? e.message : "Download failed", "x");
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
+  // Creates the gallery and resolves to its shareable URL. The dialog owns the
+  // title input, busy/error UI, and the success view with the clickable link.
+  const createGallery = async (name: string): Promise<string> => {
+    const res = await fetch("/api/smugmug/gallery", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photo_ids: [...selected], name }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.url) {
+      throw new Error(json.error ?? `Couldn't create gallery (${res.status})`);
+    }
+    return json.url as string;
+  };
+
+  const runBulkRating = async (rating: number) => {
+    setActionBusy("rating");
+    const ids = [...selected];
+    try {
+      const updated = await bulkOverridePhotoRating(ids, rating);
+      // Optimistically patch the loaded grid so badges update immediately.
+      const idSet = new Set(ids);
+      setPhotos((prev) => prev.map((p) => (idSet.has(p.id) ? { ...p, rating } : p)));
+      toast.show(`Updated ${updated} photo${updated === 1 ? "" : "s"} to ${rating}★`, "check");
+    } catch (e: unknown) {
+      toast.show(e instanceof Error ? e.message : "Couldn't change rating", "x");
+    } finally {
+      setActionBusy(null);
+    }
+  };
 
   // Senior/admin rating correction — a behind-the-scenes edit of the rating
   // used for sorting/display. Attribution ("rated by") is intentionally left
@@ -301,6 +395,79 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
           )}
         </div>
 
+        <div
+          className="card"
+          style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}
+        >
+          {!selectMode ? (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setSelectMode(true)}
+              disabled={photos.length === 0}
+            >
+              <Icon name="check" size={16} />
+              <span style={{ marginLeft: 6 }}>Select photos</span>
+            </button>
+          ) : (
+            <>
+              <span style={{ fontSize: 13, color: overZipCap ? "var(--rose)" : "var(--ink-2)" }}>
+                {selectedCount} selected
+              </span>
+              <button
+                type="button"
+                onClick={selectAllLoaded}
+                style={linkBtnStyle}
+              >
+                Select all loaded
+              </button>
+              <button
+                type="button"
+                onClick={clearSelection}
+                disabled={selectedCount === 0}
+                style={{ ...linkBtnStyle, opacity: selectedCount === 0 ? 0.5 : 1 }}
+              >
+                Clear
+              </button>
+
+              <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                {overZipCap && (
+                  <span style={{ fontSize: 11, color: "var(--rose)" }}>Max {ZIP_MAX} for download</span>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => void runZip()}
+                  disabled={selectedCount === 0 || overZipCap || actionBusy !== null}
+                  title={overZipCap ? `Select ${ZIP_MAX} or fewer to download` : undefined}
+                >
+                  <Icon name="download" size={16} />
+                  <span style={{ marginLeft: 6 }}>{actionBusy === "zip" ? "Zipping…" : "Download .zip"}</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setGalleryOpen(true)}
+                  disabled={selectedCount === 0 || actionBusy !== null}
+                >
+                  <Icon name="image" size={16} />
+                  <span style={{ marginLeft: 6 }}>Create SmugMug gallery</span>
+                </button>
+                {canEditRating && (
+                  <BulkRatingMenu
+                    disabled={selectedCount === 0 || actionBusy !== null}
+                    busy={actionBusy === "rating"}
+                    onPick={(n) => void runBulkRating(n)}
+                  />
+                )}
+                <button type="button" className="btn btn-ghost" onClick={exitSelectMode}>
+                  Done
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
         {error && <div className="card" style={{ color: "var(--rose)", fontSize: 12 }}>{error}</div>}
 
         {!loading && photos.length === 0 ? (
@@ -314,12 +481,19 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
                 gap: 12,
               }}
             >
-              {photos.map((p, idx) => (
+              {photos.map((p, idx) => {
+                const isSelected = selected.has(p.id);
+                return (
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => setLightboxIndex(idx)}
-                  aria-label={`${p.locationName} — ${p.weekName}${p.rating ? `, ${p.rating} stars` : ""}`}
+                  onClick={() => (selectMode ? toggleSelect(p.id) : setLightboxIndex(idx))}
+                  aria-label={
+                    selectMode
+                      ? `${isSelected ? "Deselect" : "Select"} ${p.locationName} — ${p.weekName}`
+                      : `${p.locationName} — ${p.weekName}${p.rating ? `, ${p.rating} stars` : ""}`
+                  }
+                  aria-pressed={selectMode ? isSelected : undefined}
                   style={{
                     position: "relative",
                     aspectRatio: "4 / 3",
@@ -329,9 +503,32 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
                     border: "1px solid var(--rule)",
                     background: "var(--paper-3)",
                     cursor: "pointer",
+                    outline: selectMode && isSelected ? "3px solid var(--sun)" : "none",
+                    outlineOffset: -3,
                   }}
                 >
                   <PhotoImg src={p.thumbnailUrl ?? p.imageUrl} alt="" fit="cover" />
+                  {selectMode && (
+                    <div
+                      aria-hidden
+                      style={{
+                        position: "absolute",
+                        top: 8,
+                        left: 8,
+                        width: 22,
+                        height: 22,
+                        borderRadius: 6,
+                        display: "grid",
+                        placeItems: "center",
+                        background: isSelected ? "var(--sun)" : "rgba(255,255,255,0.85)",
+                        border: "1px solid var(--rule)",
+                        color: "white",
+                        boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
+                      }}
+                    >
+                      {isSelected && <Icon name="check" size={14} />}
+                    </div>
+                  )}
                   {p.rating != null && (
                     <div
                       aria-hidden
@@ -347,7 +544,8 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
                     </div>
                   )}
                 </button>
-              ))}
+                );
+              })}
             </div>
 
             {hasMore && (
@@ -378,6 +576,14 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
           onNext={() => setLightboxIndex((i) => (i === null || i >= photos.length - 1 ? i : i + 1))}
           canEditRating={canEditRating || (!!viewerId && lightboxPhoto.ratedById === viewerId)}
           onOverrideRating={(rating) => overrideRating(lightboxPhoto.id, rating)}
+        />
+      )}
+
+      {galleryOpen && (
+        <GalleryCreateDialog
+          count={selectedCount}
+          onCreate={createGallery}
+          onClose={() => setGalleryOpen(false)}
         />
       )}
     </>
@@ -484,6 +690,220 @@ function selectOptionStyle(active: boolean): React.CSSProperties {
     background: active ? "var(--paper-3)" : "transparent",
     color: "var(--ink)",
   };
+}
+
+const linkBtnStyle: React.CSSProperties = {
+  background: "none", border: "none", padding: "4px 0",
+  color: "var(--ink-3)", fontSize: 12, cursor: "pointer", textDecoration: "underline",
+};
+
+// 1–5 rating buttons, shared by the lightbox "Change" editor and the
+// multi-select toolbar's bulk "Change rating" popover. `current` highlights the
+// active value (null in the bulk case, where photos may differ).
+function RatingPicker({
+  current,
+  busy,
+  onPick,
+}: {
+  current: number | null;
+  busy?: boolean;
+  onPick: (n: number) => void;
+}) {
+  return (
+    <>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button
+          key={n}
+          type="button"
+          disabled={busy}
+          aria-label={`${n} star${n === 1 ? "" : "s"}`}
+          onClick={() => onPick(n)}
+          style={{
+            display: "grid", placeItems: "center",
+            width: 30, height: 30, borderRadius: 6, cursor: "pointer",
+            border: "1px solid var(--rule-2)",
+            background: n === current ? "var(--sun)" : "var(--paper)",
+            color: n === current ? "white" : "var(--ink-2)",
+          }}
+        >
+          {n}
+        </button>
+      ))}
+    </>
+  );
+}
+
+// Bulk "Change rating" trigger + popover for the multi-select toolbar. Modeled
+// on DownloadMenu's outside-click pattern.
+function BulkRatingMenu({
+  disabled,
+  busy,
+  onPick,
+}: {
+  disabled: boolean;
+  busy: boolean;
+  onPick: (n: number) => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const wrapRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button
+        type="button"
+        className="btn btn-ghost"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Icon name="stars" size={16} />
+        <span style={{ marginLeft: 6 }}>{busy ? "Updating…" : "Change rating"}</span>
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute", right: 0, top: "100%", marginTop: 6, zIndex: 10,
+            display: "flex", gap: 6, alignItems: "center",
+            background: "var(--paper-2)", border: "1px solid var(--rule)",
+            borderRadius: 8, padding: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
+          }}
+        >
+          <RatingPicker current={null} busy={busy} onPick={(n) => { onPick(n); setOpen(false); }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Auto-suggested gallery title, e.g. "Selected Photos 2026-06-10 14-32". Mirrors
+// the server-side default in lib/smugmug/collections.ts.
+function suggestGalleryName(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `Selected Photos ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}-${pad(d.getMinutes())}`;
+}
+
+// Two-phase modal for the "Create SmugMug gallery" bulk action:
+//   compose → editable auto-suggested title + Create
+//   created → success view with a clickable link (opens in a new tab)
+function GalleryCreateDialog({
+  count,
+  onCreate,
+  onClose,
+}: {
+  count: number;
+  onCreate: (name: string) => Promise<string>;
+  onClose: () => void;
+}) {
+  const [name, setName] = React.useState(() => suggestGalleryName());
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const [createdUrl, setCreatedUrl] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) { e.preventDefault(); onClose(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, busy]);
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const url = await onCreate(name.trim() || suggestGalleryName());
+      setCreatedUrl(url);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Couldn't create gallery");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(0,0,0,0.5)",
+        display: "grid", placeItems: "center", padding: 24,
+      }}
+    >
+      <div
+        style={{
+          width: "100%", maxWidth: 440,
+          background: "var(--paper)", border: "1px solid var(--rule)",
+          borderRadius: 12, padding: 20, boxShadow: "var(--shadow-md)",
+        }}
+      >
+        {createdUrl ? (
+          <>
+            <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>Gallery created</h2>
+            <p style={{ margin: "0 0 16px", fontSize: 13, color: "var(--ink-3)" }}>
+              Your Unlisted gallery is ready — anyone with the link can view it.
+            </p>
+            <a
+              className="btn btn-primary"
+              href={createdUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}
+            >
+              <Icon name="image" size={16} />
+              <span style={{ marginLeft: 6 }}>Open gallery</span>
+            </a>
+            <div style={{ fontSize: 11, color: "var(--ink-3)", wordBreak: "break-all", marginBottom: 16 }}>
+              {createdUrl}
+            </div>
+            <button type="button" className="btn btn-ghost" style={{ width: "100%" }} onClick={onClose}>
+              Done
+            </button>
+          </>
+        ) : (
+          <>
+            <h2 style={{ margin: "0 0 4px", fontSize: 18 }}>Create SmugMug gallery</h2>
+            <p style={{ margin: "0 0 14px", fontSize: 13, color: "var(--ink-3)" }}>
+              {count} photo{count === 1 ? "" : "s"} will be gathered into a new Unlisted,
+              link-shareable gallery.
+            </p>
+            <label style={{ display: "block", fontSize: 12, color: "var(--ink-3)", marginBottom: 6 }}>
+              Gallery title
+            </label>
+            <input
+              className="select"
+              type="text"
+              value={name}
+              autoFocus
+              disabled={busy}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !busy) void submit(); }}
+              style={{ width: "100%", marginBottom: error ? 6 : 16 }}
+            />
+            {error && <div style={{ color: "var(--rose)", fontSize: 12, marginBottom: 12 }}>{error}</div>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="btn btn-ghost" disabled={busy} onClick={onClose}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void submit()}>
+                {busy ? "Creating…" : "Create gallery"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function GalleryLightbox({
@@ -656,29 +1076,16 @@ function GalleryLightbox({
             {canEditRating && editingRating && (
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Set rating:</span>
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    disabled={savingRating}
-                    aria-label={`${n} star${n === 1 ? "" : "s"}`}
-                    onClick={async () => {
-                      setSavingRating(true);
-                      const ok = await onOverrideRating(n);
-                      setSavingRating(false);
-                      if (ok) setEditingRating(false);
-                    }}
-                    style={{
-                      display: "grid", placeItems: "center",
-                      width: 30, height: 30, borderRadius: 6, cursor: "pointer",
-                      border: "1px solid var(--rule-2)",
-                      background: n === photo.rating ? "var(--sun)" : "var(--paper)",
-                      color: n === photo.rating ? "white" : "var(--ink-2)",
-                    }}
-                  >
-                    {n}
-                  </button>
-                ))}
+                <RatingPicker
+                  current={photo.rating}
+                  busy={savingRating}
+                  onPick={async (n) => {
+                    setSavingRating(true);
+                    const ok = await onOverrideRating(n);
+                    setSavingRating(false);
+                    if (ok) setEditingRating(false);
+                  }}
+                />
                 <button
                   type="button"
                   disabled={savingRating}

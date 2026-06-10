@@ -283,6 +283,26 @@ export async function overridePhotoRating(photoId: string, rating: number): Prom
   }
 }
 
+// Bulk rating correction (Photo Library multi-select). Same semantics as
+// overridePhotoRating but for many photos at once; restricted server-side to
+// seniors/admins. Resolves to the number of photos actually updated.
+export async function bulkOverridePhotoRating(
+  photoIds: string[],
+  rating: number,
+): Promise<number> {
+  const res = await fetch("/api/photo-rating/bulk-override", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ photo_ids: photoIds, rating }),
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw new Error(json.error ?? `bulk override failed (${res.status})`);
+  }
+  const json = await res.json().catch(() => ({}));
+  return Number(json.updated ?? 0);
+}
+
 export type GalleryPhotoMeta = { tagIds: string[]; ratedBy: string | null; ratedById: string | null };
 
 // photoId → { tag ids, reviewer name + id } from the latest rating event per photo.
