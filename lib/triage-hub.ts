@@ -23,6 +23,11 @@ export async function fetchTriageHubWeeks(
         "locations!inner ( name, is_ignored ), photos ( triage_state )",
     )
     .not("triage_state", "in", '("not_required","complete")')
+    // Once a lead has signed off on a week (per-week audit marker), it no
+    // longer needs to surface on the reviewer hub — leads revisit signed-off
+    // weeks from the dedicated Lead review hub. Keeping them here just adds
+    // "Waiting for lead review" noise the lead has already cleared.
+    .is("signoff_at", null)
     .eq("locations.is_ignored", false)
     .order("starts_on", { ascending: true });
   if (error) throw error;
