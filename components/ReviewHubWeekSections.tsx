@@ -3,7 +3,7 @@
 import React from "react";
 import { partitionReviewHubWeeks } from "@/lib/review-hub-sections";
 
-type ReviewHubWeekSectionsProps<T extends { id: string; startsOn: string; photoCount: number }> = {
+type ReviewHubWeekSectionsProps<T extends { id: string; startsOn: string; photoCount: number; pendingCount: number }> = {
   weeks: T[] | null;
   emptyMessage: string;
   activeEmptyMessage?: string;
@@ -11,7 +11,7 @@ type ReviewHubWeekSectionsProps<T extends { id: string; startsOn: string; photoC
   renderWeek: (week: T, section: "active" | "upcoming") => React.ReactNode;
 };
 
-export function ReviewHubWeekSections<T extends { id: string; startsOn: string; photoCount: number }>({
+export function ReviewHubWeekSections<T extends { id: string; startsOn: string; photoCount: number; pendingCount: number }>({
   weeks,
   emptyMessage,
   activeEmptyMessage = "No active weeks with photos to review.",

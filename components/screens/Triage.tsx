@@ -14,10 +14,7 @@ import {
   type ClaimPhoto,
 } from "@/lib/triage-claims";
 import { fetchTriageHubWeeks, fetchWeekPendingCount, type TriageHubWeek } from "@/lib/triage-hub";
-import {
-  campQualityHubStatusLabel,
-  isCampQualityAwaitingLeadReview,
-} from "@/lib/triage-hub-display";
+import { campQualityHubStatusLabel } from "@/lib/triage-hub-display";
 import { todayYmdLocal } from "@/lib/review-hub-sections";
 import { ReviewHubWeekSections } from "@/components/ReviewHubWeekSections";
 import { SeniorWeekDashboard } from "@/components/screens/SeniorWeekDashboard";
@@ -56,7 +53,6 @@ const REVIEW_KIND_LABEL: Record<string, string> = {
 export function TriageApp({ toast }: { toast: ToastApi }) {
   const user = useCurrentUser();
   const userId = user.id;
-  const role = user.role;
   const supabase = React.useMemo(() => createClient(), []);
   const parseView = React.useCallback(() => parseTriageViewFromUrl(), []);
   const writeView = React.useCallback((v: View) => writeTriageViewToUrl(v), []);
@@ -189,7 +185,6 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
           weeks={weeks}
           emptyMessage="No camp weeks need review right now."
           renderWeek={(w, section) => {
-            const awaitingLead = isCampQualityAwaitingLeadReview(w.triageState);
             const weekStarted = w.startsOn <= today;
 
             return (
@@ -205,14 +200,15 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
                     : [
                         WEEK_ROLE_LABEL[w.triageRole] || w.triageRole,
                         campQualityHubStatusLabel(w.triageState),
-                        awaitingLead ? null : `${w.pendingCount} pending`,
+                        `${w.pendingCount} pending`,
                       ].filter(Boolean).join(" · ")}
                 </div>
               </div>
+              {/* Active weeks always have photos pending (see
+                  partitionReviewHubWeeks), so the only actions here are
+                  starting a batch. Lead sign-off lives in the Lead review hub. */}
               {section === "active" && (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {!awaitingLead && (
-                    <>
                   {(() => {
                     const startSize = batchSize === null
                       ? Math.max(1, w.pendingCount)
@@ -222,9 +218,9 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
                         type="button"
                         className="btn btn-primary"
                         onClick={() => openClaim(w.id, startSize)}
-                        disabled={w.pendingCount === 0 || batchSize === null}
+                        disabled={batchSize === null}
                       >
-                        Start a batch ({w.pendingCount === 0 ? 0 : startSize})
+                        Start a batch ({startSize})
                       </button>
                     );
                   })()}
@@ -235,22 +231,9 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
                       const n = await fetchWeekPendingCount(supabase, w.id);
                       void openClaim(w.id, Math.max(1, n));
                     }}
-                    disabled={w.pendingCount === 0}
                   >
                     Whole week
                   </button>
-                    </>
-                  )}
-                  {(role === "senior" || role === "admin") &&
-                    awaitingLead && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost"
-                      onClick={() => setView({ kind: "senior", campWeekId: w.id })}
-                    >
-                      Lead review
-                    </button>
-                  )}
                 </div>
               )}
             </div>
