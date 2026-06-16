@@ -335,6 +335,11 @@ button {
   border: 1px solid transparent;
   white-space: nowrap;
 }
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 12px;
+  gap: 6px;
+}
 .btn-primary {
   background: var(--ink);
   color: var(--paper);
@@ -644,18 +649,6 @@ button {
   box-shadow: var(--shadow);
   color: var(--ink);
   position: relative;
-}
-.batch-points-hud-inner--overlay {
-  background: rgba(20, 20, 22, 0.88);
-  border-color: color-mix(in oklch, var(--sun) 55%, transparent);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
-  color: var(--paper);
-}
-.batch-points-hud-inner--overlay .batch-points-hud-label {
-  color: color-mix(in oklch, var(--paper) 65%, transparent);
-}
-.batch-points-hud-inner--overlay .batch-points-hud-value {
-  color: var(--sun);
 }
 .batch-points-hud-label {
   font-family: var(--font-mono);

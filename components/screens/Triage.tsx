@@ -24,6 +24,7 @@ import {
   type Tag,
 } from "@/lib/tags";
 import { BatchPointsHud } from "@/components/BatchPointsHud";
+import { ReviewLightbox } from "@/components/ReviewLightbox";
 import { useFinishBatchFlow } from "@/components/FinishBatchFlow";
 import { celebrateReviewBump } from "@/lib/review-points-celebration";
 import { usePoints } from "@/lib/points-context";
@@ -438,7 +439,7 @@ function ClaimGrid({
             </>
           )}
           {lightboxIndex === null && (
-            <BatchPointsHud variant="sidebar" lastEarned={lastEarned} />
+            <BatchPointsHud lastEarned={lastEarned} />
           )}
           <div style={{ marginTop: 16 }}>
             <button
@@ -520,10 +521,6 @@ function ClaimGrid({
         </div>
       </div>
 
-      {lightboxIndex !== null && (
-        <BatchPointsHud variant="overlay" lastEarned={lastEarned} />
-      )}
-
       {finishBatch.dialog}
 
       {lightboxPhoto && lightboxIndex !== null && (
@@ -532,6 +529,7 @@ function ClaimGrid({
           tags={tags}
           position={`${lightboxIndex + 1} / ${total}`}
           snapshot={reviewed[lightboxPhoto.id]}
+          lastEarned={lastEarned}
           hasPrev={lightboxIndex > 0}
           hasNext={lightboxIndex < total - 1}
           onClose={() => setLightboxIndex(null)}
@@ -555,6 +553,7 @@ function Lightbox({
   tags,
   position,
   snapshot,
+  lastEarned,
   hasPrev,
   hasNext,
   onClose,
@@ -566,6 +565,7 @@ function Lightbox({
   tags: Tag[];
   position: string;
   snapshot: ReviewSnapshot | undefined;
+  lastEarned: number | null;
   hasPrev: boolean;
   hasNext: boolean;
   onClose: () => void;
@@ -584,20 +584,6 @@ function Lightbox({
     setSelectedTags(snapshot?.tagIds ?? []);
     setQuarantineIntent(snapshot?.quarantineIntent ?? false);
   }, [photo.id, snapshot]);
-
-  React.useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
-      // Don't hijack arrows while the user is typing in the note field
-      // (no note field yet, but keep the guard so future inputs work).
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
-      if (e.key === "ArrowLeft" && hasPrev) { e.preventDefault(); onPrev(); }
-      else if (e.key === "ArrowRight" && hasNext) { e.preventDefault(); onNext(); }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose, onPrev, onNext, hasPrev, hasNext]);
 
   const handle = async () => {
     if (busy) return;
@@ -621,132 +607,22 @@ function Lightbox({
   const heroSrc = xlUrl ?? photo.imageUrl ?? photo.thumbnailUrl;
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      style={{
-        position: "fixed", inset: 0, zIndex: 1000,
-        background: "rgba(0,0,0,0.86)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        padding: 24,
-      }}
-    >
-      <div
-        style={{
-          position: "absolute", top: 20, left: 24,
-          color: "white",
-          fontFamily: "var(--font-mono)",
-          fontSize: 12,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-        }}
-      >
-        {position}{snapshot ? ` · ${REVIEW_KIND_LABEL[snapshot.kind]}` : ""}
-      </div>
-
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="Close"
-        style={{
-          position: "absolute", top: 16, right: 16,
-          width: 40, height: 40, borderRadius: 999,
-          background: "rgba(255,255,255,0.12)", color: "white",
-          border: "none", cursor: "pointer",
-          display: "grid", placeItems: "center",
-        }}
-      >
-        <Icon name="x" size={20} />
-      </button>
-
-      {hasPrev && (
-        <button
-          type="button"
-          onClick={onPrev}
-          aria-label="Previous photo"
-          style={{
-            position: "absolute", top: "50%", left: 16, transform: "translateY(-50%)",
-            width: 48, height: 48, borderRadius: 999,
-            background: "rgba(255,255,255,0.12)", color: "white",
-            border: "none", cursor: "pointer",
-            display: "grid", placeItems: "center",
-          }}
-        >
-          <Icon name="arrow-l" size={22} />
-        </button>
-      )}
-      {hasNext && (
-        <button
-          type="button"
-          onClick={onNext}
-          aria-label="Next photo"
-          style={{
-            position: "absolute", top: "50%", right: 16, transform: "translateY(-50%)",
-            width: 48, height: 48, borderRadius: 999,
-            background: "rgba(255,255,255,0.12)", color: "white",
-            border: "none", cursor: "pointer",
-            display: "grid", placeItems: "center",
-          }}
-        >
-          <Icon name="arrow-r" size={22} />
-        </button>
-      )}
-
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          display: "flex", flexDirection: "column", gap: 16,
-          maxWidth: 1100, width: "100%", maxHeight: "100%",
-        }}
-      >
-        <div
-          style={{
-            position: "relative",
-            width: "100%",
-            height: "62vh",
-            borderRadius: 8,
-            overflow: "hidden",
-          }}
-        >
-          <PhotoImg
-            src={heroSrc}
-            previewSrc={photo.thumbnailUrl}
-            alt={photo.caption ?? "Photo"}
-            fit="contain"
-            loading="eager"
-            background="transparent"
-            showSpinner
-          />
-        </div>
-
-        <div
-          style={{
-            background: "var(--paper-2)",
-            border: "1px solid var(--rule)",
-            borderRadius: 8,
-            padding: 16,
-          }}
-        >
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {tags.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className={"btn " + (selectedTags.includes(t.id) ? "btn-primary" : "btn-ghost")}
-                onClick={() =>
-                  setSelectedTags((s) =>
-                    s.includes(t.id) ? s.filter((x) => x !== t.id) : [...s, t.id],
-                  )
-                }
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+    <ReviewLightbox
+      heroSrc={heroSrc}
+      previewSrc={photo.thumbnailUrl}
+      alt={photo.caption ?? "Photo"}
+      position={`${position}${snapshot ? ` · ${REVIEW_KIND_LABEL[snapshot.kind]}` : ""}`}
+      hasPrev={hasPrev}
+      hasNext={hasNext}
+      onClose={onClose}
+      onPrev={onPrev}
+      onNext={onNext}
+      lastEarned={lastEarned}
+      footer={
+        <>
           <label
             style={{
-              display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13,
+              display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 13,
               opacity: willFlag ? 1 : 0.5,
             }}
           >
@@ -758,7 +634,7 @@ function Lightbox({
             />
             Hide from parent view (only applies when an issue is selected)
           </label>
-          <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <button
               type="button"
               className="btn btn-primary"
@@ -773,8 +649,26 @@ function Lightbox({
                 : "No issues selected → no issues"}
             </span>
           </div>
-        </div>
+        </>
+      }
+    >
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Issues (optional)</div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {tags.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={"btn btn-sm " + (selectedTags.includes(t.id) ? "btn-primary" : "btn-ghost")}
+            onClick={() =>
+              setSelectedTags((s) =>
+                s.includes(t.id) ? s.filter((x) => x !== t.id) : [...s, t.id],
+              )
+            }
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
-    </div>
+    </ReviewLightbox>
   );
 }

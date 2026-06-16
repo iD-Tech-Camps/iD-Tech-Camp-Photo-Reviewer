@@ -5,10 +5,8 @@ import { Icon } from "@/components/Icon";
 import { usePoints } from "@/lib/points-context";
 
 export function BatchPointsHud({
-  variant,
   lastEarned,
 }: {
-  variant: "sidebar" | "overlay";
   /** Points just earned on the latest submit — drives +N float and pulse. */
   lastEarned: number | null;
 }) {
@@ -31,32 +29,15 @@ export function BatchPointsHud({
 
   const displayTotal = total ?? (loading ? null : 0);
 
-  const isOverlay = variant === "overlay";
-
   return (
     <div
       className={"batch-points-hud" + (pulse ? " batch-points-hud--pulse" : "")}
-      style={
-        isOverlay
-          ? {
-              position: "fixed",
-              top: 20,
-              left: "50%",
-              transform: "translateX(-50%)",
-              zIndex: 1001,
-              pointerEvents: "none",
-            }
-          : { position: "relative", marginBottom: 16 }
-      }
+      style={{ position: "relative" }}
       aria-live="polite"
       aria-atomic="true"
     >
-      <div
-        className={
-          "batch-points-hud-inner" + (isOverlay ? " batch-points-hud-inner--overlay" : "")
-        }
-      >
-        <Icon name="stars" size={isOverlay ? 18 : 14} />
+      <div className="batch-points-hud-inner">
+        <Icon name="stars" size={14} />
         <div>
           <div className="batch-points-hud-label">Your points</div>
           <div className="batch-points-hud-value">
