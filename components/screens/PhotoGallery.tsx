@@ -3,6 +3,7 @@
 import React from "react";
 import { Icon } from "@/components/Icon";
 import { PhotoImg } from "@/components/PhotoImg";
+import { ReviewLightbox } from "@/components/ReviewLightbox";
 import { PageHeader, type ToastApi } from "@/components/Shell";
 import { createClient } from "@/lib/supabase/client";
 import { useCurrentUser } from "@/lib/current-user";
@@ -933,17 +934,6 @@ function GalleryLightbox({
   const [savingRating, setSavingRating] = React.useState(false);
   // Reset the editor when navigating between photos.
   React.useEffect(() => { setEditingRating(false); }, [photo.id]);
-  React.useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
-      if (e.key === "ArrowLeft" && hasPrev) { e.preventDefault(); onPrev(); }
-      else if (e.key === "ArrowRight" && hasNext) { e.preventDefault(); onNext(); }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose, onPrev, onNext, hasPrev, hasNext]);
 
   // One SmugMug !sizedetails call per opened photo, shared by the default
   // download button (for its label + dimensions) and the "More sizes" menu
@@ -973,189 +963,110 @@ function GalleryLightbox({
   const otherSizes = (sizes ?? []).filter((s) => s.size !== "O");
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      style={{
-        position: "fixed", inset: 0, zIndex: 1000,
-        background: "rgba(0,0,0,0.86)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        padding: 24,
-      }}
-    >
-      <div
-        style={{
-          position: "absolute", top: 20, left: 24,
-          color: "white", fontFamily: "var(--font-mono)", fontSize: 12,
-          letterSpacing: "0.08em", textTransform: "uppercase",
-        }}
-      >
-        {position}
-      </div>
-
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="Close"
-        style={{
-          position: "absolute", top: 16, right: 16,
-          width: 40, height: 40, borderRadius: 999,
-          background: "rgba(255,255,255,0.12)", color: "white",
-          border: "none", cursor: "pointer", display: "grid", placeItems: "center",
-        }}
-      >
-        <Icon name="x" size={20} />
-      </button>
-
-      {hasPrev && (
-        <button type="button" onClick={onPrev} aria-label="Previous photo" style={navBtnStyle("left")}>
-          <Icon name="arrow-l" size={22} />
-        </button>
-      )}
-      {hasNext && (
-        <button type="button" onClick={onNext} aria-label="Next photo" style={navBtnStyle("right")}>
-          <Icon name="arrow-r" size={22} />
-        </button>
-      )}
-
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          display: "flex", flexDirection: "column", gap: 16,
-          maxWidth: 1100, width: "100%", maxHeight: "100%",
-        }}
-      >
-        <div style={{ position: "relative", width: "100%", height: "60vh", borderRadius: 8, overflow: "hidden" }}>
-          <PhotoImg
-            src={heroSrc}
-            previewSrc={photo.thumbnailUrl}
-            alt="Photo"
-            fit="contain"
-            loading="eager"
-            background="transparent"
-            showSpinner
-          />
-        </div>
-
-        <div
-          style={{
-            background: "var(--paper-2)",
-            border: "1px solid var(--rule)",
-            borderRadius: 8,
-            padding: 16,
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 16,
-            alignItems: "flex-start",
-            justifyContent: "space-between",
-          }}
-        >
-          <div style={{ minWidth: 240, flex: 1 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
-              <RatingStars rating={photo.rating ?? 0} />
-              <span style={{ fontSize: 13, color: "var(--ink-3)" }}>
-                {photo.rating != null ? `${photo.rating} / 5` : "Unrated"}
-              </span>
-              {photo.ratedBy && (
-                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>· rated by {photo.ratedBy}</span>
-              )}
-              {canEditRating && !editingRating && (
-                <button
-                  type="button"
-                  onClick={() => setEditingRating(true)}
-                  style={{
-                    background: "none", border: "none", padding: 0, cursor: "pointer",
-                    color: "var(--lake, var(--ink-2))", fontSize: 12, textDecoration: "underline",
-                  }}
-                >
-                  Change
-                </button>
-              )}
-            </div>
-            {canEditRating && editingRating && (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Set rating:</span>
-                <RatingPicker
-                  current={photo.rating}
-                  busy={savingRating}
-                  onPick={async (n) => {
-                    setSavingRating(true);
-                    const ok = await onOverrideRating(n);
-                    setSavingRating(false);
-                    if (ok) setEditingRating(false);
-                  }}
-                />
-                <button
-                  type="button"
-                  disabled={savingRating}
-                  onClick={() => setEditingRating(false)}
-                  style={{
-                    background: "none", border: "none", padding: 0, cursor: "pointer",
-                    color: "var(--ink-3)", fontSize: 12, marginLeft: 4,
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-            <div style={{ fontWeight: 600 }}>{photo.locationName} — {photo.weekName}</div>
-            <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
-              {[photo.divisionName, captured].filter(Boolean).join(" · ")}
-            </div>
-            {photo.tagIds.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-                {photo.tagIds.map((id) => (
-                  <span
-                    key={id}
-                    style={{
-                      fontSize: 11, padding: "3px 8px", borderRadius: 999,
-                      background: "var(--paper-3)", border: "1px solid var(--rule)",
-                    }}
-                  >
-                    {tagLabel(id)}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "stretch", minWidth: 200 }}>
+    <ReviewLightbox
+      heroSrc={heroSrc}
+      previewSrc={photo.thumbnailUrl}
+      alt="Photo"
+      position={position}
+      hasPrev={hasPrev}
+      hasNext={hasNext}
+      onClose={onClose}
+      onPrev={onPrev}
+      onNext={onNext}
+      footer={
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <a
+            className="btn btn-primary"
+            href={`/api/smugmug/download?photoId=${photo.id}&stored=1`}
+            rel="noopener"
+            style={{ textAlign: "center" }}
+          >
+            <Icon name="download" size={16} />
+            <span style={{ marginLeft: 6 }}>{defaultLabel}</span>
+          </a>
+          <DownloadMenu photoId={photo.id} sizes={otherSizes} loading={sizes === null} />
+          {photo.smugmugUrl && (
             <a
-              className="btn btn-primary"
-              href={`/api/smugmug/download?photoId=${photo.id}&stored=1`}
-              rel="noopener"
+              className="btn btn-ghost"
+              href={photo.smugmugUrl}
+              target="_blank"
+              rel="noopener noreferrer"
               style={{ textAlign: "center" }}
             >
-              <Icon name="download" size={16} />
-              <span style={{ marginLeft: 6 }}>{defaultLabel}</span>
+              View on SmugMug
             </a>
-            <DownloadMenu photoId={photo.id} sizes={otherSizes} loading={sizes === null} />
-            {photo.smugmugUrl && (
-              <a
-                className="btn btn-ghost"
-                href={photo.smugmugUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ textAlign: "center" }}
-              >
-                View on SmugMug
-              </a>
-            )}
-          </div>
+          )}
         </div>
+      }
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+        <RatingStars rating={photo.rating ?? 0} />
+        <span style={{ fontSize: 13, color: "var(--ink-3)" }}>
+          {photo.rating != null ? `${photo.rating} / 5` : "Unrated"}
+        </span>
+        {photo.ratedBy && (
+          <span style={{ fontSize: 12, color: "var(--ink-3)" }}>· rated by {photo.ratedBy}</span>
+        )}
+        {canEditRating && !editingRating && (
+          <button
+            type="button"
+            onClick={() => setEditingRating(true)}
+            style={{
+              background: "none", border: "none", padding: 0, cursor: "pointer",
+              color: "var(--lake, var(--ink-2))", fontSize: 12, textDecoration: "underline",
+            }}
+          >
+            Change
+          </button>
+        )}
       </div>
-    </div>
+      {canEditRating && editingRating && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Set rating:</span>
+          <RatingPicker
+            current={photo.rating}
+            busy={savingRating}
+            onPick={async (n) => {
+              setSavingRating(true);
+              const ok = await onOverrideRating(n);
+              setSavingRating(false);
+              if (ok) setEditingRating(false);
+            }}
+          />
+          <button
+            type="button"
+            disabled={savingRating}
+            onClick={() => setEditingRating(false)}
+            style={{
+              background: "none", border: "none", padding: 0, cursor: "pointer",
+              color: "var(--ink-3)", fontSize: 12, marginLeft: 4,
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+      <div style={{ fontWeight: 600 }}>{photo.locationName} — {photo.weekName}</div>
+      <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+        {[photo.divisionName, captured].filter(Boolean).join(" · ")}
+      </div>
+      {photo.tagIds.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+          {photo.tagIds.map((id) => (
+            <span
+              key={id}
+              style={{
+                fontSize: 11, padding: "3px 8px", borderRadius: 999,
+                background: "var(--paper-3)", border: "1px solid var(--rule)",
+              }}
+            >
+              {tagLabel(id)}
+            </span>
+          ))}
+        </div>
+      )}
+    </ReviewLightbox>
   );
-}
-
-function navBtnStyle(side: "left" | "right"): React.CSSProperties {
-  return {
-    position: "absolute", top: "50%", [side]: 16, transform: "translateY(-50%)",
-    width: 48, height: 48, borderRadius: 999,
-    background: "rgba(255,255,255,0.12)", color: "white",
-    border: "none", cursor: "pointer", display: "grid", placeItems: "center",
-  };
 }
 
 function RatingStars({ rating }: { rating: number }) {
@@ -1186,12 +1097,12 @@ function DownloadMenu({
   loading: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
-  // Open up or down depending on which side of the trigger has more room, and
-  // cap the height to that space so the menu never spills off-screen.
-  const [placement, setPlacement] = React.useState<{ dropUp: boolean; maxHeight: number }>({
-    dropUp: false,
-    maxHeight: 320,
-  });
+  // Anchored with position:fixed (viewport coords) rather than absolute, so the
+  // menu escapes the lightbox sidebar's scroll/overflow clipping. Opens up or
+  // down depending on which side of the trigger has more room, capped to it.
+  const [menuPos, setMenuPos] = React.useState<{
+    left: number; top: number | null; bottom: number | null; maxHeight: number;
+  }>({ left: 0, top: null, bottom: null, maxHeight: 320 });
   const buttonRef = React.useRef<HTMLButtonElement | null>(null);
   const wrapRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -1211,7 +1122,13 @@ function DownloadMenu({
       const below = window.innerHeight - rect.bottom - 16;
       const above = rect.top - 16;
       const dropUp = above > below;
-      setPlacement({ dropUp, maxHeight: Math.max(160, Math.floor(dropUp ? above : below)) });
+      setMenuPos({
+        // Right-align the menu to the trigger's right edge (translateX(-100%)).
+        left: rect.right,
+        top: dropUp ? null : rect.bottom + 6,
+        bottom: dropUp ? window.innerHeight - rect.top + 6 : null,
+        maxHeight: Math.max(160, Math.floor(dropUp ? above : below)),
+      });
     }
     setOpen(next);
   };
@@ -1240,11 +1157,10 @@ function DownloadMenu({
       {open && (
         <div
           style={{
-            position: "absolute", right: 0, zIndex: 10,
-            ...(placement.dropUp
-              ? { bottom: "100%", marginBottom: 6 }
-              : { top: "100%", marginTop: 6 }),
-            maxHeight: placement.maxHeight, overflowY: "auto",
+            position: "fixed", zIndex: 1100,
+            left: menuPos.left, transform: "translateX(-100%)",
+            ...(menuPos.top !== null ? { top: menuPos.top } : { bottom: menuPos.bottom ?? 0 }),
+            maxHeight: menuPos.maxHeight, overflowY: "auto",
             minWidth: 200, background: "var(--paper-2)", border: "1px solid var(--rule)",
             borderRadius: 8, padding: 6, boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
           }}

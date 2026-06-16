@@ -46,18 +46,21 @@ export function ReviewLightbox({
   // Optional 1–5 number-key handler (rating hub uses it to set the score).
   onDigitKey?: (n: number) => void;
   // Points earned on the latest submit — drives the +N float in the body HUD.
-  lastEarned: number | null;
-  // Scrolling controls body (tags, etc.).
+  // Omit entirely to hide the points readout (e.g. the Photo Library, which
+  // isn't a points-earning review flow).
+  lastEarned?: number | null;
+  // Scrolling body (tags / metadata).
   children: React.ReactNode;
-  // Pinned action controls (submit / score) that never scroll out of view.
-  footer: React.ReactNode;
+  // Optional pinned action bar that never scrolls out of view — submit / score
+  // in the review hubs, download actions in the Photo Library.
+  footer?: React.ReactNode;
 }) {
   React.useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
       // Don't hijack typing in form fields.
       const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
       if (e.key === "ArrowLeft" && hasPrev) { e.preventDefault(); onPrev(); }
       else if (e.key === "ArrowRight" && hasNext) { e.preventDefault(); onNext(); }
       else if (onDigitKey && e.key >= "1" && e.key <= "5") { e.preventDefault(); onDigitKey(Number(e.key)); }
@@ -108,16 +111,20 @@ export function ReviewLightbox({
         >
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16 }}>
             {children}
-            {/* Points readout lives quietly at the foot of the body rather than
-                as a floating HUD over the photo. */}
-            <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--rule)" }}>
-              <BatchPointsHud lastEarned={lastEarned} />
+            {lastEarned !== undefined && (
+              /* Points readout lives quietly at the foot of the body rather
+                 than as a floating HUD over the photo. */
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid var(--rule)" }}>
+                <BatchPointsHud lastEarned={lastEarned} />
+              </div>
+            )}
+          </div>
+          {footer && (
+            /* Pinned: stays put while the body above scrolls. */
+            <div style={{ flexShrink: 0, borderTop: "1px solid var(--rule)", padding: 16 }}>
+              {footer}
             </div>
-          </div>
-          {/* Pinned: stays put while the tag list above scrolls. */}
-          <div style={{ flexShrink: 0, borderTop: "1px solid var(--rule)", padding: 16 }}>
-            {footer}
-          </div>
+          )}
         </aside>
 
         <div style={{ position: "relative", flex: 1, minWidth: 0, height: "100%" }}>
