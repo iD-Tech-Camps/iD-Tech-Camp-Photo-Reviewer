@@ -189,7 +189,8 @@ function DivisionsCard({ toast }: { toast?: ToastApi }) {
         <span
           aria-hidden
           style={{
-            fontSize: 11,
+            fontSize: 18,
+            lineHeight: 1,
             color: "var(--ink-3)",
             transform: collapsed ? "rotate(-90deg)" : "none",
             transition: "transform .15s",
