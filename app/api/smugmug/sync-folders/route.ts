@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { requireRole } from "@/lib/api-auth";
 import { getAuthUser, SmugMugApiError } from "@/lib/smugmug";
 import { walkDivisions, walkDivisionDeep } from "@/lib/smugmug/sync/walker";
 import {
@@ -184,6 +185,83 @@ export async function GET(req: NextRequest) {
  *
  * Idempotent: re-running with the same SmugMug state is a no-op.
  */
+/**
+ * Step 8.5 — toggle endpoint. Admin-only, writes via the service-role
+ * client (divisions reject authenticated-role writes via RLS).
+ *
+ * PATCH /api/smugmug/sync-folders
+ *   body: { divisionId: string (uuid), synced: boolean }
+ *   → flips public.divisions.synced for one division. This is the gate the
+ *     photo sync respects: synced=true divisions get deep-walked and their
+ *     photos pulled; synced=false divisions are registered but skipped.
+ *
+ * Targets by divisionId (the GET response's dbId) so this stays trivial and
+ * leaves placeholder-vs-real reconciliation to the POST top-level apply.
+ */
+export async function PATCH(req: NextRequest) {
+  const auth = await requireRole(["admin"]);
+  if ("error" in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: "invalid_json" },
+      { status: 400 }
+    );
+  }
+
+  const divisionId =
+    body && typeof body === "object" ? (body as Record<string, unknown>).divisionId : undefined;
+  const synced =
+    body && typeof body === "object" ? (body as Record<string, unknown>).synced : undefined;
+  if (typeof divisionId !== "string" || !divisionId) {
+    return NextResponse.json(
+      { ok: false, error: "invalid_body", message: "divisionId (uuid string) is required." },
+      { status: 400 }
+    );
+  }
+  if (typeof synced !== "boolean") {
+    return NextResponse.json(
+      { ok: false, error: "invalid_body", message: "synced (boolean) is required." },
+      { status: 400 }
+    );
+  }
+
+  const service = createServiceClient();
+
+  try {
+    const { data, error } = await service
+      .from("divisions")
+      .update({ synced })
+      .eq("id", divisionId)
+      .select("id, name, synced")
+      .maybeSingle();
+    if (error) {
+      const desc = describeError(error);
+      return NextResponse.json(
+        { ok: false, error: "update_failed", message: desc.message, details: desc.details },
+        { status: 500 }
+      );
+    }
+    if (!data) {
+      return NextResponse.json(
+        { ok: false, error: "division_not_found", divisionId },
+        { status: 404 }
+      );
+    }
+    return NextResponse.json({ ok: true, division: data });
+  } catch (err) {
+    console.error("[sync-folders PATCH] error:", err);
+    const desc = describeError(err);
+    return NextResponse.json(
+      { ok: false, error: "unexpected_error", message: desc.message, details: desc.details },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(req: NextRequest) {
   const auth = await requireAdmin();
   if (!auth.ok) return NextResponse.json(auth.body, { status: auth.status });

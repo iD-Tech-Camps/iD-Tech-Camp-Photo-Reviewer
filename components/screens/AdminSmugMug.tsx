@@ -27,6 +27,7 @@ export function SmugMugImport({ toast }: { toast?: ToastApi }) {
       />
 
       <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        <DivisionsCard toast={toast} />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
           <LastSyncCard refreshTick={refreshTick} />
           <ActionsCard onDone={bumpRefresh} toast={toast} />
@@ -77,6 +78,171 @@ function LastSyncCard({ refreshTick }: { refreshTick: number }) {
           />
         </div>
       )}
+    </div>
+  );
+}
+
+type DivisionRow = {
+  smugmugNodeId: string;
+  name: string;
+  type: string;
+  inDb: boolean;
+  dbId: string | null;
+  isPlaceholder: boolean;
+  matchKind: "by_id" | "by_name" | null;
+  synced: boolean;
+};
+
+function DivisionsCard({ toast }: { toast?: ToastApi }) {
+  // undefined = loading, null = error/empty
+  const [divisions, setDivisions] = React.useState<DivisionRow[] | null | undefined>(undefined);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [rowError, setRowError] = React.useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = React.useState(0);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoadError(null);
+    fetch("/api/smugmug/sync-folders")
+      .then(async (res) => {
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body?.ok === false) {
+          throw new Error(body?.message ?? body?.error ?? `Failed to load divisions (${res.status})`);
+        }
+        return body.divisions as DivisionRow[];
+      })
+      .then((rows) => {
+        if (cancelled) return;
+        setDivisions((rows ?? []).filter((d) => d.type === "Folder"));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setLoadError(err instanceof Error ? err.message : "Failed to load divisions");
+        setDivisions(null);
+      });
+    return () => { cancelled = true; };
+  }, [refreshTick]);
+
+  const onToggle = async (row: DivisionRow, next: boolean) => {
+    if (busyId || !row.inDb || !row.dbId) return;
+    setBusyId(row.dbId);
+    setRowError(null);
+    // Optimistic update.
+    setDivisions((prev) =>
+      prev && prev !== undefined
+        ? prev.map((d) => (d.dbId === row.dbId ? { ...d, synced: next } : d))
+        : prev
+    );
+    try {
+      const res = await fetch("/api/smugmug/sync-folders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ divisionId: row.dbId, synced: next }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || body?.ok === false) {
+        throw new Error(body?.message ?? body?.error ?? `Update failed (${res.status})`);
+      }
+      if (next) {
+        toast?.show(`${row.name} enabled — run “Sync now” to pull its photos.`);
+      }
+    } catch (err: unknown) {
+      // Revert.
+      setDivisions((prev) =>
+        prev && prev !== undefined
+          ? prev.map((d) => (d.dbId === row.dbId ? { ...d, synced: !next } : d))
+          : prev
+      );
+      setRowError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h3 className="card-title" style={{ marginBottom: 4 }}>Divisions</h3>
+      <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
+        Top-level SmugMug folders. Toggle which divisions feed the photo pipeline —
+        only enabled ones get their locations, weeks, and photos synced.
+      </div>
+      {loadError && <ErrorBanner>{loadError}</ErrorBanner>}
+      {rowError && <ErrorBanner>{rowError}</ErrorBanner>}
+      {divisions === undefined && !loadError && (
+        <div style={{ fontSize: 13, color: "var(--ink-3)" }}>Loading…</div>
+      )}
+      {divisions !== undefined && divisions !== null && divisions.length === 0 && !loadError && (
+        <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No divisions found under the SmugMug account.</div>
+      )}
+      {divisions && divisions.length > 0 && (
+        <div style={{ display: "grid", gap: 8 }}>
+          {divisions.map((row) => {
+            const disabled = !row.inDb || !row.dbId || busyId !== null;
+            return (
+              <div
+                key={row.smugmugNodeId}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto",
+                  gap: 12,
+                  alignItems: "center",
+                  paddingBottom: 8,
+                  borderBottom: "1px solid var(--rule)",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 14 }}>{row.name}</div>
+                  <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                    {!row.inDb && (
+                      <span className="pill pill-sun" style={{ fontSize: 10 }}>
+                        run Sync now to register
+                      </span>
+                    )}
+                    {row.isPlaceholder && (
+                      <span className="pill" style={{ fontSize: 10 }}>placeholder</span>
+                    )}
+                    {row.synced ? (
+                      <span className="pill pill-moss" style={{ fontSize: 10 }}>synced</span>
+                    ) : (
+                      <span className="pill" style={{ fontSize: 10 }}>not synced</span>
+                    )}
+                  </div>
+                </div>
+                <label
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontSize: 12,
+                    color: "var(--ink-3)",
+                    cursor: disabled ? "not-allowed" : "pointer",
+                    opacity: disabled ? 0.5 : 1,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={row.synced}
+                    disabled={disabled}
+                    onChange={(e) => onToggle(row, e.target.checked)}
+                  />
+                  Sync
+                </label>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div style={{ marginTop: 12 }}>
+        <button
+          className="btn"
+          onClick={() => setRefreshTick((t) => t + 1)}
+          disabled={divisions === undefined}
+          style={{ fontSize: 12 }}
+        >
+          Refresh
+        </button>
+      </div>
     </div>
   );
 }
