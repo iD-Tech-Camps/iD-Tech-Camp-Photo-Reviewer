@@ -100,6 +100,16 @@ function DivisionsCard({ toast }: { toast?: ToastApi }) {
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [rowError, setRowError] = React.useState<string | null>(null);
   const [refreshTick, setRefreshTick] = React.useState(0);
+  const [collapsed, setCollapsed] = React.useState(true);
+
+  // One-line summary shown in the collapsed header.
+  const summary = React.useMemo(() => {
+    if (divisions === undefined) return "Loading…";
+    if (divisions === null) return "Failed to load";
+    const syncedNames = divisions.filter((d) => d.synced).map((d) => d.name);
+    if (syncedNames.length === 0) return `0 of ${divisions.length} synced`;
+    return `${syncedNames.length} of ${divisions.length} synced · ${syncedNames.join(", ")}`;
+  }, [divisions]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -162,7 +172,49 @@ function DivisionsCard({ toast }: { toast?: ToastApi }) {
 
   return (
     <div className="card">
-      <h3 className="card-title" style={{ marginBottom: 4 }}>Divisions</h3>
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        aria-expanded={!collapsed}
+        style={{
+          all: "unset",
+          boxSizing: "border-box",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          width: "100%",
+        }}
+      >
+        <span
+          aria-hidden
+          style={{
+            fontSize: 11,
+            color: "var(--ink-3)",
+            transform: collapsed ? "rotate(-90deg)" : "none",
+            transition: "transform .15s",
+          }}
+        >
+          ▾
+        </span>
+        <h3 className="card-title" style={{ margin: 0 }}>Divisions</h3>
+        {collapsed && (
+          <span
+            style={{
+              marginLeft: "auto",
+              fontSize: 12,
+              color: "var(--ink-3)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {summary}
+          </span>
+        )}
+      </button>
+      {!collapsed && (
+        <div style={{ marginTop: 14 }}>
       <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 14 }}>
         Top-level SmugMug folders. Toggle which divisions feed the photo pipeline —
         only enabled ones get their locations, weeks, and photos synced.
@@ -243,6 +295,8 @@ function DivisionsCard({ toast }: { toast?: ToastApi }) {
           Refresh
         </button>
       </div>
+        </div>
+      )}
     </div>
   );
 }
