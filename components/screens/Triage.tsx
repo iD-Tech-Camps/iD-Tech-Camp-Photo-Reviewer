@@ -585,8 +585,20 @@ function Lightbox({
     setQuarantineIntent(snapshot?.quarantineIntent ?? false);
   }, [photo.id, snapshot]);
 
+  const willFlag = selectedTags.length > 0;
+  const effectiveQuarantine = willFlag ? quarantineIntent : false;
+  // Already-saved photos whose form is untouched can't be resubmitted — each
+  // submit inserts a fresh triage_event and awards points, so without this a
+  // reviewer could rack up points by mashing the button on the last photo
+  // (there's no next photo to advance to). A genuine edit re-enables it.
+  const sameAsSaved =
+    !!snapshot &&
+    selectedTags.length === snapshot.tagIds.length &&
+    selectedTags.every((id) => snapshot.tagIds.includes(id)) &&
+    effectiveQuarantine === snapshot.quarantineIntent;
+
   const handle = async () => {
-    if (busy) return;
+    if (busy || sameAsSaved) return;
     setBusy(true);
     try {
       await onSubmit(selectedTags, quarantineIntent);
@@ -595,7 +607,6 @@ function Lightbox({
     }
   };
 
-  const willFlag = selectedTags.length > 0;
   const submitLabel = snapshot ? "Update" : "Submit";
 
   // Rewrite the cached thumbnail URL to the XL variant (~150-400 KB) for
@@ -638,13 +649,15 @@ function Lightbox({
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy}
+              disabled={busy || sameAsSaved}
               onClick={() => void handle()}
             >
               {submitLabel}
             </button>
             <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
-              {willFlag
+              {sameAsSaved
+                ? "Saved"
+                : willFlag
                 ? `Flag ${selectedTags.length} issue${selectedTags.length === 1 ? "" : "s"}`
                 : "No issues selected → no issues"}
             </span>

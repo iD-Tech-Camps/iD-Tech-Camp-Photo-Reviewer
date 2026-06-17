@@ -526,8 +526,19 @@ function RatingLightbox({
     setQuarantineIntent(snapshot?.quarantineIntent ?? false);
   }, [photo.id, snapshot]);
 
+  // Already-saved photos whose form is untouched can't be resubmitted — each
+  // submit inserts a fresh photo_rating_event and awards points, so without
+  // this a reviewer could rack up points by mashing the button on the last
+  // photo (there's no next photo to advance to). A genuine edit re-enables it.
+  const sameAsSaved =
+    !!snapshot &&
+    rating === snapshot.rating &&
+    selectedTags.length === snapshot.tagIds.length &&
+    selectedTags.every((id) => snapshot.tagIds.includes(id)) &&
+    quarantineIntent === snapshot.quarantineIntent;
+
   const handle = async () => {
-    if (busy || rating < 1 || rating > 5) return;
+    if (busy || rating < 1 || rating > 5 || sameAsSaved) return;
     setBusy(true);
     try {
       await onSubmit(rating, selectedTags, quarantineIntent);
@@ -585,13 +596,17 @@ function RatingLightbox({
             <button
               type="button"
               className="btn btn-primary"
-              disabled={busy || rating < 1}
+              disabled={busy || rating < 1 || sameAsSaved}
               onClick={() => void handle()}
             >
               {submitLabel}
             </button>
             <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
-              {rating < 1 ? "Select a star rating to submit" : `${rating} star${rating === 1 ? "" : "s"}`}
+              {sameAsSaved
+                ? "Saved"
+                : rating < 1
+                ? "Select a star rating to submit"
+                : `${rating} star${rating === 1 ? "" : "s"}`}
             </span>
           </div>
         </>
