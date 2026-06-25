@@ -185,6 +185,18 @@ export async function runPhotoSync(
       photoStageError =
         `${perWeekErrors.length} week(s) failed; first error: ${perWeekErrors[0].message}`;
     }
+
+    // Re-derive first_week / rating roles now that this run's folder prune and
+    // photo reconcile are in. This is what demotes a passed-but-empty "phantom"
+    // first week (a folder for a week camp never ran) and promotes the next
+    // week that actually has photos, so the right week surfaces on the hub.
+    const { error: recomputeError } = await supabase.rpc("recompute_all_triage_roles");
+    if (recomputeError) {
+      status = "partial";
+      photoStageError = [photoStageError, `role recompute failed: ${recomputeError.message}`]
+        .filter(Boolean)
+        .join(" | ");
+    }
   } catch (err) {
     status = "failed";
     photoStageError = err instanceof Error ? err.message : String(err);

@@ -43,6 +43,18 @@ export interface WeekReconcileResult {
   updatedToReal: number;
   unchanged: number;
   skippedUnparseable: Array<{ name: string; smugmugNodeId: string; locationName: string }>;
+  /**
+   * Weeks whose SmugMug folder no longer appears in the walk and which had
+   * no photos — deleted so they can't keep hijacking the per-location
+   * `first_week` role (see `pruneOrphanedWeeks`).
+   */
+  prunedOrphans: Array<{ name: string; smugmugNodeId: string; locationName: string }>;
+  /**
+   * Orphaned weeks (folder gone) that still hold photos. Kept — deleting
+   * them would violate the photos→camp_weeks ON DELETE RESTRICT FK and
+   * could discard reviewed work. Surfaced so an admin can investigate.
+   */
+  orphansKeptWithPhotos: Array<{ name: string; smugmugNodeId: string; locationName: string }>;
 }
 
 export interface DeepReconcileResult {
@@ -267,7 +279,25 @@ export async function reconcileDivisionDeep(
     updatedToReal: 0,
     unchanged: 0,
     skippedUnparseable: [],
+    prunedOrphans: [],
+    orphansKeptWithPhotos: [],
   };
+
+  // Every week node id the walk actually saw on SmugMug (parseable or not).
+  // Anything in the DB under a walked location but absent here is an orphan:
+  // its folder was deleted, renamed-and-recreated (new node id), or moved.
+  const aliveWeekNodeIds = new Set<string>();
+  for (const loc of walked.locations) {
+    if (loc.type !== "Folder") continue;
+    for (const w of loc.weeks) aliveWeekNodeIds.add(w.smugmugNodeId);
+    for (const y of loc.years) for (const w of y.weeks) aliveWeekNodeIds.add(w.smugmugNodeId);
+  }
+  // DB location id → walked location name, for orphan reporting.
+  const locNameByDbId = new Map<string, string>();
+  for (const loc of walked.locations) {
+    const dbId = locationIdByNodeId.get(loc.smugmugNodeId);
+    if (dbId) locNameByDbId.set(dbId, loc.name);
+  }
 
   for (const loc of walked.locations) {
     if (loc.type !== "Folder") continue;
@@ -340,9 +370,88 @@ export async function reconcileDivisionDeep(
     }
   }
 
+  await pruneOrphanedWeeks(
+    supabase,
+    existingWeeks,
+    aliveWeekNodeIds,
+    locNameByDbId,
+    weekResult
+  );
+
   return {
     divisionName: walked.name,
     locations: locResult,
     weeks: weekResult,
   };
+}
+
+/**
+ * Remove camp_weeks rows whose SmugMug folder is gone from the walk.
+ *
+ * Why this matters: the quality-review hub only surfaces each location's
+ * *earliest* in-window week (`derive_camp_week_triage_role` keys off the
+ * minimum `starts_on`, id as tiebreaker — it never checks whether a folder
+ * or photos exist). A stale row left behind by a deleted / recreated /
+ * moved folder keeps an early `starts_on` and a low `id`, so it permanently
+ * wins the `first_week` slot: it shows as "Upcoming" forever (no folder ⇒
+ * no photos), while the real weeks fall to `triage_role = 'none'` and drop
+ * off the hub. Pruning the orphan lets the live earliest week reclaim the
+ * role.
+ *
+ * Deletion is limited to zero-photo orphans: photos.camp_week_id is
+ * ON DELETE RESTRICT, and a week that still holds photos may carry reviewed
+ * work we must not discard. Such orphans are reported, not deleted.
+ */
+async function pruneOrphanedWeeks(
+  supabase: SupabaseClient,
+  existingWeeks: CampWeekRow[],
+  aliveWeekNodeIds: Set<string>,
+  locNameByDbId: Map<string, string>,
+  weekResult: WeekReconcileResult
+): Promise<void> {
+  const orphans = existingWeeks.filter(
+    (w) =>
+      !aliveWeekNodeIds.has(w.smugmug_folder_id) &&
+      !w.smugmug_folder_id.startsWith("placeholder-")
+  );
+  if (orphans.length === 0) return;
+
+  // Which orphans still hold photos? Those can't be deleted (FK RESTRICT)
+  // and may carry reviewed history — keep + report them.
+  const orphanIds = orphans.map((w) => w.id);
+  const withPhotos = new Set<string>();
+  const PHOTO_PROBE_BATCH = 200;
+  for (let i = 0; i < orphanIds.length; i += PHOTO_PROBE_BATCH) {
+    const batch = orphanIds.slice(i, i + PHOTO_PROBE_BATCH);
+    const { data, error } = await supabase
+      .from("photos")
+      .select("camp_week_id")
+      .in("camp_week_id", batch);
+    if (error) throw new Error(`orphan-week photo probe failed: ${error.message}`);
+    for (const row of (data ?? []) as Array<{ camp_week_id: string }>) {
+      withPhotos.add(row.camp_week_id);
+    }
+  }
+
+  const deletableIds: string[] = [];
+  for (const w of orphans) {
+    const detail = {
+      name: w.name,
+      smugmugNodeId: w.smugmug_folder_id,
+      locationName: locNameByDbId.get(w.location_id) ?? "—",
+    };
+    if (withPhotos.has(w.id)) {
+      weekResult.orphansKeptWithPhotos.push(detail);
+    } else {
+      deletableIds.push(w.id);
+      weekResult.prunedOrphans.push(detail);
+    }
+  }
+
+  const DELETE_BATCH = 200;
+  for (let i = 0; i < deletableIds.length; i += DELETE_BATCH) {
+    const batch = deletableIds.slice(i, i + DELETE_BATCH);
+    const { error } = await supabase.from("camp_weeks").delete().in("id", batch);
+    if (error) throw new Error(`orphan-week delete failed: ${error.message}`);
+  }
 }

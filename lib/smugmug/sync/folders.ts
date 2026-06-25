@@ -41,7 +41,12 @@ export interface FolderSyncResult {
   locationsUpdatedToReal: number;
   weeksAdded: number;
   weeksUpdatedToReal: number;
+  weeksPruned: number;
   unparseableWeeks: Array<{ name: string; locationName: string; smugmugNodeId: string }>;
+  /** Orphaned weeks (folder gone) deleted because they had no photos. */
+  prunedOrphanWeeks: Array<{ name: string; locationName: string; smugmugNodeId: string }>;
+  /** Orphaned weeks kept because they still hold photos — flag for an admin. */
+  orphanWeeksKeptWithPhotos: Array<{ name: string; locationName: string; smugmugNodeId: string }>;
 }
 
 interface SyncedDivisionRow {
@@ -74,7 +79,10 @@ export async function runFolderSync(
     locationsUpdatedToReal: 0,
     weeksAdded: 0,
     weeksUpdatedToReal: 0,
+    weeksPruned: 0,
     unparseableWeeks: [],
+    prunedOrphanWeeks: [],
+    orphanWeeksKeptWithPhotos: [],
   };
 
   for (const div of divisions) {
@@ -91,7 +99,10 @@ export async function runFolderSync(
     result.locationsUpdatedToReal += deepResult.locations.updatedToReal;
     result.weeksAdded += deepResult.weeks.added;
     result.weeksUpdatedToReal += deepResult.weeks.updatedToReal;
+    result.weeksPruned += deepResult.weeks.prunedOrphans.length;
     result.unparseableWeeks.push(...deepResult.weeks.skippedUnparseable);
+    result.prunedOrphanWeeks.push(...deepResult.weeks.prunedOrphans);
+    result.orphanWeeksKeptWithPhotos.push(...deepResult.weeks.orphansKeptWithPhotos);
   }
 
   return result;
