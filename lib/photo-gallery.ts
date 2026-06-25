@@ -24,6 +24,10 @@ export type GalleryFilters = {
   // `viewerId` is the reviewer to match (the signed-in user).
   mineOnly?: boolean;
   viewerId?: string | null;
+  // Include "Hide from parent view" (is_quarantined) photos. Default false:
+  // the gallery shows the marketing-visible pool. When true, hidden photos are
+  // surfaced (badged) so they can be restored.
+  showHidden?: boolean;
   sort: GallerySort;
   offset: number;
   limit: number;
@@ -43,6 +47,7 @@ export type GalleryPhoto = {
   divisionName: string;
   weekName: string;
   weekStartsOn: string | null;
+  isQuarantined: boolean;
   tagIds: string[];
   ratedBy: string | null;
   ratedById: string | null;
@@ -155,7 +160,7 @@ async function fetchPhotoIdsRatedBy(
 
 const SELECT_COLUMNS =
   "id, current_rating, captured_at, thumbnail_url, image_url, smugmug_url, " +
-  "smugmug_image_id, width, height, " +
+  "smugmug_image_id, width, height, is_quarantined, " +
   "camp_weeks!inner ( name, starts_on, locations!inner ( name, division_id, divisions!inner ( name ) ) )";
 
 export async function fetchRatedPhotos(
@@ -185,8 +190,13 @@ export async function fetchRatedPhotos(
     .from("photos")
     .select(SELECT_COLUMNS)
     .eq("rating_state", "rated")
-    .eq("is_quarantined", false)
     .eq("camp_weeks.locations.is_ignored", false);
+
+  // Hidden-from-parent photos are excluded by default; the "Show hidden"
+  // toggle opts them back in (badged in the grid) so they can be restored.
+  if (!filters.showHidden) {
+    query = query.eq("is_quarantined", false);
+  }
 
   if (filters.campWeekId) {
     query = query.eq("camp_week_id", filters.campWeekId);
@@ -229,6 +239,7 @@ export async function fetchRatedPhotos(
     smugmug_image_id: string;
     width: number | null;
     height: number | null;
+    is_quarantined: boolean;
     camp_weeks: {
       name: string;
       starts_on: string | null;
@@ -248,6 +259,7 @@ export async function fetchRatedPhotos(
     height: r.height,
     weekName: r.camp_weeks?.name ?? "—",
     weekStartsOn: r.camp_weeks?.starts_on ?? null,
+    isQuarantined: r.is_quarantined,
     locationName: r.camp_weeks?.locations?.name ?? "—",
     divisionName: r.camp_weeks?.locations?.divisions?.name ?? "—",
     tagIds: [],
@@ -298,6 +310,42 @@ export async function bulkOverridePhotoRating(
   if (!res.ok) {
     const json = await res.json().catch(() => ({}));
     throw new Error(json.error ?? `bulk override failed (${res.status})`);
+  }
+  const json = await res.json().catch(() => ({}));
+  return Number(json.updated ?? 0);
+}
+
+// "Hide from parent view" toggle (Photo Library). Flips photos.is_quarantined
+// — the same flag the rating + camp-review screens write — via the gated route,
+// which also reconciles the SmugMug-side Hidden flag. Allowed for seniors/admins
+// (any photo) and a photo's own current rater.
+export async function setPhotoQuarantine(photoId: string, quarantined: boolean): Promise<void> {
+  const res = await fetch("/api/photo-rating/quarantine", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ photo_id: photoId, quarantined }),
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw new Error(json.error ?? `hide toggle failed (${res.status})`);
+  }
+}
+
+// Bulk "Hide from parent view" toggle (Photo Library multi-select). Same
+// semantics as setPhotoQuarantine but for many photos at once; restricted
+// server-side to seniors/admins. Resolves to the number of photos updated.
+export async function bulkSetPhotoQuarantine(
+  photoIds: string[],
+  quarantined: boolean,
+): Promise<number> {
+  const res = await fetch("/api/photo-rating/bulk-quarantine", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ photo_ids: photoIds, quarantined }),
+  });
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}));
+    throw new Error(json.error ?? `bulk hide toggle failed (${res.status})`);
   }
   const json = await res.json().catch(() => ({}));
   return Number(json.updated ?? 0);

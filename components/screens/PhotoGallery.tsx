@@ -11,9 +11,11 @@ import { smugmugVariantUrl } from "@/lib/smugmug/url-variants";
 import { buildTagLabelLookup } from "@/lib/tags";
 import {
   bulkOverridePhotoRating,
+  bulkSetPhotoQuarantine,
   fetchGalleryFilterOptions,
   fetchRatedPhotos,
   overridePhotoRating,
+  setPhotoQuarantine,
   type GalleryFilterOptions,
   type GalleryPhoto,
   type GallerySort,
@@ -39,6 +41,7 @@ type Filters = {
   minRating: number | null;
   tagIds: string[];
   mineOnly: boolean;
+  showHidden: boolean;
   sort: GallerySort;
 };
 
@@ -50,6 +53,7 @@ const DEFAULT_FILTERS: Filters = {
   sort: "rating_desc",
   tagIds: [],
   mineOnly: false,
+  showHidden: false,
 };
 
 export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
@@ -68,7 +72,7 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
   // Multi-select mode + bulk actions.
   const [selectMode, setSelectMode] = React.useState(false);
   const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
-  const [actionBusy, setActionBusy] = React.useState<null | "zip" | "rating">(null);
+  const [actionBusy, setActionBusy] = React.useState<null | "zip" | "rating" | "quarantine">(null);
   const [galleryOpen, setGalleryOpen] = React.useState(false);
 
   const tagLabel = React.useMemo(
@@ -203,6 +207,47 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
     }
   };
 
+  const runBulkQuarantine = async (quarantined: boolean) => {
+    setActionBusy("quarantine");
+    const ids = [...selected];
+    try {
+      const updated = await bulkSetPhotoQuarantine(ids, quarantined);
+      // Optimistically patch the loaded grid so badges update immediately.
+      // Hidden photos stay in place (badged) until the next load applies the
+      // pool filter, so the action's effect is visible right away.
+      const idSet = new Set(ids);
+      setPhotos((prev) =>
+        prev.map((p) => (idSet.has(p.id) ? { ...p, isQuarantined: quarantined } : p)),
+      );
+      toast.show(
+        `${quarantined ? "Hid" : "Restored"} ${updated} photo${updated === 1 ? "" : "s"}`,
+        "check",
+      );
+    } catch (e: unknown) {
+      toast.show(e instanceof Error ? e.message : "Couldn't change visibility", "x");
+    } finally {
+      setActionBusy(null);
+    }
+  };
+
+  // "Hide from parent view" toggle — flips the shared is_quarantined flag (also
+  // set in Camp Photo Review and Camp Quality Review) and reconciles SmugMug.
+  // The grid keeps the photo in place with an updated badge; the pool filter
+  // applies on the next load.
+  const toggleQuarantine = async (photoId: string, quarantined: boolean): Promise<boolean> => {
+    try {
+      await setPhotoQuarantine(photoId, quarantined);
+      setPhotos((prev) =>
+        prev.map((p) => (p.id === photoId ? { ...p, isQuarantined: quarantined } : p)),
+      );
+      toast.show(quarantined ? "Hidden from parent view" : "Restored to parent view", "check");
+      return true;
+    } catch (e: unknown) {
+      toast.show(e instanceof Error ? e.message : "Couldn't change visibility", "x");
+      return false;
+    }
+  };
+
   // Senior/admin rating correction — a behind-the-scenes edit of the rating
   // used for sorting/display. Attribution ("rated by") is intentionally left
   // unchanged; only the star value updates.
@@ -241,7 +286,7 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
   const isFiltered =
     filters.divisionId !== null || filters.locationId !== null || filters.campWeekId !== null ||
     filters.tagIds.length > 0 || filters.minRating !== DEFAULT_FILTERS.minRating ||
-    filters.mineOnly || filters.sort !== DEFAULT_FILTERS.sort;
+    filters.mineOnly || filters.showHidden || filters.sort !== DEFAULT_FILTERS.sort;
 
   // Lightbox neighbor preload (XL variant).
   React.useEffect(() => {
@@ -354,6 +399,22 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
             Show only my ratings
           </label>
 
+          <label
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              alignSelf: "flex-end", padding: "9px 0", fontSize: 13,
+              cursor: "pointer", color: "var(--ink)",
+            }}
+            title="Include photos hidden from parent view so they can be restored"
+          >
+            <input
+              type="checkbox"
+              checked={filters.showHidden}
+              onChange={(e) => patch({ showHidden: e.target.checked })}
+            />
+            Show hidden from parent view
+          </label>
+
           {isFiltered && (
             <button
               type="button"
@@ -461,6 +522,13 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
                     onPick={(n) => void runBulkRating(n)}
                   />
                 )}
+                {canEditRating && (
+                  <BulkVisibilityMenu
+                    disabled={selectedCount === 0 || actionBusy !== null}
+                    busy={actionBusy === "quarantine"}
+                    onPick={(hidden) => void runBulkQuarantine(hidden)}
+                  />
+                )}
                 <button type="button" className="btn btn-ghost" onClick={exitSelectMode}>
                   Done
                 </button>
@@ -544,6 +612,21 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
                       {p.rating}★
                     </div>
                   )}
+                  {p.isQuarantined && (
+                    <div
+                      aria-hidden
+                      style={{
+                        position: "absolute", bottom: 8, left: 8,
+                        display: "inline-flex", alignItems: "center", gap: 4,
+                        padding: "3px 8px", borderRadius: 999,
+                        background: "rgba(0,0,0,0.7)", color: "white",
+                        fontSize: 11, fontWeight: 600,
+                      }}
+                    >
+                      <Icon name="flag" size={12} />
+                      Hidden
+                    </div>
+                  )}
                 </button>
                 );
               })}
@@ -577,6 +660,8 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
           onNext={() => setLightboxIndex((i) => (i === null || i >= photos.length - 1 ? i : i + 1))}
           canEditRating={canEditRating || (!!viewerId && lightboxPhoto.ratedById === viewerId)}
           onOverrideRating={(rating) => overrideRating(lightboxPhoto.id, rating)}
+          canToggleHidden={canEditRating || (!!viewerId && lightboxPhoto.ratedById === viewerId)}
+          onToggleHidden={(hidden) => toggleQuarantine(lightboxPhoto.id, hidden)}
         />
       )}
 
@@ -784,6 +869,72 @@ function BulkRatingMenu({
   );
 }
 
+// Bulk "Hide from parent view" / "Restore parent view" trigger + popover for
+// the multi-select toolbar. A selection can mix hidden and visible photos, so
+// both directions are always offered rather than a single toggle.
+function BulkVisibilityMenu({
+  disabled,
+  busy,
+  onPick,
+}: {
+  disabled: boolean;
+  busy: boolean;
+  onPick: (hidden: boolean) => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const wrapRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <button
+        type="button"
+        className="btn btn-ghost"
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Icon name="flag" size={16} />
+        <span style={{ marginLeft: 6 }}>{busy ? "Updating…" : "Parent view"}</span>
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute", right: 0, top: "100%", marginTop: 6, zIndex: 10,
+            display: "flex", flexDirection: "column", gap: 4, minWidth: 180,
+            background: "var(--paper-2)", border: "1px solid var(--rule)",
+            borderRadius: 8, padding: 6, boxShadow: "0 6px 20px rgba(0,0,0,0.25)",
+          }}
+        >
+          <button
+            type="button"
+            className="btn btn-ghost"
+            style={{ justifyContent: "flex-start" }}
+            onClick={() => { onPick(true); setOpen(false); }}
+          >
+            Hide from parent view
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            style={{ justifyContent: "flex-start" }}
+            onClick={() => { onPick(false); setOpen(false); }}
+          >
+            Restore parent view
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Auto-suggested gallery title, e.g. "Selected Photos 2026-06-10 14-32". Mirrors
 // the server-side default in lib/smugmug/collections.ts.
 function suggestGalleryName(): string {
@@ -918,6 +1069,8 @@ function GalleryLightbox({
   onNext,
   canEditRating,
   onOverrideRating,
+  canToggleHidden,
+  onToggleHidden,
 }: {
   photo: GalleryPhoto;
   tagLabel: (id: string) => string;
@@ -929,9 +1082,12 @@ function GalleryLightbox({
   onNext: () => void;
   canEditRating: boolean;
   onOverrideRating: (rating: number) => Promise<boolean>;
+  canToggleHidden: boolean;
+  onToggleHidden: (hidden: boolean) => Promise<boolean>;
 }) {
   const [editingRating, setEditingRating] = React.useState(false);
   const [savingRating, setSavingRating] = React.useState(false);
+  const [savingHidden, setSavingHidden] = React.useState(false);
   // Reset the editor when navigating between photos.
   React.useEffect(() => { setEditingRating(false); }, [photo.id]);
 
@@ -1044,6 +1200,42 @@ function GalleryLightbox({
           >
             Cancel
           </button>
+        </div>
+      )}
+      {(canToggleHidden || photo.isQuarantined) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+          {photo.isQuarantined && (
+            <span
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                fontSize: 12, color: "var(--ink-2)",
+              }}
+            >
+              <Icon name="flag" size={14} />
+              Hidden from parent view
+            </span>
+          )}
+          {canToggleHidden && (
+            <button
+              type="button"
+              disabled={savingHidden}
+              onClick={async () => {
+                setSavingHidden(true);
+                await onToggleHidden(!photo.isQuarantined);
+                setSavingHidden(false);
+              }}
+              style={{
+                background: "none", border: "none", padding: 0, cursor: "pointer",
+                color: "var(--lake, var(--ink-2))", fontSize: 12, textDecoration: "underline",
+              }}
+            >
+              {savingHidden
+                ? "Saving…"
+                : photo.isQuarantined
+                ? "Restore parent view"
+                : "Hide from parent view"}
+            </button>
+          )}
         </div>
       )}
       <div style={{ fontWeight: 600 }}>{photo.locationName} — {photo.weekName}</div>

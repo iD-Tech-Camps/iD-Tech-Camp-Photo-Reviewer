@@ -46,6 +46,10 @@ app/api/photo-rating/claims/[id]/release
 app/api/photo-rating/events
 app/api/photo-rating/week-tags
 app/api/photo-rating/sweep-claims
+app/api/photo-rating/override            # Photo Library: single rating correction
+app/api/photo-rating/bulk-override       # Photo Library: bulk rating correction
+app/api/photo-rating/quarantine          # Photo Library: single hide-from-parent toggle
+app/api/photo-rating/bulk-quarantine     # Photo Library: bulk hide-from-parent toggle
 ```
 
 ## UI
@@ -60,14 +64,18 @@ Read-only browse of the rated pool, open to **every signed-in user**, for findin
 and downloading the best photos for marketing. `components/screens/PhotoGallery.tsx`
 + data layer `lib/photo-gallery.ts`.
 
-- **Pool:** `photos.rating_state = 'rated'` and `is_quarantined = false` (quarantined /
-  "hide from parent view" photos are excluded).
+- **Pool:** `photos.rating_state = 'rated'`. Photos with `is_quarantined = true`
+  ("hide from parent view") are excluded by default; the **Show hidden from parent view**
+  filter toggle opts them back in (badged in the grid) so they can be restored.
 - **Current rating:** denormalized onto `photos.current_rating` (migration 47), maintained
   by the existing `tg_photo_rating_events_after_insert_apply` trigger. A photo is rated by
   exactly one reviewer (the claim selector only picks `pending`), so the latest event wins.
 - **Filters:** division → searchable location → week (week disabled until a location is picked,
   options grouped by year), min rating, `photo_rating` tags (tag filter = "has a rating event
-  carrying the tag"), plus a **Clear filters** link. **Sort:** rating / capture date. Server-side,
+  carrying the tag"), a **Show only my ratings** and **Show hidden from parent view** toggle, plus a
+  **Clear filters** link. (Filter-dropdown options are derived from the non-hidden rated pool, so a
+  week with *only* hidden photos won't appear in the week dropdown even with the toggle on; the grid
+  itself still surfaces those photos when unfiltered.) **Sort:** rating / capture date. Server-side,
   paginated via `.range()` ("Load more"). Dropdown options are derived from the rated pool only
   (`camp_weeks` with a `photos!inner` filter), so empty divisions/locations never appear.
 - **Lightbox:** rating + **rated by** (latest event's reviewer), location, week, capture date,
@@ -80,6 +88,16 @@ and downloading the best photos for marketing. `components/screens/PhotoGallery.
   that sets `current_rating` via `POST /api/photo-rating/override`. A behind-the-scenes edit of the
   denormalized rating only — no rating event is appended, so attribution ("rated by") and
   gamification points are untouched.
+- **Hide from parent view (lightbox):** seniors/admins (and a photo's own rater) get a
+  **Hide from parent view** / **Restore parent view** toggle that flips the shared
+  `photos.is_quarantined` flag via `POST /api/photo-rating/quarantine`, then reconciles the
+  SmugMug `Image.Hidden` flag. This is the **same flag** the Camp Photo Review checkbox
+  (`quarantine_intent`) and the Camp Quality Review screen's Hide/Restore buttons
+  (`senior_quarantine` / `senior_release_quarantine`) write, so the status is shared across all
+  three screens. Unlike those flows it appends **no event** (mirroring rating override), which also
+  avoids the triage trigger's `triage_maybe_enter_senior_review` side effect — a marketer toggling
+  visibility must not pull a camp week into lead review. The write goes through the service client
+  after an app-level auth check.
 
 ### Multi-select & bulk actions
 
@@ -104,6 +122,11 @@ Select-all-loaded / Clear, and three actions:
 - **Change rating** (seniors/admins only) — `POST /api/photo-rating/bulk-override` sets
   `current_rating` on all selected photos via the service client, with the same correction semantics
   as the single-photo lightbox path above (no events/attribution/points change). Returns the count
+  actually updated.
+- **Parent view** (seniors/admins only) — a **Hide from parent view** / **Restore parent view**
+  popover; `POST /api/photo-rating/bulk-quarantine` flips `is_quarantined` on all selected photos
+  via the service client (capped at 60), then reconciles each photo's SmugMug `Image.Hidden` flag
+  with bounded concurrency. Same no-event semantics as the single-photo toggle. Returns the count
   actually updated.
 
 ### Local dev
