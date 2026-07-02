@@ -82,6 +82,10 @@ npx supabase db push --linked
 3. Reviewers open **Camp Quality Review**, claim a batch (max 3 active claim batches), mark photos clean or flag with issues. Every pending photo at an unapproved location is in scope, newest first.
 4. The **lead reviewer** works at the location level: once a location looks good for the season they **approve** it, which drains the remaining triage queue there; revoke reopens it. Leads can also mark an individual week as reviewed (audit marker) without closing the location.
 
+## Upload alerts
+
+A weekly check flags a location that uploaded photos last camp week but is silent this week, so a lead can chase it down. It's a **relative** signal (no per-location schedule to configure or update each year): a location is flagged only if a peer location *did* receive photos this week, which suppresses false alarms during a sync outage or holiday. Alerts appear at the top of the Lead review hub, **persist until a lead dismisses them** (they aren't auto-cleared when photos arrive), and keep a dismissed-history disclosure. Runs Wednesdays via [Vercel Cron](#crons-vercel) after the daily sync; trigger it manually with `curl -H "Authorization: Bearer $CRON_SECRET" https://<app>/api/alerts/weekly-upload-check`. Contract + limitations: [`spec/UPLOAD_ALERTS_SPEC.md`](./spec/UPLOAD_ALERTS_SPEC.md).
+
 ## Points & My stats
 
 Reviewers earn points for every photo they clean or flag — both reviewer actions count, lead-only actions don&apos;t. The total appears as a chip next to the reviewer&apos;s name in the sidebar and as a today/this-week/all-time headline on the **My stats** screen, which also breaks down activity by camp week. Admins set the per-photo value on the App settings screen (integer, ≥ 0); zero records activity without awarding points. Awards accrue from migration 32 forward — earlier triage events have no ledger entries. See [`spec/GAMIFICATION_SPEC.md`](./spec/GAMIFICATION_SPEC.md) for the data model.
@@ -96,16 +100,15 @@ Three suites. Unit tests are pure logic and need nothing; the other two run agai
 npm run test:unit
 ```
 
-**Database trigger tests** — `psql`-style SQL files that exercise schema + triggers directly (run after `npx supabase db reset` so the local DB is current):
+**Database trigger tests** — `psql`-style SQL files that exercise schema + triggers directly (run after `npx supabase db reset` so the local DB is current). Each file is multi-statement, which the current `supabase` CLI's `db query` rejects (`cannot insert multiple commands into a prepared statement`) — pipe them through `psql` in the DB container instead:
 
 ```bash
 npx supabase db reset
-npx supabase db query --file supabase/tests/e2e_smugmug_sync_flow.sql
-npx supabase db query --file supabase/tests/e2e_triage_triggers.sql
-npx supabase db query --file supabase/tests/e2e_location_approval.sql
-npx supabase db query --file supabase/tests/e2e_photo_rating_triggers.sql
-npx supabase db query --file supabase/tests/e2e_points_award.sql
-npx supabase db query --file supabase/tests/smoke_test.sql
+DB=supabase_db_iD_Tech_Camp_Photo_Reviewer   # container name from `docker ps`
+for f in smugmug_sync_flow triage_triggers location_approval photo_rating_triggers points_award upload_alerts; do
+  docker exec -i "$DB" psql -U postgres -d postgres < "supabase/tests/e2e_$f.sql"
+done
+docker exec -i "$DB" psql -U postgres -d postgres < supabase/tests/smoke_test.sql
 ```
 
 Each file wraps its scenarios in a transaction and `ROLLBACK`s at the end, printing a `… passed` row on success (it raises and aborts on the first failed assertion).
@@ -126,4 +129,5 @@ The harness refuses to run against a non-local Supabase URL — fixture seeding 
 | Path | Schedule |
 |------|----------|
 | `/api/smugmug/sync-scheduled` | Daily 08:00 UTC |
+| `/api/alerts/weekly-upload-check` | Wednesdays 10:00 UTC (after the daily sync) |
 | `/api/triage/sweep-claims` | Every 5 minutes |

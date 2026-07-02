@@ -1,6 +1,6 @@
 # iD Tech Camp Photo Reviewer — Project Context
 
-> Hand-off doc for collaborators and fresh threads. User-facing overview: [`README.md`](../README.md). Triage schema and behavior: [`TRIAGE_SPEC.md`](./TRIAGE_SPEC.md). Per-location approval (replaces per-week signoff): [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md).
+> Hand-off doc for collaborators and fresh threads. User-facing overview: [`README.md`](../README.md). Triage schema and behavior: [`TRIAGE_SPEC.md`](./TRIAGE_SPEC.md). Per-location approval (replaces per-week signoff): [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md). Weekly "location stopped uploading" alert: [`UPLOAD_ALERTS_SPEC.md`](./UPLOAD_ALERTS_SPEC.md).
 
 ---
 
@@ -29,6 +29,7 @@ The legacy marketing-review queue (approve/flag/points/leaderboard) was removed 
 - **Approval (post location-approval refactor):** `location_approvals` row per `(location_id, season_start)`; approve drains in-flight triage at that location, revoke reopens. The `triage_signoff_camp_week` RPC is retained as the per-week "Mark week as reviewed" audit marker (`camp_weeks.signoff_at`/`signoff_by`), decoupled from approval. The `camp_weeks.triage_state` values `senior_review` and `complete` are no longer assigned by triggers (enum values retained for historical rows). See [`LOCATION_APPROVAL_SPEC.md`](./LOCATION_APPROVAL_SPEC.md).
 - **Photo rating:** `photos.rating_state` + `photo_rating_claims` / `photo_rating_events` — see [`PHOTO_RATING_SPEC.md`](./PHOTO_RATING_SPEC.md). Untouched by the location-approval refactor.
 - **Gamification:** points layer on top of triage via a source-agnostic ledger — see [`GAMIFICATION_SPEC.md`](./GAMIFICATION_SPEC.md).
+- **Upload alerts:** `upload_alerts` table + weekly `generate_upload_alerts()` cron flag a location that uploaded last camp week but is silent this week (peer circuit-breaker suppresses systemic gaps). Relative signal — **no** per-location schedule config, no annual upkeep. Surfaced at the top of the Lead review hub, dismissible, with history. See [`UPLOAD_ALERTS_SPEC.md`](./UPLOAD_ALERTS_SPEC.md).
 
 ### Migrations
 
@@ -44,6 +45,8 @@ The legacy marketing-review queue (approve/flag/points/leaderboard) was removed 
 | `20260528000043` | Location approval — triggers swap: drain on approve, reopen on revoke, drop legacy signoff side-effects. |
 | `20260603000047` | Photo Library — `photos.current_rating` (denormalized latest star rating) + index + rating-event trigger update + backfill. Additive. |
 | `20260603000048` | `locations.is_ignored` + `set_location_ignored` RPC (senior/admin) + recreate `locations_with_approval` view. Hides a location from every review hub + the Photo Library. Additive. |
+| `20260625000049` | Orphaned-week role derivation — empty passed weeks stop holding the `first_week` slot; `recompute_all_triage_roles()` reruns after each sync. |
+| `20260701000050` | Upload alerts — `upload_alerts` table + `generate_upload_alerts()` / `dismiss_upload_alert()` RPCs + RLS. Additive. See [`UPLOAD_ALERTS_SPEC.md`](./UPLOAD_ALERTS_SPEC.md). |
 
 **Dead migration slots (do not reuse):** `20260505000010`, `20260505000011`, `20260505000012` — comment-only placeholders. Gamification was deferred during the triage refactor; V1 (points only) ships under migration 32 — see [`GAMIFICATION_SPEC.md`](./GAMIFICATION_SPEC.md). The slots stay dead — future gamification work (streaks, badges, etc.) uses new migration numbers.
 
@@ -70,6 +73,7 @@ app/api/smugmug/     # ping, sync-folders, sync-now, sync-scheduled, quarantine,
 app/api/triage/      # claims, events (grace window post-refactor), signoff (per-week review marker), sweep-claims
 app/api/locations/[id]/  # approve, revoke, feedback — post location-approval refactor
 app/api/photo-rating/  # claims, events, week-tags, sweep-claims, override + bulk-override (Photo Library rating correction)
+app/api/alerts/      # weekly-upload-check (cron), [id]/dismiss — upload alerts
 components/screens/
   Triage.tsx         # Camp Quality Review hub + claim grid + senior dashboard
   PhotoRating.tsx    # Camp Photo Review hub + star-rating lightbox
@@ -81,6 +85,7 @@ lib/smugmug/sync/photos.ts  # orphan delete preserves triage history (§0)
 lib/smugmug/collections.ts  # create Unlisted album + collect existing images (only SmugMug write path beyond quarantine)
 spec/TRIAGE_SPEC.md  # contract for schema + triggers + UI
 spec/LOCATION_APPROVAL_SPEC.md  # per-location approval lifecycle + drain/reopen contract
+spec/UPLOAD_ALERTS_SPEC.md  # weekly "location stopped uploading" alert contract
 ```
 
 ---
