@@ -5,6 +5,10 @@
       "schedule": "0 8 * * *"
     },
     {
+      "path": "/api/alerts/weekly-upload-check",
+      "schedule": "0 10 * * 3"
+    },
+    {
       "path": "/api/triage/sweep-claims",
       "schedule": "*/5 * * * *"
     },

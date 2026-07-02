@@ -28,6 +28,11 @@ import {
   groupFeedbackByWeek,
   partitionLocationWeeks,
 } from "@/lib/location-detail-sections";
+import {
+  dismissUploadAlert,
+  fetchUploadAlerts,
+  type UploadAlert,
+} from "@/lib/upload-alerts";
 
 // Per-card status label keyed on lifecycle stage so "Needs your review" stops
 // appearing on dormant locations. Sections supply the broader grouping; this
@@ -203,7 +208,6 @@ function LocationListView({
     for (const k of SECTION_ORDER) init[k] = SECTION_META[k].defaultCollapsed;
     return init;
   });
-  void toast;
 
   React.useEffect(() => {
     let cancelled = false;
@@ -268,6 +272,8 @@ function LocationListView({
         }
       />
       <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        <AlertsSection toast={toast} />
+
         {error && <div className="card" style={{ color: "var(--rose)", fontSize: 12 }}>{error}</div>}
 
         {SECTION_ORDER.map((key) => {
@@ -450,6 +456,130 @@ function LocationRow({
         </button>
       </div>
     </div>
+  );
+}
+
+// ─── Upload alerts ──────────────────────────────────────────────────────────
+
+// Weekly "this location stopped uploading" alerts, surfaced at the top of the
+// lead hub. Alerts are static records: they persist until a lead dismisses one
+// (they are not auto-cleared when photos eventually arrive). Dismissed alerts
+// move into a collapsible history disclosure.
+function AlertsSection({ toast }: { toast: ToastApi }) {
+  const supabase = React.useMemo(() => createClient(), []);
+  const [active, setActive] = React.useState<UploadAlert[]>([]);
+  const [dismissed, setDismissed] = React.useState<UploadAlert[]>([]);
+  const [loaded, setLoaded] = React.useState(false);
+  const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [busyId, setBusyId] = React.useState<string | null>(null);
+
+  const load = React.useCallback(async () => {
+    const { active: a, dismissed: d } = await fetchUploadAlerts(supabase);
+    setActive(a);
+    setDismissed(d);
+    setLoaded(true);
+  }, [supabase]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    load().catch(() => {
+      // Alerts are a best-effort overlay — a fetch failure shouldn't block the
+      // hub. Leave the section hidden and let the location list render.
+      if (!cancelled) setLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [load]);
+
+  const handleDismiss = async (id: string) => {
+    setBusyId(id);
+    try {
+      await dismissUploadAlert(id);
+      await load();
+    } catch (err) {
+      toast.show(err instanceof Error ? err.message : "Dismiss failed");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // Nothing to show until we know there's at least one alert (active or in
+  // history). Keeps the hub clean in the common case.
+  if (!loaded || (active.length === 0 && dismissed.length === 0)) return null;
+
+  const weekLine = (a: UploadAlert) =>
+    `No photos for ${a.weekLabel} (week of ${new Date(a.weekStart).toLocaleDateString(undefined, { month: "short", day: "numeric" })})`;
+
+  return (
+    <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <h2 className="page-eyebrow" style={{ margin: 0, color: "var(--rose)" }}>
+        Upload alerts ({active.length})
+      </h2>
+
+      {active.length === 0 ? (
+        <div className="card" style={{ color: "var(--ink-3)", fontSize: 13 }}>
+          No open upload alerts.
+        </div>
+      ) : (
+        active.map((a) => (
+          <div
+            key={a.id}
+            className="card"
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 16,
+              flexWrap: "wrap",
+              borderLeft: "4px solid var(--rose)",
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 15 }}>
+                {a.divisionName} · {a.locationName}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
+                {weekLine(a)} · flagged {relativeDate(a.detectedAt)}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => handleDismiss(a.id)}
+              disabled={busyId === a.id}
+            >
+              {busyId === a.id ? "Dismissing…" : "Dismiss"}
+            </button>
+          </div>
+        ))
+      )}
+
+      {dismissed.length > 0 && (
+        <CollapsibleSection title="Dismissed" count={dismissed.length} defaultCollapsed>
+          {dismissed.map((a) => (
+            <div
+              key={a.id}
+              className="card"
+              style={{ display: "flex", flexDirection: "column", gap: 4, opacity: 0.75 }}
+            >
+              <div style={{ fontWeight: 600, fontSize: 14 }}>
+                {a.divisionName} · {a.locationName}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                {weekLine(a)}
+                {a.dismissedAt && (
+                  <>
+                    {" · "}dismissed {relativeDate(a.dismissedAt)}
+                    {a.dismissedByName ? ` by ${a.dismissedByName}` : ""}
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </CollapsibleSection>
+      )}
+    </section>
   );
 }
 
