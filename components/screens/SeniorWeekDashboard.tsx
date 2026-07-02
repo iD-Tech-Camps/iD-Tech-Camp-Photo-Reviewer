@@ -3,6 +3,7 @@
 import React from "react";
 import { Icon } from "@/components/Icon";
 import { PhotoImg } from "@/components/PhotoImg";
+import { ReviewLightbox } from "@/components/ReviewLightbox";
 import { Breadcrumb, PageHeader, type Crumb, type ToastApi } from "@/components/Shell";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -527,6 +528,31 @@ export function SeniorWeekDashboard({
   );
 }
 
+// Read-only status pill mirroring the grid's border/badge semantics, so the
+// enlarged view states a photo's quality-review outcome plainly.
+function statusPill(state: string): React.ReactNode {
+  if (state === "flagged") return <span className="pill pill-rose">Flagged</span>;
+  if (state === "clean") return <span className="pill pill-moss">Cleared</span>;
+  if (state === "deleted") {
+    return (
+      <span
+        style={{
+          fontSize: 11, padding: "3px 8px", borderRadius: 999,
+          background: "var(--paper-3)", border: "1px solid var(--rule)", color: "var(--ink-3)",
+        }}
+      >
+        Deleted
+      </span>
+    );
+  }
+  return null;
+}
+
+// Wraps the shared ReviewLightbox (same shell as the Camp Quality/Photo Review
+// hubs and the Photo Library) so the lead week-review view matches them: the
+// hero fills the overlay height, prior-review metadata lives in the scrolling
+// sidebar body, and the lead's per-photo actions sit in the pinned footer.
+// The footer is omitted entirely once the week is approved (read-only).
 function SeniorPhotoLightbox({
   photo,
   labelLookup,
@@ -552,180 +578,92 @@ function SeniorPhotoLightbox({
   onNext: () => void;
   onAction: (kind: string) => void;
 }) {
-  React.useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
-      if (e.key === "ArrowLeft" && hasPrev) { e.preventDefault(); onPrev(); }
-      else if (e.key === "ArrowRight" && hasNext) { e.preventDefault(); onNext(); }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose, onPrev, onNext, hasPrev, hasNext]);
-
   const xlUrl = photo.thumbnailUrl ? smugmugVariantUrl(photo.thumbnailUrl, "XL") : null;
   const heroSrc = xlUrl ?? photo.imageUrl ?? photo.thumbnailUrl;
+  const status = statusPill(photo.triageState);
+  const hasDetails =
+    !!status || photo.isQuarantined || !!photo.reviewerName || photo.tagIds.length > 0 || !!photo.caption;
+
+  const footer = readOnly ? undefined : (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {photo.triageState === "flagged" && (
+        <button
+          type="button"
+          className="btn btn-primary"
+          disabled={busy}
+          onClick={() => void onAction("senior_unflag")}
+        >
+          Unflag (approve)
+        </button>
+      )}
+      {photo.triageState !== "deleted" && (
+        <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void onAction("senior_delete")}>
+          Delete
+        </button>
+      )}
+      {!photo.isQuarantined && photo.triageState !== "deleted" && (
+        <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void onAction("senior_quarantine")}>
+          Hide from parent view
+        </button>
+      )}
+      {photo.isQuarantined && (
+        <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void onAction("senior_release_quarantine")}>
+          Restore parent view
+        </button>
+      )}
+    </div>
+  );
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      style={{
-        position: "fixed", inset: 0, zIndex: 1000,
-        background: "rgba(0,0,0,0.86)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        padding: 24,
-      }}
+    <ReviewLightbox
+      heroSrc={heroSrc}
+      previewSrc={photo.thumbnailUrl}
+      alt={photo.caption ?? "Photo"}
+      position={position}
+      hasPrev={hasPrev}
+      hasNext={hasNext}
+      onClose={onClose}
+      onPrev={onPrev}
+      onNext={onNext}
+      footer={footer}
     >
-      <div
-        style={{
-          position: "absolute", top: 20, left: 24,
-          color: "white",
-          fontFamily: "var(--font-mono)",
-          fontSize: 12,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-        }}
-      >
-        {position}
-      </div>
-
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="Close"
-        style={{
-          position: "absolute", top: 16, right: 16,
-          width: 40, height: 40, borderRadius: 999,
-          background: "rgba(255,255,255,0.12)", color: "white",
-          border: "none", cursor: "pointer",
-          display: "grid", placeItems: "center",
-        }}
-      >
-        <Icon name="x" size={20} />
-      </button>
-
-      {hasPrev && (
-        <button
-          type="button"
-          onClick={onPrev}
-          aria-label="Previous photo"
-          style={{
-            position: "absolute", top: "50%", left: 16, transform: "translateY(-50%)",
-            width: 48, height: 48, borderRadius: 999,
-            background: "rgba(255,255,255,0.12)", color: "white",
-            border: "none", cursor: "pointer",
-            display: "grid", placeItems: "center",
-          }}
-        >
-          <Icon name="arrow-l" size={22} />
-        </button>
-      )}
-      {hasNext && (
-        <button
-          type="button"
-          onClick={onNext}
-          aria-label="Next photo"
-          style={{
-            position: "absolute", top: "50%", right: 16, transform: "translateY(-50%)",
-            width: 48, height: 48, borderRadius: 999,
-            background: "rgba(255,255,255,0.12)", color: "white",
-            border: "none", cursor: "pointer",
-            display: "grid", placeItems: "center",
-          }}
-        >
-          <Icon name="arrow-r" size={22} />
-        </button>
-      )}
-
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          display: "flex", flexDirection: "column", gap: 16,
-          maxWidth: 1100, width: "100%", maxHeight: "100%",
-        }}
-      >
-        <div
-          style={{
-            position: "relative",
-            width: "100%",
-            height: "62vh",
-            borderRadius: 8,
-            overflow: "hidden",
-          }}
-        >
-          <PhotoImg
-            src={heroSrc}
-            previewSrc={photo.thumbnailUrl}
-            alt={photo.caption ?? "Photo"}
-            fit="contain"
-            loading="eager"
-            background="transparent"
-            showSpinner
-          />
-        </div>
-
-        <div
-          style={{
-            background: "var(--paper-2)",
-            border: "1px solid var(--rule)",
-            borderRadius: 8,
-            padding: 16,
-          }}
-        >
-          {photo.reviewerName && (
-            <div style={{ fontSize: 13, marginBottom: 8 }}>
-              Reviewed by <strong>{photo.reviewerName}</strong>
-              {photo.reviewedAt ? ` · ${formatReviewedAt(photo.reviewedAt)}` : ""}
-            </div>
-          )}
-
-          {photo.tagIds.length > 0 && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-              {photo.tagIds.map((id) => {
-                const label = labelLookup(id);
-                if (!label) return null;
-                return <span key={id} className="pill pill-rose">{label}</span>;
-              })}
-            </div>
-          )}
-
-          {photo.caption && (
-            <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 12 }}>{photo.caption}</div>
-          )}
-
-          {!readOnly && (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {photo.triageState === "flagged" && (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={busy}
-                  onClick={() => void onAction("senior_unflag")}
-                >
-                  Unflag (approve)
-                </button>
-              )}
-              {photo.triageState !== "deleted" && (
-                <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void onAction("senior_delete")}>
-                  Delete
-                </button>
-              )}
-              {!photo.isQuarantined && photo.triageState !== "deleted" && (
-                <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void onAction("senior_quarantine")}>
-                  Hide from parent view
-                </button>
-              )}
-              {photo.isQuarantined && (
-                <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void onAction("senior_release_quarantine")}>
-                  Restore parent view
-                </button>
-              )}
-            </div>
+      {(status || photo.isQuarantined) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          {status}
+          {photo.isQuarantined && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--ink-2)" }}>
+              <Icon name="flag" size={14} />
+              Hidden from parent view
+            </span>
           )}
         </div>
-      </div>
-    </div>
+      )}
+
+      {photo.reviewerName && (
+        <div style={{ fontSize: 13, marginBottom: 12 }}>
+          Reviewed by <strong>{photo.reviewerName}</strong>
+          {photo.reviewedAt ? ` · ${formatReviewedAt(photo.reviewedAt)}` : ""}
+        </div>
+      )}
+
+      {photo.tagIds.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+          {photo.tagIds.map((id) => {
+            const label = labelLookup(id);
+            if (!label) return null;
+            return <span key={id} className="pill pill-rose">{label}</span>;
+          })}
+        </div>
+      )}
+
+      {photo.caption && (
+        <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{photo.caption}</div>
+      )}
+
+      {!hasDetails && (
+        <div style={{ fontSize: 13, color: "var(--ink-3)" }}>No review details for this photo.</div>
+      )}
+    </ReviewLightbox>
   );
 }
 
