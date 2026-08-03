@@ -1,5 +1,24 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+// PostgREST puts `.in()` values in the URL, so a filter over hundreds of UUIDs
+// produces a request line long enough for the Supabase edge proxy to reject
+// with HTTP 400 (empirically past ~660 IDs). Splitting into chunks keeps every
+// request well under that ceiling, so even a large whole-week claim loads.
+const IN_CHUNK_SIZE = 300;
+
+async function selectByIdsInChunks<Row>(
+  ids: string[],
+  run: (chunk: string[]) => PromiseLike<{ data: Row[] | null; error: unknown }>,
+): Promise<Row[]> {
+  const out: Row[] = [];
+  for (let i = 0; i < ids.length; i += IN_CHUNK_SIZE) {
+    const { data, error } = await run(ids.slice(i, i + IN_CHUNK_SIZE));
+    if (error) throw error;
+    if (data) out.push(...data);
+  }
+  return out;
+}
+
 export type ActiveRatingClaim = {
   id: string;
   campWeekId: string;
@@ -88,17 +107,18 @@ export async function fetchRatingClaimPhotos(
   const flaggedIds = rows.filter((r) => r.triage_state === "flagged").map((r) => r.id);
   const flagTagsByPhoto = new Map<string, string[]>();
   if (flaggedIds.length > 0) {
-    const { data: events, error: evErr } = await supabase
-      .from("triage_events")
-      .select("id, photo_id, created_at, kind, triage_event_tags ( tag_id )")
-      .in("photo_id", flaggedIds)
-      .eq("kind", "flag")
-      .order("created_at", { ascending: false });
-    if (evErr) throw evErr;
-    for (const row of (events ?? []) as Array<{
+    const events = await selectByIdsInChunks<{
       photo_id: string;
       triage_event_tags: Array<{ tag_id: string }> | null;
-    }>) {
+    }>(flaggedIds, (chunk) =>
+      supabase
+        .from("triage_events")
+        .select("id, photo_id, created_at, kind, triage_event_tags ( tag_id )")
+        .in("photo_id", chunk)
+        .eq("kind", "flag")
+        .order("created_at", { ascending: false }),
+    );
+    for (const row of events) {
       if (flagTagsByPhoto.has(row.photo_id)) continue;
       flagTagsByPhoto.set(
         row.photo_id,
@@ -172,16 +192,27 @@ export async function fetchLatestRatingEventsForClaim(
   ];
   if (photoIds.length === 0) return new Map();
 
-  const { data: events, error: evErr } = await supabase
-    .from("photo_rating_events")
-    .select("id, photo_id, rating, quarantine_intent, created_at")
-    .in("photo_id", photoIds)
-    .eq("reviewer_id", reviewerId)
-    .order("created_at", { ascending: false });
-  if (evErr) throw evErr;
+  // Chunked so a large claim (hundreds of photos) doesn't build one giant
+  // `.in()` URL. Photos are partitioned across chunks, so all of a photo's
+  // events stay in the same chunk and the desc order → first-seen-is-latest
+  // logic below still holds.
+  const events = await selectByIdsInChunks<{
+    id: string;
+    photo_id: string;
+    rating: number;
+    quarantine_intent: boolean;
+    created_at: string;
+  }>(photoIds, (chunk) =>
+    supabase
+      .from("photo_rating_events")
+      .select("id, photo_id, rating, quarantine_intent, created_at")
+      .in("photo_id", chunk)
+      .eq("reviewer_id", reviewerId)
+      .order("created_at", { ascending: false }),
+  );
 
   const latestByPhoto = new Map<string, { id: string; rating: number; quarantineIntent: boolean }>();
-  for (const row of events ?? []) {
+  for (const row of events) {
     const e = row as {
       id: string;
       photo_id: string;
@@ -200,12 +231,15 @@ export async function fetchLatestRatingEventsForClaim(
   const eventIds = [...latestByPhoto.values()].map((e) => e.id);
   const tagMap = new Map<string, string[]>();
   if (eventIds.length > 0) {
-    const { data: tagRows, error: tagErr } = await supabase
-      .from("photo_rating_event_tags")
-      .select("event_id, tag_id")
-      .in("event_id", eventIds);
-    if (tagErr) throw tagErr;
-    for (const row of tagRows ?? []) {
+    const tagRows = await selectByIdsInChunks<{ event_id: string; tag_id: string }>(
+      eventIds,
+      (chunk) =>
+        supabase
+          .from("photo_rating_event_tags")
+          .select("event_id, tag_id")
+          .in("event_id", chunk),
+    );
+    for (const row of tagRows) {
       const t = row as { event_id: string; tag_id: string };
       const list = tagMap.get(t.event_id) ?? [];
       list.push(t.tag_id);

@@ -29,7 +29,7 @@ import { useFinishBatchFlow } from "@/components/FinishBatchFlow";
 import { celebrateReviewBump } from "@/lib/review-points-celebration";
 import { usePoints } from "@/lib/points-context";
 import { smugmugVariantUrl } from "@/lib/smugmug/url-variants";
-import { fetchTriageConfig } from "@/lib/triage-config";
+import { fetchTriageConfig, MAX_WHOLE_WEEK_BATCH } from "@/lib/triage-config";
 import {
   parseTriageViewFromUrl,
   usePersistedView,
@@ -109,6 +109,25 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
     }
   };
 
+  // Release a batch straight from the hub, so a reviewer never has to open a
+  // claim to give it back — important when a batch won't open at all. Reviewed
+  // photos keep their result; unreviewed photos return to the queue, exactly
+  // like "Finish batch".
+  const releaseClaim = async (claimId: string) => {
+    if (!window.confirm(
+      "Release this batch back to the queue? Photos you've already reviewed keep their result; any unreviewed photos become available to other reviewers.",
+    )) return;
+    try {
+      const res = await fetch(`/api/triage/claims/${claimId}/release`, { method: "POST" });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error ?? "Couldn't release batch");
+      toast.show("Batch released", "check");
+      await reloadHub();
+    } catch (err: unknown) {
+      toast.show(err instanceof Error ? err.message : "Couldn't release batch", "x");
+    }
+  };
+
   if (view.kind === "claim") {
     return (
       <ClaimGrid
@@ -169,15 +188,25 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
           <div className="card">
             <h3 className="card-title" style={{ marginBottom: 8 }}>Your active batches</h3>
             {claims.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                className="btn btn-ghost"
-                style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 6 }}
-                onClick={() => setView({ kind: "claim", claimId: c.id, campWeekId: c.campWeekId })}
-              >
-                Resume batch · {c.sliceSize} photos
-              </button>
+              <div key={c.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ flex: 1, textAlign: "left" }}
+                  onClick={() => setView({ kind: "claim", claimId: c.id, campWeekId: c.campWeekId })}
+                >
+                  Resume batch · {c.sliceSize} photos
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ color: "var(--rose)" }}
+                  onClick={() => void releaseClaim(c.id)}
+                  title="Release this batch back to the queue"
+                >
+                  Release
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -230,10 +259,10 @@ export function TriageApp({ toast }: { toast: ToastApi }) {
                     className="btn btn-ghost"
                     onClick={async () => {
                       const n = await fetchWeekPendingCount(supabase, w.id);
-                      void openClaim(w.id, Math.max(1, n));
+                      void openClaim(w.id, Math.min(Math.max(1, n), MAX_WHOLE_WEEK_BATCH));
                     }}
                   >
-                    Whole week
+                    Whole week — {Math.min(w.pendingCount, MAX_WHOLE_WEEK_BATCH)} (max {MAX_WHOLE_WEEK_BATCH} per batch)
                   </button>
                 </div>
               )}
@@ -281,18 +310,25 @@ function ClaimGrid({
   const [lightboxIndex, setLightboxIndex] = React.useState<number | null>(null);
   const [batchReviewCount, setBatchReviewCount] = React.useState(0);
   const [lastEarned, setLastEarned] = React.useState<number | null>(null);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const { bumpAfterReviewEvent, eventCount } = usePoints();
 
   React.useEffect(() => {
     let cancelled = false;
+    setLoadError(null);
     void (async () => {
-      const [p, c] = await Promise.all([
-        fetchClaimPhotos(supabase, claimId),
-        fetchWeekContext(supabase, campWeekId),
-      ]);
-      if (cancelled) return;
-      setPhotos(p);
-      setCtx(c);
+      try {
+        const [p, c] = await Promise.all([
+          fetchClaimPhotos(supabase, claimId),
+          fetchWeekContext(supabase, campWeekId),
+        ]);
+        if (cancelled) return;
+        setPhotos(p);
+        setCtx(c);
+      } catch (err: unknown) {
+        if (cancelled) return;
+        setLoadError(err instanceof Error ? err.message : "Couldn't load this batch");
+      }
     })();
     return () => { cancelled = true; };
   }, [supabase, claimId, campWeekId]);
@@ -418,6 +454,18 @@ function ClaimGrid({
     }
   };
 
+  if (loadError) {
+    return (
+      <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="card" style={{ color: "var(--rose)", fontSize: 13 }}>
+          Couldn&apos;t load this batch: {loadError}
+        </div>
+        <div>
+          <button type="button" className="btn btn-ghost" onClick={onBack}>← Back to batches</button>
+        </div>
+      </div>
+    );
+  }
   if (!ctx) return <div className="page-body">Loading batch…</div>;
 
   const lightboxPhoto = lightboxIndex !== null ? photos[lightboxIndex] ?? null : null;

@@ -1,5 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+// Hard cap on how many photos a single "Whole week" claim may grab. Batches
+// larger than this break the reviewer: loading a claim runs an `.in(photo_id,
+// [...])` query whose URL grows with the photo count, and past ~660 IDs the
+// request line exceeds the Supabase edge proxy's limit and returns HTTP 400.
+// The load effect has no fallback, so the batch is stuck on "Loading batch…"
+// forever. Keeping whole-week claims at/under this bound stays well clear.
+export const MAX_WHOLE_WEEK_BATCH = 500;
+
 export type TriageConfig = {
   seasonFirstWeekStart: string;
   seasonLastWeekStart: string;

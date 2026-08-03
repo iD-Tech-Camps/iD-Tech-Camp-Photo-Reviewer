@@ -5,6 +5,7 @@ import { Icon } from "@/components/Icon";
 import {
   fetchTriageConfig,
   updateTriageConfig,
+  MAX_WHOLE_WEEK_BATCH,
   type TriageConfig,
 } from "@/lib/triage-config";
 import {
@@ -1174,8 +1175,19 @@ export function AdminSettings() {
     triageForm.claimExpiryMinutes !== triageConfig.claimExpiryMinutes
   );
 
+  // A configured batch size larger than the whole-week cap would recreate the
+  // "stuck on Loading batch…" bug: claims that big produce an over-long
+  // `.in(photo_id, …)` URL that the edge proxy rejects. Keep the ceiling here
+  // aligned with MAX_WHOLE_WEEK_BATCH.
+  const batchSizeError =
+    !Number.isInteger(triageForm.batchSize) || triageForm.batchSize < 1
+      ? "Batch size must be a whole number of at least 1."
+      : triageForm.batchSize > MAX_WHOLE_WEEK_BATCH
+        ? `Batch size can't exceed ${MAX_WHOLE_WEEK_BATCH} — larger batches fail to load.`
+        : null;
+
   const saveTriage = async () => {
-    if (!triageDirty || triageBusy) return;
+    if (!triageDirty || triageBusy || batchSizeError) return;
     setTriageBusy(true);
     setTriageSaveError(null);
     try {
@@ -1439,11 +1451,12 @@ export function AdminSettings() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
               <FieldRow
                 label="Batch size"
-                hint="How many photos a reviewer pulls when they click Start a batch. Whole week still pulls all pending."
+                hint={`How many photos a reviewer pulls when they click Start a batch. Whole week pulls up to ${MAX_WHOLE_WEEK_BATCH} at a time. Max ${MAX_WHOLE_WEEK_BATCH}.`}
               >
                 <input
                   type="number"
                   min={1}
+                  max={MAX_WHOLE_WEEK_BATCH}
                   className="input"
                   disabled={triageConfig === null || triageBusy}
                   value={triageForm.batchSize}
@@ -1451,7 +1464,13 @@ export function AdminSettings() {
                     ...f,
                     batchSize: Number(e.target.value),
                   }))}
+                  aria-invalid={batchSizeError !== null}
                 />
+                {batchSizeError && (
+                  <div style={{ marginTop: 6, fontSize: 12, color: "var(--rose)" }}>
+                    {batchSizeError}
+                  </div>
+                )}
               </FieldRow>
               <FieldRow label="Release abandoned batches after (minutes)">
                 <input
@@ -1485,8 +1504,8 @@ export function AdminSettings() {
               type="button"
               className="btn btn-primary"
               onClick={saveTriage}
-              disabled={!triageDirty || triageBusy || triageConfig === null}
-              style={{ opacity: triageDirty && !triageBusy ? 1 : 0.5 }}
+              disabled={!triageDirty || triageBusy || triageConfig === null || batchSizeError !== null}
+              style={{ opacity: triageDirty && !triageBusy && !batchSizeError ? 1 : 0.5 }}
             >
               <Icon name="check" size={12} /> {triageBusy ? "Saving…" : "Save season & review"}
             </button>
