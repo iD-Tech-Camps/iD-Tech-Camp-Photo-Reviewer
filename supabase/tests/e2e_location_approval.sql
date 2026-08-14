@@ -15,6 +15,16 @@
 
 begin;
 
+-- Pin the season window around today — see the same preamble in
+-- e2e_triage_triggers.sql. The fixture week below is a fixed date that has to
+-- fall inside the configured season to derive a first_week role and get a
+-- pending photo pool; without this the suite breaks as soon as the seeded
+-- season moves past it. least/greatest only ever widens the window.
+update public.triage_config
+   set season_first_week_start = least(current_date - 365, season_first_week_start),
+       season_last_week_start  = greatest(current_date + 365, season_last_week_start)
+ where id = 1;
+
 insert into auth.users (
   id, instance_id, aud, role, email,
   encrypted_password, email_confirmed_at,
@@ -63,9 +73,11 @@ declare
   v_status text;
   v_count int;
 begin
-  -- Create a 1st-week camp_week within the configured season window.
+  -- Create a 1st-week camp_week within the configured season window. Dates are
+  -- current-relative so the week stays inside the window the preamble pinned,
+  -- whatever year the suite runs in.
   insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
-  values (v_loc, 'E2E Loc Week 1', 'e2e-loc-w1', date '2026-06-01', date '2026-06-05')
+  values (v_loc, 'E2E Loc Week 1', 'e2e-loc-w1', current_date + 7, current_date + 11)
   returning id into v_week;
 
   -- ── Scenario 1: Approve drain ────────────────────────────────────────────

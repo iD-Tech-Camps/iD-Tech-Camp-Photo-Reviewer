@@ -4,6 +4,15 @@
 
 begin;
 
+-- Pin the season window around today — see the same preamble in
+-- e2e_triage_triggers.sql. Weeks starting outside the configured season get no
+-- ordinal, so without this the role assertions below fail once the seeded
+-- season has passed. least/greatest only ever widens the window.
+update public.triage_config
+   set season_first_week_start = least(current_date - 365, season_first_week_start),
+       season_last_week_start  = greatest(current_date + 365, season_last_week_start)
+ where id = 1;
+
 insert into auth.users (
   id, instance_id, aud, role, email,
   encrypted_password, email_confirmed_at,
@@ -40,7 +49,7 @@ declare
   v_week_state public.camp_week_rating_state;
 begin
   insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
-  values (v_loc, 'Rating Week', 'e2e-rating-w1', date '2026-06-01', date '2026-06-05')
+  values (v_loc, 'Rating Week', 'e2e-rating-w1', current_date + 7, current_date + 11)
   returning id into v_week;
 
   if (select rating_role from public.camp_weeks where id = v_week) <> 'first_week' then
@@ -111,16 +120,21 @@ declare
   v_triage_role public.camp_week_triage_role;
   v_rating_state public.camp_week_rating_state;
 begin
+  -- These three weeks must all still be UPCOMING. This block asserts pure
+  -- positional ordinals (1 / 2 / 3), and migration 49's orphan rule disqualifies
+  -- any week that has fully passed while holding no photos — none of these get
+  -- photos. With fixed past dates, W1 orphans out and W2 inherits ordinal 1,
+  -- which is exactly how this test failed once 2026-07 slipped into the past.
   insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
-  values (v_loc, 'Ord W1', 'e2e-ord-w1', date '2026-07-06', date '2026-07-10')
+  values (v_loc, 'Ord W1', 'e2e-ord-w1', current_date + 7, current_date + 11)
   returning id into v_w1;
 
   insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
-  values (v_loc, 'Ord W2', 'e2e-ord-w2', date '2026-07-13', date '2026-07-17')
+  values (v_loc, 'Ord W2', 'e2e-ord-w2', current_date + 14, current_date + 18)
   returning id into v_w2;
 
   insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
-  values (v_loc, 'Ord W3', 'e2e-ord-w3', date '2026-07-20', date '2026-07-24')
+  values (v_loc, 'Ord W3', 'e2e-ord-w3', current_date + 21, current_date + 25)
   returning id into v_w3;
 
   select triage_role, rating_role into v_triage_role, v_rating_role

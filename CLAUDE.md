@@ -15,10 +15,17 @@ When a change touches the schema, triggers, or RPCs, also run the relevant SQL t
 
 ```bash
 npx supabase db reset
-npx supabase db query --file supabase/tests/e2e_triage_triggers.sql
-npx supabase db query --file supabase/tests/e2e_location_approval.sql
+# `supabase db query` sends the file as one prepared statement on CLI ≥ 2.11x,
+# which rejects these multi-statement suites. Pipe them into psql instead:
+docker exec -i supabase_db_iD_Tech_Camp_Photo_Reviewer psql -U postgres -d postgres \
+  -v ON_ERROR_STOP=1 < supabase/tests/e2e_triage_triggers.sql
+docker exec -i supabase_db_iD_Tech_Camp_Photo_Reviewer psql -U postgres -d postgres \
+  -v ON_ERROR_STOP=1 < supabase/tests/e2e_location_approval.sql
 # ...other suites in supabase/tests/ as relevant
 ```
+
+Each suite pins the season window around `current_date` in its own rolled-back
+transaction, so they pass year-round rather than only during the seeded season.
 
 ## Deploying
 

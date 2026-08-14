@@ -5,6 +5,18 @@
 
 begin;
 
+-- Pin the season window around today so the suite doesn't depend on when it
+-- runs. camp_week_season_ordinal() returns NULL for any week starting outside
+-- [season_first_week_start, season_last_week_start], so once the seeded season
+-- passes, every current_date-relative fixture below derives role 'none' and the
+-- role assertions fail for a reason that has nothing to do with the triggers.
+-- least/greatest only ever widens, so fixed-date fixtures stay in range too.
+-- Rolled back with the rest of the transaction.
+update public.triage_config
+   set season_first_week_start = least(current_date - 365, season_first_week_start),
+       season_last_week_start  = greatest(current_date + 365, season_last_week_start)
+ where id = 1;
+
 insert into auth.users (
   id, instance_id, aud, role, email,
   encrypted_password, email_confirmed_at,
