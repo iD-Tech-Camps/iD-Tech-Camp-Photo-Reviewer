@@ -143,10 +143,12 @@ begin
     raise exception 'w1: expected first_week for both, got triage=% rating=%', v_triage_role, v_rating_role;
   end if;
 
+  -- Week 2 is rateable (migration 53) but never triageable: quality review
+  -- reserves ordinal 2 for the recheck workflow, which only a lead activates.
   select triage_role, rating_role into v_triage_role, v_rating_role
     from public.camp_weeks where id = v_w2;
-  if v_triage_role <> 'none' or v_rating_role <> 'none' then
-    raise exception 'w2: expected none for both, got triage=% rating=%', v_triage_role, v_rating_role;
+  if v_triage_role <> 'none' or v_rating_role <> 'later_week' then
+    raise exception 'w2: expected triage none + rating later_week, got triage=% rating=%', v_triage_role, v_rating_role;
   end if;
 
   select triage_role, rating_role into v_triage_role, v_rating_role
@@ -259,8 +261,8 @@ begin
   end if;
 
   select rating_role into v_rating from public.camp_weeks where id = v_prior_w2;
-  if v_rating <> 'none' then
-    raise exception 'prior W2: expected none (recheck slot), got %', v_rating;
+  if v_rating <> 'later_week' then
+    raise exception 'prior W2: expected later_week, got %', v_rating;
   end if;
 
   select rating_role into v_rating from public.camp_weeks where id = v_prior_w3;
@@ -305,10 +307,33 @@ begin
     raise exception 'prior W1 photo: expected pending after backfill, got %', v_photo_state;
   end if;
 
+  -- Week 2's photos are claimable too since migration 53; before it, this week
+  -- was the single largest block of unreachable photos on prod.
   select rating_state into v_photo_state
     from public.photos where camp_week_id = v_prior_w2 limit 1;
+  if v_photo_state <> 'pending' then
+    raise exception 'prior W2 photo: expected pending, got %', v_photo_state;
+  end if;
+
+  -- The pre-season week is still out of scope entirely, so its photos must
+  -- stay not_required — this is the assertion that would catch ordinal 2
+  -- accidentally swallowing weeks that have no ordinal at all.
+  select rating_state into v_photo_state
+    from public.photos where camp_week_id = v_pre limit 1;
   if v_photo_state <> 'not_required' then
-    raise exception 'prior W2 photo: expected not_required, got %', v_photo_state;
+    raise exception 'pre-season photo: expected not_required, got %', v_photo_state;
+  end if;
+
+  -- Flagging a week for recheck must still relabel its rating_role, even though
+  -- ordinal 2 already made it later_week. The migration 37 fanout guarded on
+  -- rating_role = 'none', which stopped matching once week 2 became rateable;
+  -- migration 53 widened it. Both roles are claimable, so what this protects is
+  -- the hub telling a lead their recheck actually landed.
+  update public.camp_weeks set triage_role = 'second_week_recheck' where id = v_in2;
+
+  select rating_role into v_rating from public.camp_weeks where id = v_in2;
+  if v_rating <> 'second_week_recheck' then
+    raise exception 'recheck week: expected rating second_week_recheck, got %', v_rating;
   end if;
 
   raise notice 'e2e cross-season rating scope OK';

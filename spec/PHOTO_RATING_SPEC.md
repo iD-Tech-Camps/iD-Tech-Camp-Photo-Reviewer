@@ -7,7 +7,8 @@ Parallel workflow to Camp Quality Review (triage). Reviewers rate photos 1–5 s
 ### Camp week (`camp_weeks.rating_state`)
 
 - `not_required` — week not in photo review (`rating_role = none`)
-- `rating_role`: `first_week` and `second_week_recheck` mirror triage; `later_week` is week 3+ at the location (photo review only, no camp quality review)
+- `rating_role`: `first_week` and `second_week_recheck` mirror triage; `later_week` is week 2+ at the location (photo review only, no camp quality review). Week 2 derives `later_week` unless triage has flagged it `second_week_recheck`, which takes precedence — before migration 53 it derived `none`, so a location's second week was the one week nobody could rate.
+- Rating seasons are the calendar year a week starts in, not the configured triage season (migration 52), so prior-season and post-season weeks stay rateable. Quality review remains bound to `triage_config`.
 - `awaiting_photos` / `photos_in` / `rating_in_progress` / `rating_done` / `complete`
 
 ### Photo (`photos.rating_state`)
