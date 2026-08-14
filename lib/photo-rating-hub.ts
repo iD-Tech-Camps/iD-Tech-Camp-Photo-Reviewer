@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { seasonDateRange, seasonsFromDates } from "@/lib/seasons";
 
 export type PhotoRatingHubWeek = {
   id: string;
@@ -14,9 +15,34 @@ export type PhotoRatingHubWeek = {
   inProgressCount: number;
 };
 
+// Season years that currently have hub-eligible weeks, newest first. Selects
+// nothing but the date column — this deliberately skips the `photos` embed the
+// hub query uses, because since migration 52 opened prior seasons the eligible
+// set spans years and embedding every photo just to list years would pull tens
+// of thousands of rows.
+export async function fetchPhotoRatingSeasons(
+  supabase: SupabaseClient,
+): Promise<number[]> {
+  const { data, error } = await supabase
+    .from("camp_weeks")
+    .select("starts_on, locations!inner ( is_ignored )")
+    .not("rating_state", "in", '("not_required","complete")')
+    .eq("locations.is_ignored", false);
+  if (error) throw error;
+  return seasonsFromDates(
+    ((data ?? []) as unknown as Array<{ starts_on: string }>).map((r) => r.starts_on),
+  );
+}
+
+// Scoped to one season. The season argument is required rather than optional:
+// this query embeds every photo's rating_state per week, so an unbounded fetch
+// across all seasons would be enormous now that prior years are rateable.
 export async function fetchPhotoRatingHubWeeks(
   supabase: SupabaseClient,
+  season: number | null,
 ): Promise<PhotoRatingHubWeek[]> {
+  if (season === null) return [];
+  const { from, to } = seasonDateRange(season);
   const { data, error } = await supabase
     .from("camp_weeks")
     .select(
@@ -25,6 +51,8 @@ export async function fetchPhotoRatingHubWeeks(
     )
     .not("rating_state", "in", '("not_required","complete")')
     .eq("locations.is_ignored", false)
+    .gte("starts_on", from)
+    .lte("starts_on", to)
     .order("starts_on", { ascending: true });
   if (error) throw error;
 

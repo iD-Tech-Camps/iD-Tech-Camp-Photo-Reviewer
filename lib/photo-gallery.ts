@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchTags, type Tag } from "@/lib/tags";
+import { seasonDateRange, seasonsFromDates } from "@/lib/seasons";
 
 // Data layer for the marketing Photo Library screen — browse the rated pool of
 // photos (rating_state = 'rated', not quarantined) with filters + sorting.
@@ -15,6 +16,11 @@ export type GallerySort =
   | "captured_asc";
 
 export type GalleryFilters = {
+  // Calendar year of the week's starts_on. Null = every season. The rated pool
+  // spans years (it always did for photos rated in past seasons, and migration
+  // 52 will grow it substantially), so this is the coarse filter that keeps the
+  // grid meaningful.
+  season?: number | null;
   divisionId?: string | null;
   locationId?: string | null;
   campWeekId?: string | null;
@@ -54,6 +60,8 @@ export type GalleryPhoto = {
 };
 
 export type GalleryFilterOptions = {
+  /** Season years present in the rated pool, newest first. */
+  seasons: number[];
   divisions: { id: string; name: string }[];
   locations: { id: string; name: string; divisionId: string }[];
   weeks: { id: string; name: string; startsOn: string | null; locationId: string }[];
@@ -108,6 +116,7 @@ export async function fetchGalleryFilterOptions(
 
   const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
   return {
+    seasons: seasonsFromDates(weeks.map((w) => w.startsOn)),
     divisions: [...divisions.values()].sort(byName),
     locations: [...locations.values()].sort(byName),
     weeks,
@@ -196,6 +205,16 @@ export async function fetchRatedPhotos(
   // toggle opts them back in (badged in the grid) so they can be restored.
   if (!filters.showHidden) {
     query = query.eq("is_quarantined", false);
+  }
+
+  // Season narrows the embedded camp_weeks join, so it composes with the
+  // division / location filters below rather than replacing them. A specific
+  // week already implies its season, so skip the redundant bounds there.
+  if (filters.season != null && !filters.campWeekId) {
+    const { from, to } = seasonDateRange(filters.season);
+    query = query
+      .gte("camp_weeks.starts_on", from)
+      .lte("camp_weeks.starts_on", to);
   }
 
   if (filters.campWeekId) {

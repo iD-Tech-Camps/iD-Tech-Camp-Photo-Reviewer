@@ -167,4 +167,152 @@ begin
 end;
 $$;
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Cross-season rating scope (migration 52).
+--
+-- Rating seasons are calendar years, so prior-year weeks are rateable while
+-- quality review stays bound to the configured season. Pins a deterministic
+-- mid-year season window first — the file preamble widens the window by a year
+-- in each direction, which would put the prior-year fixtures below the lower
+-- bound of their own season and mask what this block is checking.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+insert into public.locations (id, division_id, name, smugmug_folder_id) values
+  ('ffffffff-2222-2222-2222-222222222204',
+   'ffffffff-2222-2222-2222-222222222201',
+   'E2E Season Location', 'e2e-season-loc')
+on conflict (id) do nothing;
+
+do $$
+declare
+  v_loc uuid := 'ffffffff-2222-2222-2222-222222222204';
+  v_year int := extract(year from current_date)::int;
+  v_prior_empty uuid;
+  v_prior_w1 uuid;
+  v_prior_w2 uuid;
+  v_prior_w3 uuid;
+  v_pre uuid;
+  v_in uuid;
+  v_in2 uuid;
+  v_post uuid;
+  v_triage public.camp_week_triage_role;
+  v_rating public.camp_week_triage_role;
+  v_photo_state public.photo_rating_state;
+begin
+  -- Mid-year season so the "keep the configured start for its own year" branch
+  -- of camp_week_rating_ordinal is actually exercised.
+  update public.triage_config
+     set season_first_week_start = make_date(v_year, 5, 1),
+         season_last_week_start  = make_date(v_year, 8, 1)
+   where id = 1;
+
+  -- Prior season. The first week is left photo-less on purpose: it has fully
+  -- passed, so the orphan rule must skip it and let the next week take
+  -- ordinal 1 — the same protection that applies inside the current season.
+  insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
+  values (v_loc, 'Prior empty', 'e2e-s-p0', make_date(v_year - 1, 5, 4),  make_date(v_year - 1, 5, 8))
+  returning id into v_prior_empty;
+
+  insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
+  values (v_loc, 'Prior W1', 'e2e-s-p1', make_date(v_year - 1, 6, 1),  make_date(v_year - 1, 6, 5))
+  returning id into v_prior_w1;
+
+  insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
+  values (v_loc, 'Prior W2', 'e2e-s-p2', make_date(v_year - 1, 6, 8),  make_date(v_year - 1, 6, 12))
+  returning id into v_prior_w2;
+
+  insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
+  values (v_loc, 'Prior W3', 'e2e-s-p3', make_date(v_year - 1, 6, 15), make_date(v_year - 1, 6, 19))
+  returning id into v_prior_w3;
+
+  -- Current year: before the season start, inside it, and after its end.
+  insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
+  values (v_loc, 'Pre season', 'e2e-s-c0', make_date(v_year, 3, 2),  make_date(v_year, 3, 6))
+  returning id into v_pre;
+
+  insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
+  values (v_loc, 'In season', 'e2e-s-c1', make_date(v_year, 5, 25), make_date(v_year, 5, 29))
+  returning id into v_in;
+
+  insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
+  values (v_loc, 'In season 2', 'e2e-s-c1b', make_date(v_year, 6, 8), make_date(v_year, 6, 12))
+  returning id into v_in2;
+
+  -- Third in-year week, so the post-season week lands on ordinal 3 rather than
+  -- the ordinal-2 recheck slot — this asserts later_week, not just "non-none".
+  insert into public.camp_weeks (location_id, name, smugmug_folder_id, starts_on, ends_on)
+  values (v_loc, 'Post season', 'e2e-s-c2', make_date(v_year, 9, 7), make_date(v_year, 9, 11))
+  returning id into v_post;
+
+  insert into public.photos (camp_week_id, smugmug_image_id)
+  select id, 'e2e-s-photo-' || id
+    from public.camp_weeks
+   where location_id = v_loc and id <> v_prior_empty;
+
+  perform public.recompute_all_triage_roles();
+
+  -- Prior season is rateable on a calendar-year ordinal, and never triageable.
+  select triage_role, rating_role into v_triage, v_rating
+    from public.camp_weeks where id = v_prior_w1;
+  if v_rating <> 'first_week' or v_triage <> 'none' then
+    raise exception 'prior W1: expected rating first_week + triage none, got rating=% triage=%', v_rating, v_triage;
+  end if;
+
+  select rating_role into v_rating from public.camp_weeks where id = v_prior_w2;
+  if v_rating <> 'none' then
+    raise exception 'prior W2: expected none (recheck slot), got %', v_rating;
+  end if;
+
+  select rating_role into v_rating from public.camp_weeks where id = v_prior_w3;
+  if v_rating <> 'later_week' then
+    raise exception 'prior W3: expected later_week, got %', v_rating;
+  end if;
+
+  -- Orphan rule still applies across seasons: the photo-less passed week keeps
+  -- no role, which is why Prior W1 above could hold ordinal 1.
+  select rating_role into v_rating from public.camp_weeks where id = v_prior_empty;
+  if v_rating <> 'none' then
+    raise exception 'prior empty week: expected none (orphan), got %', v_rating;
+  end if;
+
+  -- Opening past seasons must not disturb the season under review: a week
+  -- before the configured start still derives none, and the first in-season
+  -- week still holds first_week for both workflows.
+  select rating_role into v_rating from public.camp_weeks where id = v_pre;
+  if v_rating <> 'none' then
+    raise exception 'pre-season week: expected none, got %', v_rating;
+  end if;
+
+  select triage_role, rating_role into v_triage, v_rating
+    from public.camp_weeks where id = v_in;
+  if v_triage <> 'first_week' or v_rating <> 'first_week' then
+    raise exception 'in-season week: expected first_week for both, got triage=% rating=%', v_triage, v_rating;
+  end if;
+
+  -- Weeks past the season end are what the sync keeps pulling; they are now
+  -- rateable (ordinal 3 behind the in-season week and the recheck slot).
+  select triage_role, rating_role into v_triage, v_rating
+    from public.camp_weeks where id = v_post;
+  if v_triage <> 'none' or v_rating <> 'later_week' then
+    raise exception 'post-season week: expected triage none + rating later_week, got triage=% rating=%', v_triage, v_rating;
+  end if;
+
+  -- The role change must have fanned out to the photos, otherwise nothing is
+  -- actually claimable and the whole exercise is cosmetic.
+  select rating_state into v_photo_state
+    from public.photos where camp_week_id = v_prior_w1 limit 1;
+  if v_photo_state <> 'pending' then
+    raise exception 'prior W1 photo: expected pending after backfill, got %', v_photo_state;
+  end if;
+
+  select rating_state into v_photo_state
+    from public.photos where camp_week_id = v_prior_w2 limit 1;
+  if v_photo_state <> 'not_required' then
+    raise exception 'prior W2 photo: expected not_required, got %', v_photo_state;
+  end if;
+
+  raise notice 'e2e cross-season rating scope OK';
+end;
+$$;
+
 rollback;

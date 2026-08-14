@@ -15,7 +15,9 @@ import {
   type RatingClaimPhoto,
   type RatingEventSnapshot,
 } from "@/lib/photo-rating-claims";
+import { pickDefaultSeason, seasonLabel } from "@/lib/seasons";
 import {
+  fetchPhotoRatingSeasons,
   fetchPhotoRatingHubWeeks,
   fetchRatingWeekPendingCount,
   type PhotoRatingHubWeek,
@@ -53,6 +55,13 @@ export function PhotoRatingApp({ toast }: { toast: ToastApi }) {
   const writeView = React.useCallback((v: View) => writePhotoRatingViewToUrl(v), []);
   const [view, setView] = usePersistedView(parseView, writeView, { kind: "hub" });
   const [weeks, setWeeks] = React.useState<PhotoRatingHubWeek[] | null>(null);
+  // Since migration 52 opened prior seasons for rating, the hub is scoped to
+  // one season at a time — otherwise every past year's weeks land in one list.
+  // `null` means "not resolved yet"; the first load picks the default.
+  const [seasons, setSeasons] = React.useState<number[]>([]);
+  const [season, setSeason] = React.useState<number | null>(null);
+  const seasonRef = React.useRef<number | null>(null);
+  seasonRef.current = season;
   const [claims, setClaims] = React.useState<Awaited<ReturnType<typeof fetchActiveRatingClaimsForReviewer>>>([]);
   const [tags, setTags] = React.useState<Tag[]>([]);
   const [flagTags, setFlagTags] = React.useState<Tag[]>([]);
@@ -61,19 +70,41 @@ export function PhotoRatingApp({ toast }: { toast: ToastApi }) {
 
   const reloadHub = React.useCallback(async () => {
     if (!userId) return;
+    // Resolve the season list first: the weeks query needs a season, and on the
+    // very first load there isn't one yet. Later reloads keep the reviewer's
+    // current selection rather than snapping back to the default.
+    const available = await fetchPhotoRatingSeasons(supabase);
+    const active = seasonRef.current !== null && available.includes(seasonRef.current)
+      ? seasonRef.current
+      : pickDefaultSeason(available, new Date().getFullYear());
+
     const [w, c, t, ft, cfg] = await Promise.all([
-      fetchPhotoRatingHubWeeks(supabase),
+      fetchPhotoRatingHubWeeks(supabase, active),
       fetchActiveRatingClaimsForReviewer(supabase, userId),
       fetchTags(supabase, { purpose: "photo_rating" }),
       fetchTags(supabase, { purpose: "quality_flag", activeOnly: false }),
       fetchTriageConfig(supabase),
     ]);
+    setSeasons(available);
+    setSeason(active);
     setWeeks(w);
     setClaims(c);
     setTags(t);
     setFlagTags(ft);
     setBatchSize(cfg.batchSize);
   }, [supabase, userId]);
+
+  // Season switch reloads only the week list — claims, tags and config are
+  // season-independent, so there's no reason to refetch them.
+  const changeSeason = React.useCallback(async (next: number) => {
+    setSeason(next);
+    setWeeks(null);
+    try {
+      setWeeks(await fetchPhotoRatingHubWeeks(supabase, next));
+    } catch (err: unknown) {
+      setLoadError(err instanceof Error ? err.message : "Failed to load season");
+    }
+  }, [supabase]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -176,7 +207,23 @@ export function PhotoRatingApp({ toast }: { toast: ToastApi }) {
         eyebrow="Camp Photo Review"
         title="Camp weeks <em>to rate</em>"
         sub={claims.length > 0 ? `${claims.length} active batch${claims.length === 1 ? "" : "es"}` : "Pick a week to start a batch"}
-      />
+      >
+        {seasons.length > 1 && season !== null && (
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Season</span>
+            <select
+              className="input"
+              value={season}
+              onChange={(e) => void changeSeason(Number(e.target.value))}
+              style={{ width: 150 }}
+            >
+              {seasons.map((s) => (
+                <option key={s} value={s}>{seasonLabel(s)}</option>
+              ))}
+            </select>
+          </label>
+        )}
+      </PageHeader>
       <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {loadError && <div className="card" style={{ color: "var(--rose)", fontSize: 12 }}>{loadError}</div>}
 
@@ -209,7 +256,9 @@ export function PhotoRatingApp({ toast }: { toast: ToastApi }) {
 
         {weeks === null ? null : needsRating.length === 0 ? (
           <div className="card" style={{ color: "var(--ink-3)" }}>
-            Nothing to rate right now — every week with photos has been rated.
+            {seasons.length > 1 && season !== null
+              ? <>Nothing to rate in the {season} season — every week with photos has been rated. Try another season above.</>
+              : <>Nothing to rate right now — every week with photos has been rated.</>}
           </div>
         ) : (
           needsRating.map((w) => {

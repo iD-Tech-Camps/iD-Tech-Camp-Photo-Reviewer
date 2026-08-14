@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useCurrentUser } from "@/lib/current-user";
 import { smugmugVariantUrl } from "@/lib/smugmug/url-variants";
 import { buildTagLabelLookup } from "@/lib/tags";
+import { seasonLabel } from "@/lib/seasons";
 import {
   bulkOverridePhotoRating,
   bulkSetPhotoQuarantine,
@@ -35,6 +36,7 @@ const SORT_LABELS: Record<GallerySort, string> = {
 };
 
 type Filters = {
+  season: number | null;
   divisionId: string | null;
   locationId: string | null;
   campWeekId: string | null;
@@ -46,6 +48,10 @@ type Filters = {
 };
 
 const DEFAULT_FILTERS: Filters = {
+  // All seasons by default — the Library is for finding the best photo ever
+  // shot, not this year's. Results are rating-sorted and paginated, so a bigger
+  // pool costs nothing; the filter is there for when a season matters.
+  season: null,
   divisionId: null,
   locationId: null,
   campWeekId: null,
@@ -284,6 +290,7 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
   }, [options, filters.locationId]);
 
   const isFiltered =
+    filters.season !== null ||
     filters.divisionId !== null || filters.locationId !== null || filters.campWeekId !== null ||
     filters.tagIds.length > 0 || filters.minRating !== DEFAULT_FILTERS.minRating ||
     filters.mineOnly || filters.showHidden || filters.sort !== DEFAULT_FILTERS.sort;
@@ -312,6 +319,26 @@ export function PhotoGalleryApp({ toast }: { toast: ToastApi }) {
       />
       <div className="page-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <div className="card" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
+          {(options?.seasons ?? []).length > 1 && (
+            <Field label="Season">
+              <select
+                className="select"
+                value={filters.season ?? ""}
+                // Clearing the week keeps the two consistent: a week already
+                // implies its season, and leaving a stale one selected would
+                // silently ignore the season the user just picked.
+                onChange={(e) =>
+                  patch({ season: e.target.value ? Number(e.target.value) : null, campWeekId: null })
+                }
+              >
+                <option value="">All seasons</option>
+                {(options?.seasons ?? []).map((s) => (
+                  <option key={s} value={s}>{seasonLabel(s)}</option>
+                ))}
+              </select>
+            </Field>
+          )}
+
           <Field label="Division">
             <select
               className="select"
