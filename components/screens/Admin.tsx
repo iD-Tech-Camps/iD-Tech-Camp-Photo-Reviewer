@@ -23,6 +23,16 @@ import {
   updateReviewerProfile,
   type RosterRow,
 } from "@/lib/admin-roster";
+import {
+  fetchAdminOverviewStats,
+  formatCount,
+  overviewTiles,
+  qualityMeter,
+  ratingMeter,
+  type AdminOverviewStats,
+  type Meter,
+  type SegmentTone,
+} from "@/lib/admin-stats";
 import type { Role } from "@/lib/current-user";
 import {
   createTag,
@@ -646,9 +656,8 @@ function TagEditCard({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AdminOverview — reviewer roster (identity + role + team + last active).
-// Per-user triage activity counts will be added when the rating system is
-// rebuilt; until then this screen stays scoped to roster management.
+// AdminOverview — app-wide photo/week counters on top of the reviewer roster
+// (identity + role + team + last active).
 // ─────────────────────────────────────────────────────────────────────────────
 
 type RosterSort = "last_active" | "points";
@@ -658,6 +667,8 @@ export function AdminOverview({ toast }: { toast: ToastApi }) {
   const { id: currentUserId } = useCurrentUser();
   const [roster, setRoster] = React.useState<RosterRow[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const [stats, setStats] = React.useState<AdminOverviewStats | null>(null);
+  const [statsError, setStatsError] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState("");
   const [editing, setEditing] = React.useState<RosterRow | null>(null);
   const [sortBy, setSortBy] = React.useState<RosterSort>("last_active");
@@ -672,6 +683,19 @@ export function AdminOverview({ toast }: { toast: ToastApi }) {
           setLoadError(err?.message ?? "Failed to load reviewer roster");
           setRoster([]);
         }
+      });
+    return () => { cancelled = true; };
+  }, [supabase]);
+
+  // Stats load independently of the roster: one failing shouldn't blank the
+  // other, so each keeps its own error slot and renders what it has.
+  React.useEffect(() => {
+    let cancelled = false;
+    fetchAdminOverviewStats(supabase)
+      .then((s) => { if (!cancelled) setStats(s); })
+      .catch((err) => {
+        console.error("[admin-overview] fetchAdminOverviewStats failed:", err);
+        if (!cancelled) setStatsError(err?.message ?? "Failed to load stats");
       });
     return () => { cancelled = true; };
   }, [supabase]);
@@ -738,14 +762,15 @@ export function AdminOverview({ toast }: { toast: ToastApi }) {
     <>
       <PageHeader
         eyebrow="Admin · Overview"
-        title="<em>Reviewers.</em>"
+        title="<em>Overview.</em>"
         sub={subtitle}
       >
         <div style={{ position: "relative" }}>
           <Icon name="search" size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)" }} />
           <input
             className="input"
-            placeholder="Search…"
+            placeholder="Search reviewers…"
+            aria-label="Search reviewers"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={{ paddingLeft: 30, width: 220 }}
@@ -754,6 +779,8 @@ export function AdminOverview({ toast }: { toast: ToastApi }) {
       </PageHeader>
 
       <div className="page-body">
+        <OverviewStatsSection stats={stats} error={statsError} />
+
         {loadError && (
           <div style={{
             padding: 12, marginBottom: 14,
@@ -764,6 +791,8 @@ export function AdminOverview({ toast }: { toast: ToastApi }) {
             Couldn&apos;t load roster: {loadError}
           </div>
         )}
+
+        <h3 className="card-title" style={{ marginBottom: 10 }}>Reviewers</h3>
 
         <div className="card" style={{ padding: 0 }}>
           <table className="table">
@@ -823,6 +852,186 @@ export function AdminOverview({ toast }: { toast: ToastApi }) {
         />
       )}
     </>
+  );
+}
+
+// ─── Overview stats ──────────────────────────────────────────────────────────
+// A KPI row over two segmented progress meters, one per review pipeline.
+// Colors are the app's status tokens — moss = done, sun = needs attention,
+// rose = removed, lake = in flight, and a recessive grey for untouched work.
+// Text always wears an ink token; the swatch beside it carries the identity,
+// which keeps the legend readable in both themes.
+
+const SEGMENT_COLOR: Record<SegmentTone, string> = {
+  moss:    "var(--moss)",
+  sun:     "var(--sun)",
+  rose:    "var(--rose)",
+  lake:    "var(--lake)",
+  neutral: "var(--rule-2)",
+};
+
+function OverviewStatsSection({
+  stats,
+  error,
+}: {
+  stats: AdminOverviewStats | null;
+  error: string | null;
+}) {
+  if (error) {
+    return (
+      <div style={{
+        padding: 12, marginBottom: 20,
+        border: "1px solid var(--rule)", borderRadius: 8,
+        background: "var(--paper-2)", color: "var(--ink-3)",
+        fontSize: 12,
+      }}>
+        Couldn&apos;t load app stats: {error}
+      </div>
+    );
+  }
+
+  if (stats === null) return <StatsSkeleton />;
+
+  const tiles = overviewTiles(stats);
+  const meters = [qualityMeter(stats.photos), ratingMeter(stats.photos)];
+
+  return (
+    <div className="card" style={{ marginBottom: 20 }}>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+        gap: 18,
+      }}>
+        {tiles.map((t) => (
+          <div key={t.key}>
+            <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 4 }}>
+              {t.label}
+            </div>
+            <div style={{
+              fontSize: 26, fontWeight: 600, lineHeight: 1.1,
+              letterSpacing: "-0.02em", color: "var(--ink)",
+            }}>
+              {t.value}
+            </div>
+            {t.detail && (
+              <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4, lineHeight: 1.4 }}>
+                {t.detail}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div style={{
+        marginTop: 20, paddingTop: 18, borderTop: "1px solid var(--rule)",
+        display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+        gap: 22,
+      }}>
+        {meters.map((m) => <MeterBlock key={m.title} meter={m} />)}
+      </div>
+    </div>
+  );
+}
+
+function MeterBlock({ meter }: { meter: Meter }) {
+  // Zero-count segments are dropped rather than rendered at width 0 — the 2px
+  // gap between fills would otherwise stack up as phantom ticks in the bar.
+  const visible = meter.segments.filter((s) => s.count > 0);
+
+  return (
+    <div>
+      <div style={{
+        display: "flex", alignItems: "baseline", justifyContent: "space-between",
+        gap: 10, marginBottom: 8,
+      }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>
+          {meter.title}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
+          {meter.inScope > 0
+            ? `${meter.donePct}% done · ${formatCount(meter.done)} of ${formatCount(meter.inScope)}`
+            : "—"}
+        </div>
+      </div>
+
+      {meter.inScope > 0 ? (
+        <div style={{ display: "flex", gap: 2, height: 10, marginBottom: 10 }} aria-hidden>
+          {visible.map((s) => (
+            <div
+              key={s.key}
+              title={`${s.label}: ${formatCount(s.count)}`}
+              style={{
+                flexGrow: s.count,
+                flexBasis: 0,
+                minWidth: 4,
+                borderRadius: 999,
+                background: SEGMENT_COLOR[s.tone],
+              }}
+            />
+          ))}
+        </div>
+      ) : (
+        <div style={{
+          height: 10, marginBottom: 10, borderRadius: 999,
+          background: "var(--paper-3)",
+        }} />
+      )}
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px" }}>
+        {meter.segments.map((s) => (
+          <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{
+              width: 8, height: 8, borderRadius: 999, flexShrink: 0,
+              background: SEGMENT_COLOR[s.tone],
+            }} />
+            <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{s.label}</span>
+            <span style={{ fontSize: 11, color: "var(--ink-2)", fontWeight: 500 }}>
+              {formatCount(s.count)}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {meter.outOfScope > 0 && (
+        <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 8, lineHeight: 1.4 }}>
+          {formatCount(meter.outOfScope)} more outside this pipeline — weeks not
+          sampled, or locations still awaiting approval.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatsSkeleton() {
+  return (
+    <div className="card" style={{ marginBottom: 20, opacity: 0.4 }}>
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+        gap: 18,
+      }}>
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i}>
+            <div style={{ height: 10, width: 80,  background: "var(--paper-3)", borderRadius: 4, marginBottom: 8 }} />
+            <div style={{ height: 22, width: 70,  background: "var(--paper-3)", borderRadius: 4, marginBottom: 6 }} />
+            <div style={{ height: 9,  width: 110, background: "var(--paper-3)", borderRadius: 4 }} />
+          </div>
+        ))}
+      </div>
+      <div style={{
+        marginTop: 20, paddingTop: 18, borderTop: "1px solid var(--rule)",
+        display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+        gap: 22,
+      }}>
+        {Array.from({ length: 2 }).map((_, i) => (
+          <div key={i}>
+            <div style={{ height: 12, width: 150, background: "var(--paper-3)", borderRadius: 4, marginBottom: 10 }} />
+            <div style={{ height: 10, background: "var(--paper-3)", borderRadius: 999, marginBottom: 10 }} />
+            <div style={{ height: 10, width: 200, background: "var(--paper-3)", borderRadius: 4 }} />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
