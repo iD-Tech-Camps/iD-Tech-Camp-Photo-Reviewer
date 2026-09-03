@@ -124,82 +124,55 @@ export async function fetchGalleryFilterOptions(
   };
 }
 
-// Photos carrying a rating event tagged with any of `tagIds`. Semantics:
-// "has a rating event carrying tag X" — superseded events count too, which is
-// fine for browsing since re-rating is rare and keeps the same reviewer's tags.
-async function fetchPhotoIdsForTags(
-  supabase: SupabaseClient,
-  tagIds: string[],
-): Promise<string[]> {
-  const { data, error } = await supabase
-    .from("photo_rating_event_tags")
-    .select("tag_id, photo_rating_events!inner ( photo_id )")
-    .in("tag_id", tagIds);
-  if (error) throw error;
-  const ids = new Set<string>();
-  // The embedded relation is to-one, but PostgREST's generated types model it
-  // as an array — normalize either shape.
-  for (const row of (data ?? []) as unknown as Array<{
-    photo_rating_events: { photo_id: string } | { photo_id: string }[] | null;
-  }>) {
-    const ev = row.photo_rating_events;
-    const pid = Array.isArray(ev) ? ev[0]?.photo_id : ev?.photo_id;
-    if (pid) ids.add(pid);
-  }
-  return [...ids];
-}
-
-// Photo ids the given reviewer has a rating event for. Semantics mirror the tag
-// pre-filter: "has rated this photo" (superseded events count too), which is
-// fine since admin corrections don't append events and re-rating is rare, so
-// the photo's current "rated by" is virtually always this reviewer.
-async function fetchPhotoIdsRatedBy(
-  supabase: SupabaseClient,
-  reviewerId: string,
-): Promise<string[]> {
-  const { data, error } = await supabase
-    .from("photo_rating_events")
-    .select("photo_id")
-    .eq("reviewer_id", reviewerId);
-  if (error) throw error;
-  const ids = new Set<string>();
-  for (const row of (data ?? []) as Array<{ photo_id: string }>) ids.add(row.photo_id);
-  return [...ids];
-}
-
 const SELECT_COLUMNS =
   "id, current_rating, captured_at, thumbnail_url, image_url, smugmug_url, " +
   "smugmug_image_id, width, height, is_quarantined, " +
   "camp_weeks!inner ( name, starts_on, locations!inner ( name, division_id, divisions!inner ( name ) ) )";
 
+// Both the tag filter and "only my ratings" ask the same kind of question —
+// does this photo have a rating event that matches — so they ride along as
+// inner-joined embeds on this query instead of a list of photo ids resolved
+// up front. Resolving ids first broke twice over on
+// a tag as broad as a whole program: the list came back capped by PostgREST's
+// max-rows (1000), silently dropping matches, and then `.in("id", …)` — whose
+// values PostgREST puts in the URL — went past the length the edge proxy
+// rejects with HTTP 400 (see lib/photo-rating-claims.ts).
+//
+// Each filter gets its own aliased embed, so the two stay independent
+// existence checks: "carries this tag" AND "I rated it", not necessarily on
+// the same event. Superseded events count, as before — re-rating is rare and
+// keeps the same reviewer's tags. A photo with several matching events still
+// comes back once; PostgREST nests the matches rather than fanning the row
+// out, so `.range()` keeps paginating photos.
+const TAGGED_EMBED = "tagged:photo_rating_events!inner ( photo_rating_event_tags!inner ( tag_id ) )";
+const MINE_EMBED = "mine:photo_rating_events!inner ( reviewer_id )";
+
 export async function fetchRatedPhotos(
   supabase: SupabaseClient,
   filters: GalleryFilters,
 ): Promise<GalleryPhoto[]> {
-  // Resolve id pre-filters (tags, "only my ratings") up front and intersect
-  // them; any empty result short-circuits the page.
-  let restrictIds: string[] | null = null;
-  if (filters.tagIds && filters.tagIds.length > 0) {
-    restrictIds = await fetchPhotoIdsForTags(supabase, filters.tagIds);
-    if (restrictIds.length === 0) return [];
-  }
-  if (filters.mineOnly && filters.viewerId) {
-    const mineIds = await fetchPhotoIdsRatedBy(supabase, filters.viewerId);
-    if (mineIds.length === 0) return [];
-    if (restrictIds) {
-      const mineSet = new Set(mineIds);
-      restrictIds = restrictIds.filter((id) => mineSet.has(id));
-      if (restrictIds.length === 0) return [];
-    } else {
-      restrictIds = mineIds;
-    }
-  }
+  const tagIds = filters.tagIds ?? [];
+  const byTag = tagIds.length > 0;
+  const mineOnlyFor = filters.mineOnly ? filters.viewerId ?? null : null;
+
+  const select = [
+    SELECT_COLUMNS,
+    ...(byTag ? [TAGGED_EMBED] : []),
+    ...(mineOnlyFor ? [MINE_EMBED] : []),
+  ].join(", ");
 
   let query = supabase
     .from("photos")
-    .select(SELECT_COLUMNS)
+    .select(select)
     .eq("rating_state", "rated")
     .eq("camp_weeks.locations.is_ignored", false);
+
+  if (byTag) {
+    query = query.in("tagged.photo_rating_event_tags.tag_id", tagIds);
+  }
+  if (mineOnlyFor) {
+    query = query.eq("mine.reviewer_id", mineOnlyFor);
+  }
 
   // Hidden-from-parent photos are excluded by default; the "Show hidden"
   // toggle opts them back in (badged in the grid) so they can be restored.
@@ -227,10 +200,6 @@ export async function fetchRatedPhotos(
 
   if (filters.minRating != null) {
     query = query.gte("current_rating", filters.minRating);
-  }
-
-  if (restrictIds) {
-    query = query.in("id", restrictIds);
   }
 
   const asc = filters.sort === "rating_asc" || filters.sort === "captured_asc";

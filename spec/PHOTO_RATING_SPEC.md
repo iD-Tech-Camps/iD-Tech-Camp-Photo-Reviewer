@@ -79,6 +79,10 @@ and downloading the best photos for marketing. `components/screens/PhotoGallery.
   itself still surfaces those photos when unfiltered.) **Sort:** rating / capture date. Server-side,
   paginated via `.range()` ("Load more"). Dropdown options are derived from the rated pool only
   (`camp_weeks` with a `photos!inner` filter), so empty divisions/locations never appear.
+  The tag and **Show only my ratings** filters are applied as aliased `photo_rating_events!inner`
+  embeds on the grid query, one per filter, so each stays an independent existence check and no
+  filter resolves a photo-id list first — a list would be truncated by PostgREST's `max-rows` and
+  then rejected as an over-long `.in()` URL once a tag covered a few hundred photos.
 - **Lightbox:** rating + **rated by** (latest event's reviewer), location, week, capture date,
   `photo_rating` tags. Two downloads: **Download (full size)** streams the stored `image_url`
   (no SmugMug API call); **Other sizes…** lists sizes from SmugMug `!sizedetails` on demand. Both
