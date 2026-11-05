@@ -53,10 +53,10 @@ Linked production project: **`idtech-photo-reviewer`** (ref `xatxybwbjuusybfmwkb
 npx supabase db reset
 
 # 2. See what's pending on prod — an empty "Remote" column means not yet applied
-npx supabase migration list --linked
+npx supabase migration list --remote
 
 # 3. Apply pending migrations to prod (prompts before running)
-npx supabase db push --linked
+npx supabase db push --remote
 ```
 
 **Sequencing with the Vercel deploy:** additive migrations are safe to push before the code. For destructive migrations (dropping columns/functions), make sure the deployed code no longer references the dropped objects first, then push the migration — otherwise the live app errors against the old schema in the gap between the two.

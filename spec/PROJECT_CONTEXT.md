@@ -92,7 +92,7 @@ spec/UPLOAD_ALERTS_SPEC.md  # weekly "location stopped uploading" alert contract
 
 ## Local verification
 
-Requires Docker for `npx supabase db reset` (local stack only — **do not** `db push --linked` unless intentionally deploying).
+Requires Docker for `npx supabase db reset` (local stack only — **do not** `db push --remote` unless intentionally deploying).
 
 ```bash
 npx supabase db reset

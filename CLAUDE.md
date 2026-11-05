@@ -33,8 +33,8 @@ transaction, so they pass year-round rather than only during the seeded season.
 - **Database migrations do NOT auto-deploy** — there is no CI for the DB. Apply them by hand to the linked prod project (`idtech-photo-reviewer`, ref `xatxybwbjuusybfmwkbg`):
 
   ```bash
-  npx supabase migration list --linked   # empty "Remote" column = pending on prod
-  npx supabase db push --linked           # applies pending migrations (confirm prompt)
+  npx supabase migration list --remote   # empty "Remote" column = pending on prod
+  npx supabase db push --remote           # applies pending migrations (confirm prompt)
   ```
 
 - For **destructive** migrations (dropping columns/functions), land + deploy the code that stops referencing the objects *before* pushing the migration, so the live app isn't running against a schema it still expects. Additive migrations are safe either order. See README → "Database migrations".
