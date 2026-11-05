@@ -604,8 +604,11 @@ function mapImage(img: SmugMugImage, weekFolderId: string): MappedPhoto {
     width: typeof img.Width === "number" ? img.Width : null,
     height: typeof img.Height === "number" ? img.Height : null,
     // ArchivedUri is the highest-fidelity URL the basic Image payload
-    // exposes without a follow-up !sizes call. Step 8.6 may revise this
-    // once the renderer settles on a target size.
+    // exposes without a follow-up !sizes call. On prod it is the "D"
+    // (download) URL, e.g. .../D/IMG_5244-D.jpg, which serves the uploaded
+    // original byte-for-byte (same file as the "O" rendition) — multi-MB,
+    // so renderers derive smaller variants via smugmugVariantUrl rather
+    // than loading it directly. ThumbnailUrl is the "Th" rendition.
     image_url: img.ArchivedUri ?? img.ThumbnailUrl ?? null,
     thumbnail_url: img.ThumbnailUrl ?? null,
     smugmug_url: img.WebUri ?? null,

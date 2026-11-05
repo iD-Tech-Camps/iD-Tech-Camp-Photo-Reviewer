@@ -46,4 +46,45 @@ describe("smugmugVariantUrl", () => {
     const mismatched = `${BASE}/M/i-abc123-Th.jpg`;
     expect(smugmugVariantUrl(mismatched, "XL")).toBeNull();
   });
+
+  describe("production camera-filename shape (size D)", () => {
+    const PROD =
+      "https://photos.smugmug.com/IDTC/UW/2026/August10August142026/i-xxBqhHs/0/NXM2rNZgqhBrw9NBMCkSq3GpLSXFdzF3SX5cxGzNn";
+    const archived = `${PROD}/D/IMG_5244-D.jpg`;
+
+    it.each(["M", "L", "XL"] as const)("rewrites a D archive URL to %s", (size) => {
+      expect(smugmugVariantUrl(archived, size)).toBe(`${PROD}/${size}/IMG_5244-${size}.jpg`);
+    });
+
+    it("rewrites a camera-filename Th thumbnail to XL", () => {
+      expect(smugmugVariantUrl(`${PROD}/Th/IMG_5244-Th.jpg`, "XL")).toBe(
+        `${PROD}/XL/IMG_5244-XL.jpg`,
+      );
+    });
+
+    it("is idempotent for a camera-filename URL already at the target size", () => {
+      const input = `${PROD}/L/IMG_5244-L.jpg`;
+      expect(smugmugVariantUrl(input, "L")).toBe(input);
+    });
+
+    it("preserves the query string", () => {
+      expect(smugmugVariantUrl(`${archived}?v=2`, "XL")).toBe(`${PROD}/XL/IMG_5244-XL.jpg?v=2`);
+    });
+
+    it("handles stems containing -, _, . and URL-encoded spaces", () => {
+      for (const stem of ["IMG-5244", "DSC_0001", "photo.v2", "Camp%20Day%201", "a-D"]) {
+        expect(smugmugVariantUrl(`${PROD}/D/${stem}-D.JPG`, "XL")).toBe(
+          `${PROD}/XL/${stem}-XL.JPG`,
+        );
+      }
+    });
+
+    it("returns null when the path-size and filename-size disagree", () => {
+      expect(smugmugVariantUrl(`${PROD}/D/IMG_5244-L.jpg`, "XL")).toBeNull();
+    });
+
+    it("returns null for a filename with no size suffix", () => {
+      expect(smugmugVariantUrl(`${PROD}/D/IMG_5244.jpg`, "XL")).toBeNull();
+    });
+  });
 });
