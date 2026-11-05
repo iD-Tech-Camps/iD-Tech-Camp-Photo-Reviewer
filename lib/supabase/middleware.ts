@@ -10,6 +10,10 @@ const PUBLIC_PATHS = [
   "/auth/callback",
   "/api/smugmug/sync-scheduled",
   "/api/triage/sweep-claims",
+  // AI tagging cron (CRON_SECRET) and photo search, which accepts either a
+  // session or a bot bearer key — both routes enforce auth themselves.
+  "/api/ai-tagging/sweep",
+  "/api/photos/ai-search",
 ];
 
 function isPublicPath(pathname: string) {

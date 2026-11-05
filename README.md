@@ -34,6 +34,11 @@ CLI link (from repo root): `npx vercel link` → team **i-d-tech**, project **id
 | `SMUGMUG_API_KEY` / `SMUGMUG_API_SECRET` | SmugMug OAuth |
 | `SMUGMUG_ACCESS_TOKEN` / `SMUGMUG_ACCESS_TOKEN_SECRET` | SmugMug OAuth |
 | `CRON_SECRET` | Scheduled sync + triage crons |
+| `GEMINI_API_KEY` | AI photo search: tagging sweep + search API (paid-tier key) |
+| `AI_TAGGING_ENABLED` | `true` turns the AI tagging cron on; anything else = no-op |
+| `AI_TAGGING_BATCH` / `AI_TAGGING_CONCURRENCY` | Optional: photos per sweep run (default 400) / in parallel (default 12) |
+| `PHOTO_SEARCH_API_KEY` | Optional: bearer key letting a bot call `/api/photos/ai-search` without a session |
+| `GEMINI_TAGGING_MODEL` | Optional: override the pinned Flash model (default `gemini-3.8-flash`) |
 
 If **Sync now** returns 500 or 503 with `server_config_incomplete`, one or more of the rows above is missing on the deployment.
 
@@ -131,3 +136,12 @@ The harness refuses to run against a non-local Supabase URL — fixture seeding 
 | `/api/smugmug/sync-scheduled` | Daily 08:00 UTC |
 | `/api/alerts/weekly-upload-check` | Wednesdays 10:00 UTC (after the daily sync) |
 | `/api/triage/sweep-claims` | Every 5 minutes |
+| `/api/ai-tagging/sweep` | Every 5 minutes (no-op unless `AI_TAGGING_ENABLED=true`) |
+
+## AI photo search
+
+Gemini Flash describes each photo once — caption, apparent people/gender counts, shot type, activities, technology, keywords — and we store that plus two embeddings (of the description and of the image) in `photo_ai_metadata` (pgvector). Search fuses description similarity, image similarity and full-text keywords under structured filters, so "two girls building a robot" can filter on counts while still matching meaning.
+
+- **Tagging:** the `/api/ai-tagging/sweep` cron pulls from `photo_ai_pending()` (newest first, skips quarantined photos and ignored locations), so it handles both new uploads and the historical backfill. Failures are retried up to 3 times, an hour apart. Progress: `select * from photo_ai_progress();`. Manual run: `curl -H "Authorization: Bearer $CRON_SECRET" "https://<app>/api/ai-tagging/sweep?limit=50"`.
+- **Search:** `POST /api/photos/ai-search` with `{ "query": "...", "filters": { "season": 2026, "locationId": "..." }, "limit": 24 }`. Gemini turns the query into search text plus filters (people count, apparent gender minimums, shot type, year); explicit `filters` win. If inferred filters match nothing, it retries without them and returns `relaxed: true`. Each result carries `text_similarity`, `image_similarity` and `keyword_match` for judging confidence (no fixed cutoff by default; absolute similarity didn't separate hits from misses in testing). Callers: a signed-in user, or a bot with `Authorization: Bearer $PHOTO_SEARCH_API_KEY`.
+- **Code:** `lib/ai/` (prompt/schema/validation are pure and unit-tested); prototype + evaluation script: `scripts/gemini-prototype.mjs`.
