@@ -1,22 +1,25 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// `/api/smugmug/sync-scheduled` is the Vercel-Cron entry point — it
-// has no Supabase user session by design (cron auth is a CRON_SECRET
-// bearer token, enforced inside the route handler). Without this
-// whitelist the middleware redirects every cron call to /login.
-const PUBLIC_PATHS = [
+// Vercel-Cron entry points have no Supabase user session by design (cron
+// auth is a CRON_SECRET bearer token, enforced inside each route handler).
+// Without this whitelist the middleware redirects every cron call to /login
+// and the handler never runs. tests/unit/middleware-public-paths.test.ts
+// fails if a cron in vercel.json is missing here.
+export const PUBLIC_PATHS = [
   "/login",
   "/auth/callback",
   "/api/smugmug/sync-scheduled",
   "/api/triage/sweep-claims",
+  "/api/photo-rating/sweep-claims",
+  "/api/alerts/weekly-upload-check",
   // AI tagging cron (CRON_SECRET) and photo search, which accepts either a
   // session or a bot bearer key — both routes enforce auth themselves.
   "/api/ai-tagging/sweep",
   "/api/photos/ai-search",
 ];
 
-function isPublicPath(pathname: string) {
+export function isPublicPath(pathname: string) {
   // Dev-only seed/role helpers bypass the login redirect when the dev sign-in
   // flag is on (local only); production never sets it. The handlers re-check
   // the flag and (for /role) the session, so this only skips the redirect.
