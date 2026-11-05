@@ -24,6 +24,14 @@ docker exec -i supabase_db_iD_Tech_Camp_Photo_Reviewer psql -U postgres -d postg
 # ...other suites in supabase/tests/ as relevant
 ```
 
+**Hosted Supabase rejects `UPDATE`/`DELETE` without a `WHERE` clause (pg_safeupdate), even inside triggers — local doesn't.** A bare `update public.camp_weeks set …` passes every local test and then fails in prod (this broke the season-settings save twice). Use `where true` for intentional full-table writes, and when touching triggers/functions run the safeupdate suite as the local superuser:
+
+```bash
+docker exec -i -e PGPASSWORD=postgres supabase_db_iD_Tech_Camp_Photo_Reviewer \
+  psql -h 127.0.0.1 -U supabase_admin -d postgres -v ON_ERROR_STOP=1 \
+  < supabase/tests/e2e_safeupdate_triggers.sql
+```
+
 Each suite pins the season window around `current_date` in its own rolled-back
 transaction, so they pass year-round rather than only during the seeded season.
 
